@@ -21,6 +21,10 @@ export class Migrator {
     this.migrationsDir = customDir || path.resolve(__dirname, 'migrations');
   }
 
+  /**
+   * Executes pending forward (.sql) migrations in alphabetical order within a transaction.
+   * Tracks applied versions in `schema_migrations`.
+   */
   public async runMigrations(clientOrPool?: pg.Pool | pg.PoolClient): Promise<MigrationResult> {
     const pool = clientOrPool || dbManager.getPool();
     if (!pool) {
@@ -52,7 +56,7 @@ export class Migrator {
       const { rows } = await client.query('SELECT version FROM schema_migrations ORDER BY version ASC');
       const appliedSet = new Set(rows.map((r: { version: string }) => r.version));
 
-      // 3. Read migration files
+      // 3. Read forward migration files (exclude .down.sql files)
       if (!fs.existsSync(this.migrationsDir)) {
         await client.query('COMMIT');
         return { success: true, applied: [], alreadyApplied: [] };
@@ -60,7 +64,7 @@ export class Migrator {
 
       const files = fs
         .readdirSync(this.migrationsDir)
-        .filter((f) => f.endsWith('.sql'))
+        .filter((f) => f.endsWith('.sql') && !f.endsWith('.down.sql'))
         .sort();
 
       for (const file of files) {
@@ -89,15 +93,25 @@ export class Migrator {
       return { success: true, applied, alreadyApplied };
     } catch (err: unknown) {
       await client.query('ROLLBACK');
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, applied, alreadyApplied, error: msg };
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      const safeMsg = rawMsg.replace(/:[^:@]+@/, ':***@');
+      return { success: false, applied, alreadyApplied, error: safeMsg };
     } finally {
       if ('release' in client) {
-        client.release();
+        try {
+          client.release();
+        } catch {
+          // ignore
+        }
       }
     }
   }
 
+  /**
+   * Genuine rollback of the latest applied migration.
+   * Requires and executes the corresponding `<version>_*.down.sql` DDL script.
+   * Never just deletes the tracking row.
+   */
   public async rollbackLast(clientOrPool?: pg.Pool | pg.PoolClient): Promise<{ success: boolean; rolledBack?: string; error?: string }> {
     const pool = clientOrPool || dbManager.getPool();
     if (!pool) return { success: false, error: 'Database connection pool not available' };
@@ -113,16 +127,62 @@ export class Migrator {
       }
 
       const lastMigration = rows[0];
+      const baseName = lastMigration.name.replace(/\.sql$/, '');
+      const downFileName = `${baseName}.down.sql`;
+      const downFilePath = path.join(this.migrationsDir, downFileName);
+
+      if (!fs.existsSync(downFilePath)) {
+        await client.query('ROLLBACK');
+        return {
+          success: false,
+          error: `Rollback aborted: Missing genuine down migration script (${downFileName}). Schema state left unchanged.`,
+        };
+      }
+
+      const downSql = fs.readFileSync(downFilePath, 'utf-8');
+      await client.query(downSql);
+
       await client.query('DELETE FROM schema_migrations WHERE version = $1', [lastMigration.version]);
       await client.query('COMMIT');
       return { success: true, rolledBack: lastMigration.name };
     } catch (err: unknown) {
       await client.query('ROLLBACK');
-      const msg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: msg };
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: rawMsg.replace(/:[^:@]+@/, ':***@') };
     } finally {
       if ('release' in client) {
-        client.release();
+        try {
+          client.release();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  /**
+   * Verifies existing schema tables in PostgreSQL.
+   */
+  public async getExistingTables(clientOrPool?: pg.Pool | pg.PoolClient): Promise<string[]> {
+    const pool = clientOrPool || dbManager.getPool();
+    if (!pool) return [];
+
+    const client = 'connect' in pool ? await (pool as pg.Pool).connect() : (pool as pg.PoolClient);
+    try {
+      const { rows } = await client.query(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name ASC`
+      );
+      return rows.map((r: { table_name: string }) => r.table_name);
+    } catch (err) {
+      console.error('[Migrator] Error checking existing tables:', err);
+      return [];
+    } finally {
+      if ('release' in client) {
+        try {
+          client.release();
+        } catch {
+          // ignore
+        }
       }
     }
   }

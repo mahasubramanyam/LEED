@@ -2,7 +2,7 @@
 -- Approved 12-Table Architecture + Security & Audit
 -- Pure PostgreSQL relational schema with foreign key constraints and indexes
 
--- 1. Owner Users (Single-Owner Authentication)
+-- 1. Owner Users (Single-Owner Authentication with DB-level Singleton Enforcement)
 CREATE TABLE IF NOT EXISTS owner_users (
     id TEXT PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS owner_users (
     full_name TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'owner',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_singleton BOOLEAN NOT NULL DEFAULT TRUE CONSTRAINT uq_owner_singleton UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

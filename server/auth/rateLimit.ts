@@ -1,7 +1,16 @@
+import { Request } from 'express';
+
 interface RateLimitEntry {
   attempts: number;
   firstAttemptAt: number;
   blockedUntil?: number;
+}
+
+export function normalizeClientIp(req: Request): string {
+  // Uses Express req.ip (trusted when app.set('trust proxy', 1) is active)
+  const rawIp = req.ip || req.socket?.remoteAddress || '127.0.0.1';
+  // Strip IPv4-mapped IPv6 prefix (e.g. ::ffff:192.168.1.1 -> 192.168.1.1)
+  return rawIp.replace(/^::ffff:/, '').trim();
 }
 
 export class LoginRateLimiter {
@@ -17,8 +26,9 @@ export class LoginRateLimiter {
   }
 
   public check(ip: string): { allowed: boolean; remainingAttempts: number; retryAfterSeconds?: number } {
+    const cleanIp = ip.replace(/^::ffff:/, '').trim();
     const now = Date.now();
-    const entry = this.attemptsMap.get(ip);
+    const entry = this.attemptsMap.get(cleanIp);
 
     if (!entry) {
       return { allowed: true, remainingAttempts: this.maxAttempts };
@@ -32,7 +42,7 @@ export class LoginRateLimiter {
 
     // Check if window has expired
     if (now - entry.firstAttemptAt > this.windowMs) {
-      this.attemptsMap.delete(ip);
+      this.attemptsMap.delete(cleanIp);
       return { allowed: true, remainingAttempts: this.maxAttempts };
     }
 
@@ -44,8 +54,9 @@ export class LoginRateLimiter {
   }
 
   public recordFailure(ip: string): { remainingAttempts: number; retryAfterSeconds?: number } {
+    const cleanIp = ip.replace(/^::ffff:/, '').trim();
     const now = Date.now();
-    let entry = this.attemptsMap.get(ip);
+    let entry = this.attemptsMap.get(cleanIp);
 
     if (!entry || now - entry.firstAttemptAt > this.windowMs) {
       entry = { attempts: 1, firstAttemptAt: now };
@@ -55,21 +66,22 @@ export class LoginRateLimiter {
 
     if (entry.attempts >= this.maxAttempts) {
       entry.blockedUntil = now + this.lockoutMs;
-      this.attemptsMap.set(ip, entry);
+      this.attemptsMap.set(cleanIp, entry);
       return {
         remainingAttempts: 0,
         retryAfterSeconds: Math.ceil(this.lockoutMs / 1000),
       };
     }
 
-    this.attemptsMap.set(ip, entry);
+    this.attemptsMap.set(cleanIp, entry);
     return {
       remainingAttempts: this.maxAttempts - entry.attempts,
     };
   }
 
   public reset(ip: string): void {
-    this.attemptsMap.delete(ip);
+    const cleanIp = ip.replace(/^::ffff:/, '').trim();
+    this.attemptsMap.delete(cleanIp);
   }
 
   public clear(): void {

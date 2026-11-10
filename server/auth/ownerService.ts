@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
+import pg from 'pg';
 import { dbManager } from '../db/pool.js';
 import { hashPassword, verifyPassword, validatePasswordStrength } from './password.js';
-import { createSession, revokeSession, revokeAllOwnerSessions, OwnerUser, OwnerSession, validateSession } from './session.js';
+import { createSession, revokeSession, revokeAllOwnerSessions, OwnerUser, OwnerSession } from './session.js';
 import { loginRateLimiter } from './rateLimit.js';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -22,6 +22,7 @@ export interface StoredOwner {
 
 export class OwnerService {
   private fallbackOwner: StoredOwner | null = null;
+  private isSettingUp = false;
 
   constructor() {
     this.ensureDataDir();
@@ -34,7 +35,7 @@ export class OwnerService {
     }
   }
 
-  private loadFallbackOwner(): void {
+  public loadFallbackOwner(): void {
     if (fs.existsSync(OWNER_FALLBACK_FILE)) {
       try {
         const raw = fs.readFileSync(OWNER_FALLBACK_FILE, 'utf-8');
@@ -60,12 +61,16 @@ export class OwnerService {
   public async isOwnerInitialized(): Promise<boolean> {
     const pool = dbManager.getPool();
     if (pool && dbManager.isDbConnected()) {
+      let client: pg.PoolClient | null = null;
       try {
-        const res = await pool.query(`SELECT COUNT(*) as count FROM owner_users WHERE is_active = TRUE`);
+        client = await pool.connect();
+        const res = await client.query(`SELECT COUNT(*) as count FROM owner_users WHERE is_active = TRUE`);
         const count = parseInt(res.rows[0]?.count || '0', 10);
         if (count > 0) return true;
       } catch (err) {
         console.warn('[OwnerService] Failed to check owner count in DB, checking fallback:', err);
+      } finally {
+        if (client) client.release();
       }
     }
 
@@ -77,69 +82,101 @@ export class OwnerService {
 
   /**
    * Initializes the single private owner account.
-   * Strictly enforces: Only one owner account can ever be registered.
+   * Concurrency-safe and strictly enforced at both process and database singleton constraint level.
    */
-  public async setupOwner(fullName: string, email: string, password: string): Promise<OwnerUser> {
-    const initialized = await this.isOwnerInitialized();
-    if (initialized) {
-      throw new Error('Initial setup already completed. LEED is a private single-owner platform.');
+  public async setupOwner(
+    fullName: string,
+    email: string,
+    password: string,
+    suppliedSetupSecret?: string
+  ): Promise<OwnerUser> {
+    // 1. Process-level mutex preventing concurrent initialization race conditions
+    if (this.isSettingUp) {
+      throw new Error('Owner initialization is already in progress.');
     }
+    this.isSettingUp = true;
 
-    if (!fullName || typeof fullName !== 'string' || fullName.trim().length === 0) {
-      throw new Error('Owner full name is required');
-    }
-
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
-      throw new Error('A valid owner email address is required');
-    }
-
-    const validation = validatePasswordStrength(password);
-    if (!validation.valid) {
-      throw new Error(validation.message || 'Invalid password');
-    }
-
-    const passwordHash = await hashPassword(password);
-    const ownerId = `owner-${Date.now()}`;
-    const now = new Date();
-    const normalizedEmail = email.trim().toLowerCase();
-
-    const stored: StoredOwner = {
-      id: ownerId,
-      email: normalizedEmail,
-      fullName: fullName.trim(),
-      passwordHash,
-      role: 'owner',
-      isActive: true,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    };
-
-    // Save to PostgreSQL if connected
-    const pool = dbManager.getPool();
-    if (pool && dbManager.isDbConnected()) {
-      try {
-        await pool.query(
-          `INSERT INTO owner_users (id, email, password_hash, full_name, role, is_active, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, 'owner', TRUE, $5, $6)`,
-          [ownerId, normalizedEmail, passwordHash, fullName.trim(), now, now]
-        );
-      } catch (err) {
-        console.warn('[OwnerService] Failed to insert owner to PostgreSQL, saving fallback:', err);
+    try {
+      // 2. Setup Secret Verification if configured in environment
+      const envSetupSecret = process.env.SETUP_SECRET;
+      if (envSetupSecret && envSetupSecret.trim().length > 0) {
+        if (!suppliedSetupSecret || suppliedSetupSecret !== envSetupSecret) {
+          throw new Error('Invalid or missing SETUP_SECRET. Owner initialization is protected against unauthorized setup.');
+        }
       }
+
+      // 3. Check existing owner
+      const initialized = await this.isOwnerInitialized();
+      if (initialized) {
+        throw new Error('Initial setup already completed. LEED is a private single-owner platform.');
+      }
+
+      if (!fullName || typeof fullName !== 'string' || fullName.trim().length === 0) {
+        throw new Error('Owner full name is required');
+      }
+
+      if (!email || typeof email !== 'string' || !email.includes('@')) {
+        throw new Error('A valid owner email address is required');
+      }
+
+      const validation = validatePasswordStrength(password);
+      if (!validation.valid) {
+        throw new Error(validation.message || 'Invalid password');
+      }
+
+      const passwordHash = await hashPassword(password);
+      const ownerId = `owner-${Date.now()}`;
+      const now = new Date();
+      const normalizedEmail = email.trim().toLowerCase();
+
+      const stored: StoredOwner = {
+        id: ownerId,
+        email: normalizedEmail,
+        fullName: fullName.trim(),
+        passwordHash,
+        role: 'owner',
+        isActive: true,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+
+      // 4. Atomic Database Insert with DB-level Singleton Constraint
+      const pool = dbManager.getPool();
+      if (pool && dbManager.isDbConnected()) {
+        let client: pg.PoolClient | null = null;
+        try {
+          client = await pool.connect();
+          await client.query(
+            `INSERT INTO owner_users (id, email, password_hash, full_name, role, is_active, is_singleton, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 'owner', TRUE, TRUE, $5, $6)`,
+            [ownerId, normalizedEmail, passwordHash, fullName.trim(), now, now]
+          );
+        } catch (err: any) {
+          // PostgreSQL code 23505 = unique violation on uq_owner_singleton or email
+          if (err?.code === '23505') {
+            throw new Error('Initial setup already completed. LEED is a private single-owner platform.');
+          }
+          console.warn('[OwnerService] Failed to insert owner to PostgreSQL, saving fallback:', err);
+        } finally {
+          if (client) client.release();
+        }
+      }
+
+      // Always keep fallback synchronized
+      this.saveFallbackOwner(stored);
+
+      return {
+        id: ownerId,
+        email: normalizedEmail,
+        fullName: fullName.trim(),
+        role: 'owner',
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+    } finally {
+      this.isSettingUp = false;
     }
-
-    // Always keep fallback synchronized
-    this.saveFallbackOwner(stored);
-
-    return {
-      id: ownerId,
-      email: normalizedEmail,
-      fullName: fullName.trim(),
-      role: 'owner',
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    };
   }
 
   /**
@@ -170,8 +207,10 @@ export class OwnerService {
     // Try finding in PostgreSQL first
     const pool = dbManager.getPool();
     if (pool && dbManager.isDbConnected()) {
+      let client: pg.PoolClient | null = null;
       try {
-        const res = await pool.query(
+        client = await pool.connect();
+        const res = await client.query(
           `SELECT id, email, password_hash as "passwordHash", full_name as "fullName",
                   role, is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"
            FROM owner_users WHERE email = $1 AND is_active = TRUE`,
@@ -181,7 +220,9 @@ export class OwnerService {
           targetOwner = res.rows[0];
         }
       } catch (err) {
-        console.warn('[OwnerService] Postgres query failed, using fallback:', err);
+        console.warn('[OwnerService] Postgres query failed, checking fallback:', err);
+      } finally {
+        if (client) client.release();
       }
     }
 
@@ -200,7 +241,7 @@ export class OwnerService {
       );
     }
 
-    // Verify Password
+    // Verify Password using bcrypt-12
     const passwordMatch = await verifyPassword(password, targetOwner.passwordHash);
     if (!passwordMatch) {
       const failure = loginRateLimiter.recordFailure(ip);
@@ -254,8 +295,10 @@ export class OwnerService {
     const pool = dbManager.getPool();
 
     if (pool && dbManager.isDbConnected()) {
+      let client: pg.PoolClient | null = null;
       try {
-        const res = await pool.query(
+        client = await pool.connect();
+        const res = await client.query(
           `SELECT id, email, password_hash as "passwordHash", full_name as "fullName",
                   role, is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"
            FROM owner_users WHERE id = $1`,
@@ -264,6 +307,8 @@ export class OwnerService {
         if (res.rows.length > 0) ownerRecord = res.rows[0];
       } catch (err) {
         console.warn('[OwnerService] Postgres check failed in changePassword:', err);
+      } finally {
+        if (client) client.release();
       }
     }
 
@@ -284,14 +329,18 @@ export class OwnerService {
     const now = new Date();
 
     if (pool && dbManager.isDbConnected()) {
+      let client: pg.PoolClient | null = null;
       try {
-        await pool.query(`UPDATE owner_users SET password_hash = $1, updated_at = $2 WHERE id = $3`, [
+        client = await pool.connect();
+        await client.query(`UPDATE owner_users SET password_hash = $1, updated_at = $2 WHERE id = $3`, [
           newHash,
           now,
           ownerId,
         ]);
       } catch (err) {
         console.warn('[OwnerService] Failed to update password in Postgres:', err);
+      } finally {
+        if (client) client.release();
       }
     }
 
@@ -313,8 +362,10 @@ export class OwnerService {
   public async getOwnerBySession(session: OwnerSession): Promise<OwnerUser | null> {
     const pool = dbManager.getPool();
     if (pool && dbManager.isDbConnected()) {
+      let client: pg.PoolClient | null = null;
       try {
-        const res = await pool.query(
+        client = await pool.connect();
+        const res = await client.query(
           `SELECT id, email, full_name as "fullName", role, is_active as "isActive",
                   created_at as "createdAt", updated_at as "updatedAt"
            FROM owner_users WHERE id = $1 AND is_active = TRUE`,
@@ -330,6 +381,8 @@ export class OwnerService {
         }
       } catch (err) {
         console.warn('[OwnerService] Postgres user lookup failed:', err);
+      } finally {
+        if (client) client.release();
       }
     }
 
