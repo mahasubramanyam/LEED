@@ -1,0 +1,582 @@
+{
+  "leads": [
+    {
+      "id": "brreg-923609016",
+      "companyName": "NORDIC SEMICONDUCTOR ASA",
+      "legalName": "NORDIC SEMICONDUCTOR ASA",
+      "registrationNumber": "923609016",
+      "registrationType": "NO_ORG",
+      "companyStatus": "active",
+      "website": "https://www.nordicsemi.com",
+      "domain": "nordicsemi.com",
+      "email": "post@nordicsemi.no",
+      "emailStatus": "syntax_valid",
+      "phone": "+47 72 89 89 00",
+      "phoneNormalized": "+4772898900",
+      "address": {
+        "street": "Otto Nielsens veg 12",
+        "city": "Trondheim",
+        "region": "Trøndelag",
+        "postalCode": "7052",
+        "country": "Norway",
+        "countryCode": "NO",
+        "formattedAddress": "Otto Nielsens veg 12, 7052 Trondheim, Norway"
+      },
+      "coordinates": {
+        "lat": 63.421,
+        "lon": 10.435
+      },
+      "industry": "Engineering and technical consultancy activities",
+      "category": "Allmennaksjeselskap (ASA)",
+      "employeeRange": "1000-5000",
+      "foundedYear": 1983,
+      "confidenceScore": 95,
+      "confidenceSignals": [
+        "Official Government Registry Record (Brreg Verified)",
+        "Active Registered Corporate Status",
+        "Official Registered Website Present",
+        "Physical Registered Address Verified",
+        "Valid Corporate Telephone"
+      ],
+      "sources": [
+        {
+          "sourceName": "Brønnøysund Register Centre (Brreg)",
+          "providerId": "923609016",
+          "url": "https://data.brreg.no/enhetsregisteret/oppslag/enheter/923609016",
+          "retrievedAt": "2026-11-07T19:54:37.619Z",
+          "license": "Norwegian Licence for Open Government Data (NLOD)",
+          "attribution": "Official open public data from the Brønnøysund Register Centre"
+        }
+      ],
+      "identifiers": [
+        {
+          "type": "BRREG_ORG",
+          "value": "923609016",
+          "verified": true
+        },
+        {
+          "type": "DOMAIN",
+          "value": "nordicsemi.com",
+          "verified": true
+        }
+      ],
+      "webMetadata": {
+        "title": "Nordic Semiconductor | Low Power Short-Range Wireless IoT Solutions",
+        "description": "Nordic Semiconductor is a fabless semiconductor company specializing in wireless technology for the IoT.",
+        "httpStatus": 200,
+        "isHttps": true,
+        "serverLatencyMs": 142,
+        "inspectedAt": "2026-11-10T18:54:37.619Z"
+      },
+      "socialLinks": {
+        "linkedin": "https://www.linkedin.com/company/nordic-semiconductor",
+        "twitter": "https://twitter.com/NordicTweets",
+        "youtube": "https://www.youtube.com/NordicSemi"
+      },
+      "status": "qualified",
+      "pipelineStageId": "stage-qualified",
+      "opportunityValue": 45000,
+      "currency": "USD",
+      "winProbability": 60,
+      "tags": [
+        "Norway",
+        "Semiconductors",
+        "IoT",
+        "High Value"
+      ],
+      "notes": [
+        {
+          "id": "note-1",
+          "content": "Verified publicly available quarterly reporting. Strong candidate for European enterprise pipeline expansion.",
+          "createdAt": "2026-11-08T19:54:37.619Z",
+          "author": "Lead Intelligence Operator"
+        }
+      ],
+      "activities": [
+        {
+          "id": "act-1",
+          "type": "enrichment",
+          "title": "Initial registry import from Brreg",
+          "outcome": "923609016 confirmed active",
+          "date": "2026-11-07T19:54:37.619Z",
+          "actor": "Brreg Connector"
+        },
+        {
+          "id": "act-2",
+          "type": "stage_change",
+          "title": "Moved to Qualified",
+          "outcome": "Firmographic criteria satisfied",
+          "date": "2026-11-09T19:54:37.619Z",
+          "actor": "Lead Intelligence Operator"
+        }
+      ],
+      "createdAt": "2026-11-07T19:54:37.619Z",
+      "updatedAt": "2026-11-10T18:54:37.619Z"
+    },
+    {
+      "id": "uk-crn-07386161",
+      "companyName": "DEEPMIND TECHNOLOGIES LIMITED",
+      "legalName": "DEEPMIND TECHNOLOGIES LIMITED",
+      "registrationNumber": "07386161",
+      "registrationType": "UK_CRN",
+      "companyStatus": "active",
+      "website": "https://deepmind.google",
+      "domain": "deepmind.google",
+      "phone": "+44 20 7031 3000",
+      "phoneNormalized": "+442070313000",
+      "address": {
+        "street": "6 Pancras Square",
+        "city": "London",
+        "region": "Greater London",
+        "postalCode": "N1C 4AG",
+        "country": "United Kingdom",
+        "countryCode": "GB",
+        "formattedAddress": "6 Pancras Square, London, N1C 4AG, United Kingdom"
+      },
+      "coordinates": {
+        "lat": 51.532,
+        "lon": -0.125
+      },
+      "industry": "Other research and experimental development on natural sciences",
+      "category": "Private Limited Company (LTD)",
+      "employeeRange": "1000+",
+      "foundedYear": 2010,
+      "confidenceScore": 92,
+      "confidenceSignals": [
+        "Verified UK Company Registration Number (CRN 07386161)",
+        "Active Registered Corporate Status in Companies House",
+        "Registered Office Postcode & City on File",
+        "Live Verified Domain Presence"
+      ],
+      "sources": [
+        {
+          "sourceName": "UK Companies House (Official Register)",
+          "providerId": "07386161",
+          "url": "https://find-and-update.company-information.service.gov.uk/company/07386161",
+          "retrievedAt": "2026-11-05T19:54:37.621Z",
+          "license": "Open Government Licence v3.0 (OGL)",
+          "attribution": "Crown copyright. Contains public sector information licensed under the Open Government Licence v3.0."
+        }
+      ],
+      "identifiers": [
+        {
+          "type": "CRN",
+          "value": "07386161",
+          "verified": true
+        },
+        {
+          "type": "DOMAIN",
+          "value": "deepmind.google",
+          "verified": true
+        }
+      ],
+      "webMetadata": {
+        "title": "Google DeepMind | Research and Artificial Intelligence",
+        "description": "Advancing science and benefiting humanity through artificial intelligence development.",
+        "httpStatus": 200,
+        "isHttps": true,
+        "serverLatencyMs": 98,
+        "inspectedAt": "2026-11-10T17:54:37.621Z"
+      },
+      "status": "pitch_ready",
+      "pipelineStageId": "stage-pitch-ready",
+      "opportunityValue": 120000,
+      "currency": "GBP",
+      "winProbability": 40,
+      "tags": [
+        "United Kingdom",
+        "Companies House",
+        "Artificial Intelligence",
+        "London HQ"
+      ],
+      "notes": [
+        {
+          "id": "note-2",
+          "content": "AI research division. Pitch should highlight automated dataset governance and provenance tracking.",
+          "createdAt": "2026-11-09T19:54:37.621Z",
+          "author": "Lead Intelligence Operator"
+        }
+      ],
+      "activities": [
+        {
+          "id": "act-3",
+          "type": "enrichment",
+          "title": "Companies House lookup completed",
+          "outcome": "CRN 07386161 confirmed active with registered office at Pancras Square",
+          "date": "2026-11-05T19:54:37.621Z",
+          "actor": "Companies House Connector"
+        }
+      ],
+      "createdAt": "2026-11-05T19:54:37.621Z",
+      "updatedAt": "2026-11-10T17:54:37.621Z"
+    },
+    {
+      "id": "abn-88098143410",
+      "companyName": "ATLASSIAN PTY LTD",
+      "legalName": "ATLASSIAN PTY LTD",
+      "registrationNumber": "88 098 143 410",
+      "registrationType": "AU_ABN",
+      "companyStatus": "active",
+      "website": "https://www.atlassian.com",
+      "domain": "atlassian.com",
+      "phone": "+61 2 9262 1077",
+      "address": {
+        "street": "341 George Street",
+        "city": "Sydney",
+        "region": "NSW",
+        "postalCode": "2000",
+        "country": "Australia",
+        "countryCode": "AU",
+        "formattedAddress": "341 George Street, Sydney NSW 2000, Australia"
+      },
+      "coordinates": {
+        "lat": -33.868,
+        "lon": 151.207
+      },
+      "industry": "Australian Proprietary Company, Limited By Shares",
+      "category": "Enterprise Software & Collaboration",
+      "employeeRange": "5000+",
+      "foundedYear": 2002,
+      "confidenceScore": 90,
+      "confidenceSignals": [
+        "Official Australian Business Number (ABN Checksum Validated)",
+        "Active Status in Australian Business Register",
+        "Verified Enterprise Domain (atlassian.com)"
+      ],
+      "sources": [
+        {
+          "sourceName": "Australian Business Register (ABN Lookup)",
+          "providerId": "88098143410",
+          "url": "https://abr.business.gov.au/ABN/View?id=88098143410",
+          "retrievedAt": "2026-11-06T19:54:37.621Z",
+          "license": "Commonwealth of Australia Open Data",
+          "attribution": "Data sourced from Australian Business Register (abr.business.gov.au)"
+        }
+      ],
+      "identifiers": [
+        {
+          "type": "ABN",
+          "value": "88098143410",
+          "verified": true
+        },
+        {
+          "type": "DOMAIN",
+          "value": "atlassian.com",
+          "verified": true
+        }
+      ],
+      "status": "contacted",
+      "pipelineStageId": "stage-contacted",
+      "opportunityValue": 75000,
+      "currency": "AUD",
+      "winProbability": 50,
+      "tags": [
+        "Australia",
+        "Enterprise",
+        "Software",
+        "Sydney"
+      ],
+      "notes": [],
+      "activities": [
+        {
+          "id": "act-4",
+          "type": "email",
+          "title": "Initial Partnership Proposal Drafted",
+          "outcome": "Awaiting response from procurement office",
+          "date": "2026-11-09T19:54:37.621Z",
+          "actor": "Lead Intelligence Operator"
+        }
+      ],
+      "createdAt": "2026-11-06T19:54:37.621Z",
+      "updatedAt": "2026-11-09T19:54:37.621Z"
+    },
+    {
+      "id": "osm-2481940182",
+      "companyName": "St. Thomas Hospital Dental Clinic",
+      "website": "https://www.guysandstthomas.nhs.uk",
+      "domain": "guysandstthomas.nhs.uk",
+      "phone": "+44 20 7188 7188",
+      "email": "contact@guysandstthomas.nhs.uk",
+      "emailStatus": "syntax_valid",
+      "address": {
+        "street": "Westminster Bridge Road",
+        "city": "London",
+        "region": "Greater London",
+        "postalCode": "SE1 7EH",
+        "country": "United Kingdom",
+        "countryCode": "GB",
+        "formattedAddress": "Westminster Bridge Road, London, SE1 7EH, United Kingdom"
+      },
+      "coordinates": {
+        "lat": 51.5008,
+        "lon": -0.1195
+      },
+      "industry": "AMENITY",
+      "category": "Healthcare & Clinic",
+      "confidenceScore": 82,
+      "confidenceSignals": [
+        "Geocoded Physical Location & Coordinates",
+        "Detailed Street Address on Map",
+        "Public Telephone Discovered",
+        "Direct Email Address Tagged"
+      ],
+      "sources": [
+        {
+          "sourceName": "OpenStreetMap (Nominatim & POI)",
+          "providerId": "osm-node-2481940182",
+          "url": "https://www.openstreetmap.org/node/2481940182",
+          "retrievedAt": "2026-11-08T19:54:37.621Z",
+          "license": "Open Data Commons Open Database License (ODbL)",
+          "attribution": "© OpenStreetMap contributors"
+        }
+      ],
+      "identifiers": [
+        {
+          "type": "DOMAIN",
+          "value": "guysandstthomas.nhs.uk",
+          "verified": false
+        },
+        {
+          "type": "PHONE",
+          "value": "+44 20 7188 7188",
+          "verified": false
+        }
+      ],
+      "status": "new",
+      "pipelineStageId": "stage-discovered",
+      "currency": "GBP",
+      "tags": [
+        "United Kingdom",
+        "Healthcare",
+        "Clinic",
+        "London"
+      ],
+      "notes": [],
+      "activities": [
+        {
+          "id": "act-5",
+          "type": "enrichment",
+          "title": "Geocoded via OpenStreetMap POI search",
+          "outcome": "Discovered dental clinic near Westminster Bridge",
+          "date": "2026-11-08T19:54:37.621Z",
+          "actor": "OpenStreetMap Connector"
+        }
+      ],
+      "createdAt": "2026-11-08T19:54:37.621Z",
+      "updatedAt": "2026-11-08T19:54:37.621Z"
+    }
+  ],
+  "stages": [
+    {
+      "id": "stage-discovered",
+      "name": "Discovered",
+      "color": "#64748b",
+      "order": 1
+    },
+    {
+      "id": "stage-qualified",
+      "name": "Qualified",
+      "color": "#3b82f6",
+      "order": 2
+    },
+    {
+      "id": "stage-pitch-ready",
+      "name": "Outreach Drafted",
+      "color": "#8b5cf6",
+      "order": 3
+    },
+    {
+      "id": "stage-contacted",
+      "name": "Contacted",
+      "color": "#f59e0b",
+      "order": 4
+    },
+    {
+      "id": "stage-meeting",
+      "name": "Meeting Scheduled",
+      "color": "#06b6d4",
+      "order": 5
+    },
+    {
+      "id": "stage-proposal",
+      "name": "Proposal / Review",
+      "color": "#ec4899",
+      "order": 6
+    },
+    {
+      "id": "stage-won",
+      "name": "Closed Won",
+      "color": "#10b981",
+      "order": 7
+    },
+    {
+      "id": "stage-lost",
+      "name": "Closed Lost",
+      "color": "#ef4444",
+      "order": 8
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-1",
+      "title": "Review Companies House filing for DeepMind executive contact points",
+      "dueDate": "2026-11-12T19:54:37.621Z",
+      "priority": "high",
+      "completed": false,
+      "assignedTo": "Lead Intelligence Operator",
+      "leadId": "uk-crn-07386161",
+      "createdAt": "2026-11-10T19:54:37.621Z"
+    },
+    {
+      "id": "task-2",
+      "title": "Verify website contact form on Nordic Semiconductor web portal",
+      "dueDate": "2026-11-13T19:54:37.621Z",
+      "priority": "medium",
+      "completed": false,
+      "assignedTo": "Lead Intelligence Operator",
+      "leadId": "brreg-923609016",
+      "createdAt": "2026-11-10T19:54:37.621Z"
+    }
+  ],
+  "campaigns": [
+    {
+      "id": "camp-q4-europe-tech",
+      "name": "Nordic & UK High-Growth Tech Infrastructure",
+      "channel": "email",
+      "subjectTemplate": "Quick question regarding {{company_name}} data infrastructure",
+      "bodyTemplate": "Hi {{company_name}} team,\n\nI noticed your recent technological developments in {{city}} within the {{industry}} space.\n\nWe specialize in automated data integrity and registry compliance pipelines for global tech leaders.\n\nWould you be open to reviewing a short 3-minute executive brief on this?\n\nBest regards,\n{{owner_name}}",
+      "targetIndustry": "Technology & Engineering",
+      "targetCountry": "NO",
+      "status": "active",
+      "createdAt": "2026-11-05T19:54:37.621Z",
+      "messages": [
+        {
+          "id": "msg-1",
+          "campaignId": "camp-q4-europe-tech",
+          "leadId": "brreg-923609016",
+          "leadCompanyName": "NORDIC SEMICONDUCTOR ASA",
+          "recipientEmail": "post@nordicsemi.no",
+          "subject": "Quick question regarding NORDIC SEMICONDUCTOR ASA data infrastructure",
+          "content": "Hi NORDIC SEMICONDUCTOR ASA team,\n\nI noticed your recent technological developments in Trondheim within the Engineering and technical consultancy activities space.\n\nWe specialize in automated data integrity and registry compliance pipelines for global tech leaders.\n\nWould you be open to reviewing a short 3-minute executive brief on this?\n\nBest regards,\nLead Intelligence Operator",
+          "status": "pending_approval"
+        }
+      ]
+    }
+  ],
+  "mergeHistory": [],
+  "connectors": [
+    {
+      "id": "conn-brreg",
+      "name": "Brønnøysund Register Centre (Brreg)",
+      "category": "government_registry",
+      "countryCoverage": [
+        "NO"
+      ],
+      "status": "healthy",
+      "authType": "none_open",
+      "isConfigured": true,
+      "rateLimitNote": "100% Free Open API (data.brreg.no), no key required",
+      "attribution": "Norwegian Licence for Open Government Data (NLOD)",
+      "totalCalls": 19,
+      "lastRunAt": "2026-11-10T19:54:49.648Z"
+    },
+    {
+      "id": "conn-companies-house",
+      "name": "UK Companies House Registry",
+      "category": "government_registry",
+      "countryCoverage": [
+        "GB"
+      ],
+      "status": "healthy",
+      "authType": "api_key",
+      "isConfigured": true,
+      "rateLimitNote": "600 reqs / 5 mins. Free key available at developer.company-information.service.gov.uk",
+      "attribution": "Crown Copyright (Open Government Licence v3.0)",
+      "totalCalls": 12,
+      "lastRunAt": "2026-11-10T17:54:37.619Z"
+    },
+    {
+      "id": "conn-osm",
+      "name": "OpenStreetMap & Nominatim POI",
+      "category": "maps_geo",
+      "countryCoverage": [
+        "GLOBAL",
+        "GB",
+        "NO",
+        "US",
+        "AU",
+        "DE",
+        "FR",
+        "IN"
+      ],
+      "status": "healthy",
+      "authType": "none_open",
+      "isConfigured": true,
+      "rateLimitNote": "Max 1 req/sec compliance with Nominatim Usage Policy",
+      "attribution": "© OpenStreetMap contributors (ODbL License)",
+      "totalCalls": 45,
+      "lastRunAt": "2026-11-10T19:24:37.619Z"
+    },
+    {
+      "id": "conn-abn",
+      "name": "Australian Business Register (ABN Lookup)",
+      "category": "government_registry",
+      "countryCoverage": [
+        "AU"
+      ],
+      "status": "healthy",
+      "authType": "none_open",
+      "isConfigured": true,
+      "rateLimitNote": "ABN modulo-89 algorithmic checksum verification",
+      "attribution": "Commonwealth of Australia Open Data",
+      "totalCalls": 8,
+      "lastRunAt": "2026-11-09T19:54:37.619Z"
+    },
+    {
+      "id": "conn-web-inspector",
+      "name": "Safe Website Inspector & SSRF Shield",
+      "category": "web_search",
+      "countryCoverage": [
+        "GLOBAL"
+      ],
+      "status": "degraded",
+      "authType": "none_open",
+      "isConfigured": true,
+      "rateLimitNote": "DNS pinning, private IP range blocking, 300KB response cap",
+      "attribution": "Direct HTTP Inspection via internal safe crawler",
+      "totalCalls": 66,
+      "lastRunAt": "2026-11-10T19:55:03.397Z",
+      "lastError": "Target IP 127.0.0.1 resolved to protected/private network (SSRF blocked)"
+    },
+    {
+      "id": "conn-gemini",
+      "name": "Gemini AI Sales & Intelligence Engine",
+      "category": "ai_engine",
+      "countryCoverage": [
+        "GLOBAL"
+      ],
+      "status": "healthy",
+      "authType": "environment",
+      "isConfigured": true,
+      "rateLimitNote": "gemini-3.8-flash server-side inference",
+      "attribution": "Google GenAI SDK",
+      "totalCalls": 31,
+      "lastRunAt": "2026-11-10T19:59:10.381Z"
+    }
+  ],
+  "settings": {
+    "ownerName": "Lead Intelligence Operator",
+    "ownerEmail": "owner@pipeline.local",
+    "defaultCountry": "GB",
+    "defaultCurrency": "USD",
+    "userAgent": "GlobalLeadPipeline/1.0 (contact@internal-pipeline.local)",
+    "enableSafeWebsiteCrawl": true,
+    "outreachApprovalRequired": true,
+    "autoDedupeThreshold": 0.85,
+    "suppressionDomains": [
+      "example.com",
+      "test.com",
+      "spamdomain.org"
+    ]
+  }
+}

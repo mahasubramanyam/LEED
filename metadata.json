@@ -1,0 +1,6 @@
+{
+  "name": "Global Lead Intelligence & Sales Pipeline",
+  "description": "Production portable global lead discovery, official registry connectors, verification engine, CRM pipeline, and AI sales agent.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
