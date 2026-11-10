@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header.tsx';
 import { DiscoveryEngine } from './components/DiscoveryEngine.tsx';
 import { LeadsView } from './components/LeadsView.tsx';
@@ -10,6 +10,7 @@ import { ConnectorsView } from './components/ConnectorsView.tsx';
 import { TasksView } from './components/TasksView.tsx';
 import { LeadDetailModal } from './components/LeadDetailModal.tsx';
 import { ImportModal } from './components/ImportModal.tsx';
+import { AuthModal } from './components/AuthModal.tsx';
 import {
   CanonicalLead,
   PipelineStage,
@@ -18,6 +19,13 @@ import {
   ConnectorStatus,
   AppSettings,
 } from './types.ts';
+
+interface OwnerProfile {
+  id: string;
+  email: string;
+  fullName: string;
+  role: 'owner';
+}
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('discovery');
@@ -38,49 +46,142 @@ export default function App() {
     suppressionDomains: [],
   });
 
+  // Owner Authentication & Storage Engine State
+  const [owner, setOwner] = useState<OwnerProfile | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<'setup' | 'login' | 'change_password'>('login');
+  const [storageEngine, setStorageEngine] = useState<'postgresql' | 'json_store'>('json_store');
+  const [isDbConnected, setIsDbConnected] = useState<boolean>(false);
+
   const [selectedLeadForDetail, setSelectedLeadForDetail] = useState<CanonicalLead | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch initial system state
-  const fetchAllData = async () => {
+  // Helper to extract CSRF token cookie
+  const getCsrfToken = (): string => {
+    const match = document.cookie.match(/leed_csrf=([^;]+)/);
+    return match ? match[1] : '';
+  };
+
+  // Central authenticated API fetch helper
+  const apiFetch = useCallback(async (url: string, options: RequestInit = {}): Promise<Response> => {
+    const headers = new Headers(options.headers || {});
+    const method = (options.method || 'GET').toUpperCase();
+
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+      const csrf = getCsrfToken();
+      if (csrf && !headers.has('x-leed-csrf-token')) {
+        headers.set('x-leed-csrf-token', csrf);
+      }
+    }
+
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'include',
+    });
+
+    if (response.status === 401 && !url.includes('/api/auth/')) {
+      setIsAuthenticated(false);
+      setAuthModalMode('login');
+      setAuthModalOpen(true);
+    }
+
+    return response;
+  }, []);
+
+  // Fetch initial system state & check owner authentication
+  const checkAuthAndLoad = useCallback(async () => {
     try {
-      const [leadsRes, stagesRes, tasksRes, campsRes, connsRes, settRes, statusRes] = await Promise.all([
-        fetch('/api/leads'),
-        fetch('/api/pipeline/stages'),
-        fetch('/api/tasks'),
-        fetch('/api/campaigns'),
-        fetch('/api/connectors'),
-        fetch('/api/settings'),
-        fetch('/api/status'),
+      setIsLoading(true);
+
+      // 1. Fetch system & setup status
+      const [setupRes, statusRes] = await Promise.all([
+        fetch('/api/auth/setup-status', { credentials: 'include' }),
+        fetch('/api/status', { credentials: 'include' }),
       ]);
 
-      const leadsData = await leadsRes.json();
-      const stagesData = await stagesRes.json();
-      const tasksData = await tasksRes.json();
-      const campsData = await campsRes.json();
-      const connsData = await connsRes.json();
-      const settData = await settRes.json();
+      const setupData = await setupRes.json();
       const statusData = await statusRes.json();
 
-      setLeads(leadsData.leads || []);
-      setStages(stagesData || []);
-      setTasks(tasksData || []);
-      setCampaigns(campsData || []);
-      setConnectors(connsData || []);
-      setSettings(settData || settings);
+      setStorageEngine(statusData.storageEngine || 'json_store');
+      setIsDbConnected(!!statusData.databaseConnected);
       setAiAvailable(statusData.aiEngineAvailable ?? true);
+
+      // If owner account is not yet initialized, show setup modal
+      if (!setupData.initialized) {
+        setAuthModalMode('setup');
+        setAuthModalOpen(true);
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. Check current session
+      const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        setOwner(meData.owner);
+        setIsAuthenticated(true);
+        setAuthModalOpen(false);
+        await fetchAllData();
+      } else {
+        setIsAuthenticated(false);
+        setAuthModalMode('login');
+        setAuthModalOpen(true);
+      }
     } catch (err) {
-      console.error('Failed to load application data', err);
+      console.error('Failed to initialize application', err);
     } finally {
       setIsLoading(false);
+    }
+  }, []);
+
+  // Fetch all domain data
+  const fetchAllData = async () => {
+    try {
+      const [leadsRes, stagesRes, tasksRes, campsRes, connsRes, settRes] = await Promise.all([
+        apiFetch('/api/leads'),
+        apiFetch('/api/pipeline/stages'),
+        apiFetch('/api/tasks'),
+        apiFetch('/api/campaigns'),
+        apiFetch('/api/connectors'),
+        apiFetch('/api/settings'),
+      ]);
+
+      if (leadsRes.ok) {
+        const leadsData = await leadsRes.json();
+        setLeads(leadsData.leads || []);
+      }
+      if (stagesRes.ok) {
+        const stagesData = await stagesRes.json();
+        setStages(stagesData || []);
+      }
+      if (tasksRes.ok) {
+        const tasksData = await tasksRes.json();
+        setTasks(tasksData || []);
+      }
+      if (campsRes.ok) {
+        const campsData = await campsRes.json();
+        setCampaigns(campsData || []);
+      }
+      if (connsRes.ok) {
+        const connsData = await connsRes.json();
+        setConnectors(connsData || []);
+      }
+      if (settRes.ok) {
+        const settData = await settRes.json();
+        setSettings(settData || settings);
+      }
+    } catch (err) {
+      console.error('Failed to load application records', err);
     }
   };
 
   useEffect(() => {
-    fetchAllData();
-  }, []);
+    checkAuthAndLoad();
+  }, [checkAuthAndLoad]);
 
   // Sync selected lead when leads update
   useEffect(() => {
@@ -90,10 +191,30 @@ export default function App() {
     }
   }, [leads]);
 
+  // Auth Handlers
+  const handleAuthSuccess = (ownerProfile: OwnerProfile) => {
+    setOwner(ownerProfile);
+    setIsAuthenticated(true);
+    setAuthModalOpen(false);
+    fetchAllData();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+    setOwner(null);
+    setIsAuthenticated(false);
+    setAuthModalMode('login');
+    setAuthModalOpen(true);
+  };
+
   // Lead Actions
   const handleAddLeadToCrm = async (newLead: CanonicalLead) => {
     try {
-      const res = await fetch('/api/leads', {
+      const res = await apiFetch('/api/leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newLead),
@@ -108,7 +229,7 @@ export default function App() {
 
   const handleBatchAddLeads = async (newLeads: CanonicalLead[]) => {
     try {
-      const res = await fetch('/api/leads/batch-import', {
+      const res = await apiFetch('/api/leads/batch-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leads: newLeads }),
@@ -123,7 +244,7 @@ export default function App() {
 
   const handleUpdateLead = async (lead: CanonicalLead) => {
     try {
-      const res = await fetch(`/api/leads/${lead.id}`, {
+      const res = await apiFetch(`/api/leads/${lead.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(lead),
@@ -142,7 +263,7 @@ export default function App() {
 
   const handleDeleteLead = async (leadId: string) => {
     try {
-      const res = await fetch(`/api/leads/${leadId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/leads/${leadId}`, { method: 'DELETE' });
       if (res.ok) {
         setLeads((prev) => prev.filter((l) => l.id !== leadId));
         if (selectedLeadForDetail?.id === leadId) {
@@ -156,7 +277,7 @@ export default function App() {
 
   const handleBatchUpdateStage = async (leadIds: string[], stageId: string) => {
     for (const id of leadIds) {
-      await fetch('/api/pipeline/move', {
+      await apiFetch('/api/pipeline/move', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId: id, stageId }),
@@ -167,14 +288,14 @@ export default function App() {
 
   const handleBatchDelete = async (leadIds: string[]) => {
     for (const id of leadIds) {
-      await fetch(`/api/leads/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/leads/${id}`, { method: 'DELETE' });
     }
     fetchAllData();
   };
 
   const handleMoveStage = async (leadId: string, stageId: string, lostReason?: string) => {
     try {
-      const res = await fetch('/api/pipeline/move', {
+      const res = await apiFetch('/api/pipeline/move', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId, stageId, lostReason }),
@@ -190,7 +311,7 @@ export default function App() {
 
   const handleAddNote = async (leadId: string, content: string) => {
     try {
-      const res = await fetch(`/api/leads/${leadId}/notes`, {
+      const res = await apiFetch(`/api/leads/${leadId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
@@ -209,7 +330,7 @@ export default function App() {
 
   const handleAddActivity = async (leadId: string, activity: any) => {
     try {
-      const res = await fetch(`/api/leads/${leadId}/activities`, {
+      const res = await apiFetch(`/api/leads/${leadId}/activities`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(activity),
@@ -227,7 +348,7 @@ export default function App() {
   };
 
   const handleInspectUrl = async (url: string, leadId: string) => {
-    const res = await fetch('/api/inspection/inspect-url', {
+    const res = await apiFetch('/api/inspection/inspect-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, leadId }),
@@ -240,7 +361,7 @@ export default function App() {
   // Task Actions
   const handleToggleTask = async (taskId: string, completed: boolean) => {
     try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
+      const res = await apiFetch(`/api/tasks/${taskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ completed }),
@@ -255,7 +376,7 @@ export default function App() {
 
   const handleCreateTask = async (task: Omit<LeadTask, 'id' | 'createdAt'>) => {
     try {
-      const res = await fetch('/api/tasks', {
+      const res = await apiFetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(task),
@@ -271,7 +392,7 @@ export default function App() {
 
   const handleDeleteTask = async (taskId: string) => {
     try {
-      const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
       if (res.ok) {
         setTasks((prev) => prev.filter((t) => t.id !== taskId));
       }
@@ -282,7 +403,7 @@ export default function App() {
 
   const handleUpdateSettings = async (newSettings: Partial<AppSettings>) => {
     try {
-      const res = await fetch('/api/settings', {
+      const res = await apiFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newSettings),
@@ -315,6 +436,14 @@ export default function App() {
         onOpenImport={() => setIsImportModalOpen(true)}
         onExportCsv={handleExportCsv}
         aiAvailable={aiAvailable}
+        owner={owner}
+        storageEngine={storageEngine}
+        isDbConnected={isDbConnected}
+        onOpenPasswordChange={() => {
+          setAuthModalMode('change_password');
+          setAuthModalOpen(true);
+        }}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
@@ -323,7 +452,7 @@ export default function App() {
           <div className="flex flex-col items-center justify-center min-h-[400px] space-y-3">
             <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
             <span className="text-xs text-slate-400 font-medium">
-              Initializing Lead Intelligence Pipeline & Connectors...
+              Verifying owner authentication & pipeline state...
             </span>
           </div>
         ) : (
@@ -427,6 +556,14 @@ export default function App() {
           existingLeads={leads}
         />
       )}
+
+      {/* Owner Setup / Login / Change Password Modal */}
+      <AuthModal
+        isOpen={authModalOpen}
+        mode={authModalMode}
+        onClose={isAuthenticated ? () => setAuthModalOpen(false) : undefined}
+        onSuccess={handleAuthSuccess}
+      />
     </div>
   );
 }

@@ -560,8 +560,8 @@
       "isConfigured": true,
       "rateLimitNote": "gemini-3.8-flash server-side inference",
       "attribution": "Google GenAI SDK",
-      "totalCalls": 31,
-      "lastRunAt": "2026-11-10T19:59:10.381Z"
+      "totalCalls": 32,
+      "lastRunAt": "2026-11-10T20:38:07.559Z"
     }
   ],
   "settings": {

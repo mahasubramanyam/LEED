@@ -9,6 +9,10 @@ import {
   ConnectorStatus,
   AppSettings,
 } from './types.js';
+import { dbManager } from './db/pool.js';
+import { PostgresStorage } from './db/storagePg.js';
+import { migrator } from './db/migrator.js';
+import { jsonMigrator, MigrationSummary } from './db/migrateJsonToSql.js';
 
 interface DatabaseSchema {
   leads: CanonicalLead[];
@@ -700,6 +704,89 @@ class StorageManager {
     this.saveDatabase(this.db);
     return this.db.settings;
   }
+
+  // PostgreSQL Integration & Dual-Engine Status
+  public readonly pgStorage = new PostgresStorage();
+
+  public isPostgresConnected(): boolean {
+    return dbManager.isDbConnected();
+  }
+
+  public getStorageEngine(): 'postgresql' | 'json_store' {
+    return dbManager.isDbConnected() ? 'postgresql' : 'json_store';
+  }
+
+  public async getDatabaseDiagnostics(): Promise<{
+    configured: boolean;
+    connected: boolean;
+    engine: 'postgresql' | 'json_store';
+    connectionStringConfigured: boolean;
+    poolStatus: any;
+    jsonRecords: {
+      leads: number;
+      stages: number;
+      tasks: number;
+      campaigns: number;
+      mergeRecords: number;
+    };
+    postgresRecords?: {
+      leads: number;
+      stages: number;
+      tasks: number;
+      campaigns: number;
+      schemaVersion?: string;
+    };
+  }> {
+    const configured = !!process.env.DATABASE_URL;
+    const connected = dbManager.isDbConnected();
+    const pool = dbManager.getPool();
+
+    let postgresRecords;
+    if (connected && pool) {
+      try {
+        const leadsRes = await pool.query('SELECT COUNT(*) as count FROM leads');
+        const stagesRes = await pool.query('SELECT COUNT(*) as count FROM pipeline_stages');
+        const tasksRes = await pool.query('SELECT COUNT(*) as count FROM tasks');
+        const campsRes = await pool.query('SELECT COUNT(*) as count FROM campaigns');
+        const migRes = await pool.query('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1');
+
+        postgresRecords = {
+          leads: parseInt(leadsRes.rows[0]?.count || '0', 10),
+          stages: parseInt(stagesRes.rows[0]?.count || '0', 10),
+          tasks: parseInt(tasksRes.rows[0]?.count || '0', 10),
+          campaigns: parseInt(campsRes.rows[0]?.count || '0', 10),
+          schemaVersion: migRes.rows[0]?.version || 'none',
+        };
+      } catch (err) {
+        console.warn('Failed to query diagnostics from postgres:', err);
+      }
+    }
+
+    return {
+      configured,
+      connected,
+      engine: connected ? 'postgresql' : 'json_store',
+      connectionStringConfigured: configured,
+      poolStatus: dbManager.getHealthStatus(),
+      jsonRecords: {
+        leads: this.db.leads.length,
+        stages: this.db.stages.length,
+        tasks: this.db.tasks.length,
+        campaigns: this.db.campaigns.length,
+        mergeRecords: this.db.mergeHistory.length,
+      },
+      postgresRecords,
+    };
+  }
+
+  public async runSchemaMigrations() {
+    return migrator.runMigrations();
+  }
+
+  public async runJsonMigration(dryRun = false): Promise<MigrationSummary> {
+    return jsonMigrator.migrate({ dryRun });
+  }
 }
 
 export const storage = new StorageManager();
+

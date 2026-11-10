@@ -2,11 +2,12 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
 import { storage } from './server/storage.js';
 import { searchBrreg } from './server/connectors/brreg.js';
 import { searchCompaniesHouse } from './server/connectors/companiesHouse.js';
 import { searchOpenStreetMap } from './server/connectors/osmOverpass.js';
-import { searchAbn, validateAbnChecksum } from './server/connectors/abnLookup.js';
+import { searchAbn } from './server/connectors/abnLookup.js';
 import { inspectWebsite } from './server/connectors/webInspector.js';
 import { detectDuplicates, mergeLeads } from './server/connectors/dedupeEngine.js';
 import {
@@ -16,6 +17,14 @@ import {
   generateMarketReportWithAi,
 } from './server/gemini.js';
 import { CanonicalLead } from './server/types.js';
+import {
+  requireOwnerAuth,
+  setSessionCookie,
+  clearSessionCookie,
+  SESSION_COOKIE_NAME,
+} from './server/auth/middleware.js';
+import { ownerService } from './server/auth/ownerService.js';
+import { generateCsrfToken, setCsrfCookie, validateCsrf } from './server/auth/csrf.js';
 
 dotenv.config();
 
@@ -26,14 +35,27 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
 
-// --- API ROUTES ---
+// CSRF Token Cookie Provisioning Middleware
+app.use((req: Request, res: Response, next) => {
+  if (!req.cookies?.leed_csrf) {
+    const csrfToken = generateCsrfToken();
+    setCsrfCookie(res, csrfToken);
+  }
+  next();
+});
 
-// 1. System Health & Observability
-app.get('/api/status', (req: Request, res: Response) => {
+// ==========================================
+// 1. PUBLIC UNRESTRICTED ENDPOINTS
+// ==========================================
+
+// System Health & Observability
+app.get('/api/status', async (req: Request, res: Response) => {
   const leads = storage.getLeads();
   const connectors = storage.getConnectors();
   const activeConnectors = connectors.filter((c) => c.status === 'healthy').length;
+  const initialized = await ownerService.isOwnerInitialized();
 
   res.json({
     status: 'online',
@@ -42,13 +64,160 @@ app.get('/api/status', (req: Request, res: Response) => {
     uptimeSeconds: Math.floor(process.uptime()),
     totalLeads: leads.length,
     activeConnectors: `${activeConnectors}/${connectors.length}`,
+    storageEngine: storage.getStorageEngine(),
+    databaseConnected: storage.isPostgresConnected(),
+    ownerInitialized: initialized,
     timestamp: new Date().toISOString(),
     aiEngineAvailable: !!process.env.GEMINI_API_KEY,
   });
 });
 
-// 2. Leads Management
-app.get('/api/leads', (req: Request, res: Response) => {
+// CSRF Token Endpoint (for frontend retrieval)
+app.get('/api/auth/csrf', (req: Request, res: Response) => {
+  let token = req.cookies?.leed_csrf;
+  if (!token) {
+    token = generateCsrfToken();
+    setCsrfCookie(res, token);
+  }
+  res.json({ csrfToken: token });
+});
+
+// Owner Setup Status Check (Public)
+app.get('/api/auth/setup-status', async (req: Request, res: Response) => {
+  try {
+    const initialized = await ownerService.isOwnerInitialized();
+    res.json({
+      initialized,
+      mode: 'single-owner',
+      registrationAllowed: !initialized,
+    });
+  } catch (err) {
+    console.error('Setup status check error:', err);
+    res.status(500).json({ error: 'Failed to check setup status' });
+  }
+});
+
+// Owner Setup (One-time only, locked forever after)
+app.post('/api/auth/setup', async (req: Request, res: Response) => {
+  const { fullName, email, password } = req.body;
+  try {
+    const owner = await ownerService.setupOwner(fullName, email, password);
+    // Automatically log in after setup
+    const loginResult = await ownerService.login(email, password, req.ip, req.headers['user-agent']);
+    setSessionCookie(res, loginResult.rawToken);
+    res.status(201).json({
+      success: true,
+      owner: loginResult.owner,
+      token: loginResult.rawToken,
+      message: 'Owner initialized successfully. Platform locked to single-owner mode.',
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: msg });
+  }
+});
+
+// Owner Login (Rate-limited, sets HTTP-only cookie)
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  try {
+    const result = await ownerService.login(email, password, req.ip, req.headers['user-agent']);
+    setSessionCookie(res, result.rawToken);
+    res.json({
+      success: true,
+      owner: result.owner,
+      token: result.rawToken,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isLocked = msg.includes('locked') || msg.includes('Too many failed');
+    res.status(isLocked ? 429 : 401).json({ error: msg });
+  }
+});
+
+// Owner Logout
+app.post('/api/auth/logout', async (req: Request, res: Response) => {
+  const rawToken = req.cookies?.[SESSION_COOKIE_NAME] || req.headers['authorization']?.replace('Bearer ', '');
+  if (rawToken) {
+    await ownerService.logout(rawToken);
+  }
+  clearSessionCookie(res);
+  res.json({ success: true, message: 'Logged out successfully' });
+});
+
+// ==========================================
+// 2. PROTECTED SINGLE-OWNER API ROUTER
+// All routes below require valid owner session & CSRF validation
+// ==========================================
+
+const protectedApi = express.Router();
+protectedApi.use(requireOwnerAuth);
+protectedApi.use(validateCsrf);
+
+// Current Authenticated Owner Profile
+protectedApi.get('/auth/me', (req: Request, res: Response) => {
+  res.json({
+    owner: req.owner,
+    authenticated: true,
+  });
+});
+
+// Change Owner Password (Revokes older sessions)
+protectedApi.post('/auth/change-password', async (req: Request, res: Response) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!req.owner) {
+    res.status(401).json({ error: 'Unauthenticated' });
+    return;
+  }
+
+  try {
+    await ownerService.changePassword(req.owner.id, currentPassword, newPassword, req.sessionToken);
+    // Issue fresh session for current client
+    const freshLogin = await ownerService.login(req.owner.email, newPassword, req.ip, req.headers['user-agent']);
+    setSessionCookie(res, freshLogin.rawToken);
+    res.json({ success: true, message: 'Password changed successfully. Prior sessions revoked.' });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: msg });
+  }
+});
+
+// Database Status & Diagnostics
+protectedApi.get('/database/status', async (req: Request, res: Response) => {
+  try {
+    const diagnostics = await storage.getDatabaseDiagnostics();
+    res.json(diagnostics);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Failed to fetch diagnostics: ${msg}` });
+  }
+});
+
+// Run Schema Migrations (DDL)
+protectedApi.post('/database/run-migrations', async (req: Request, res: Response) => {
+  try {
+    const result = await storage.runSchemaMigrations();
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Schema migration failed: ${msg}` });
+  }
+});
+
+// Migrate JSON Store into PostgreSQL (Supports Dry-Run)
+protectedApi.post('/database/migrate-json', async (req: Request, res: Response) => {
+  const dryRun = req.body?.dryRun === true;
+  try {
+    const summary = await storage.runJsonMigration(dryRun);
+    res.json(summary);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `JSON migration failed: ${msg}` });
+  }
+});
+
+// Leads Management
+protectedApi.get('/leads', (req: Request, res: Response) => {
   let leads = storage.getLeads();
 
   const { search, country, status, stage, category, hasWebsite, hasEmail, hasPhone } = req.query;
@@ -99,7 +268,7 @@ app.get('/api/leads', (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/leads/:id', (req: Request, res: Response) => {
+protectedApi.get('/leads/:id', (req: Request, res: Response) => {
   const lead = storage.getLead(req.params.id);
   if (!lead) {
     res.status(404).json({ error: 'Lead not found' });
@@ -108,7 +277,7 @@ app.get('/api/leads/:id', (req: Request, res: Response) => {
   res.json(lead);
 });
 
-app.post('/api/leads', (req: Request, res: Response) => {
+protectedApi.post('/leads', (req: Request, res: Response) => {
   const newLead: CanonicalLead = req.body;
   if (!newLead.companyName) {
     res.status(400).json({ error: 'Company name is required' });
@@ -124,7 +293,7 @@ app.post('/api/leads', (req: Request, res: Response) => {
   res.status(201).json(saved);
 });
 
-app.put('/api/leads/:id', (req: Request, res: Response) => {
+protectedApi.put('/leads/:id', (req: Request, res: Response) => {
   const existing = storage.getLead(req.params.id);
   if (!existing) {
     res.status(404).json({ error: 'Lead not found' });
@@ -134,7 +303,7 @@ app.put('/api/leads/:id', (req: Request, res: Response) => {
   res.json(updated);
 });
 
-app.delete('/api/leads/:id', (req: Request, res: Response) => {
+protectedApi.delete('/leads/:id', (req: Request, res: Response) => {
   const success = storage.deleteLead(req.params.id);
   if (!success) {
     res.status(404).json({ error: 'Lead not found' });
@@ -144,7 +313,7 @@ app.delete('/api/leads/:id', (req: Request, res: Response) => {
 });
 
 // Batch Import from CSV / JSON
-app.post('/api/leads/batch-import', (req: Request, res: Response) => {
+protectedApi.post('/leads/batch-import', (req: Request, res: Response) => {
   const { leads } = req.body;
   if (!Array.isArray(leads) || leads.length === 0) {
     res.status(400).json({ error: 'Array of leads is required' });
@@ -161,7 +330,7 @@ app.post('/api/leads/batch-import', (req: Request, res: Response) => {
 });
 
 // Add Note to Lead
-app.post('/api/leads/:id/notes', (req: Request, res: Response) => {
+protectedApi.post('/leads/:id/notes', (req: Request, res: Response) => {
   const { content } = req.body;
   if (!content) {
     res.status(400).json({ error: 'Note content is required' });
@@ -173,11 +342,12 @@ app.post('/api/leads/:id/notes', (req: Request, res: Response) => {
     return;
   }
 
+  const author = req.owner?.fullName || storage.getSettings().ownerName;
   const note = {
     id: `note-${Date.now()}`,
     content: String(content),
     createdAt: new Date().toISOString(),
-    author: storage.getSettings().ownerName,
+    author,
   };
 
   lead.notes.unshift(note);
@@ -187,7 +357,7 @@ app.post('/api/leads/:id/notes', (req: Request, res: Response) => {
     title: 'Added Note',
     notes: String(content).slice(0, 80),
     date: new Date().toISOString(),
-    actor: storage.getSettings().ownerName,
+    actor: author,
   });
 
   const saved = storage.upsertLead(lead);
@@ -195,7 +365,7 @@ app.post('/api/leads/:id/notes', (req: Request, res: Response) => {
 });
 
 // Add Activity to Lead
-app.post('/api/leads/:id/activities', (req: Request, res: Response) => {
+protectedApi.post('/leads/:id/activities', (req: Request, res: Response) => {
   const { type, title, outcome, notes } = req.body;
   if (!title) {
     res.status(400).json({ error: 'Activity title is required' });
@@ -207,6 +377,7 @@ app.post('/api/leads/:id/activities', (req: Request, res: Response) => {
     return;
   }
 
+  const author = req.owner?.fullName || storage.getSettings().ownerName;
   lead.activities.unshift({
     id: `act-${Date.now()}`,
     type: type || 'call',
@@ -214,15 +385,15 @@ app.post('/api/leads/:id/activities', (req: Request, res: Response) => {
     outcome,
     notes,
     date: new Date().toISOString(),
-    actor: storage.getSettings().ownerName,
+    actor: author,
   });
 
   const saved = storage.upsertLead(lead);
   res.json(saved);
 });
 
-// 3. Multi-Source Discovery Engine
-app.post('/api/discovery/search', async (req: Request, res: Response) => {
+// Multi-Source Discovery Engine
+protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
   const { query, countryCode, city, connectorId, autoSave } = req.body;
 
   if (!query || typeof query !== 'string' || query.trim().length === 0) {
@@ -316,8 +487,8 @@ app.post('/api/discovery/search', async (req: Request, res: Response) => {
   }
 });
 
-// 4. SSRF-Safe Web Inspector
-app.post('/api/inspection/inspect-url', async (req: Request, res: Response) => {
+// SSRF-Safe Web Inspector
+protectedApi.post('/inspection/inspect-url', async (req: Request, res: Response) => {
   const { url, leadId } = req.body;
   if (!url) {
     res.status(400).json({ error: 'URL is required' });
@@ -328,7 +499,6 @@ app.post('/api/inspection/inspect-url', async (req: Request, res: Response) => {
     const inspection = await inspectWebsite(url);
     storage.recordConnectorActivity('conn-web-inspector', inspection.securityCheck.passed, inspection.securityCheck.reason);
 
-    // If leadId is provided and site inspected successfully, update lead record
     if (leadId && inspection.isOnline) {
       const lead = storage.getLead(leadId);
       if (lead) {
@@ -372,14 +542,14 @@ app.post('/api/inspection/inspect-url', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Deduplication & Merge Engine
-app.get('/api/dedupe/candidates', (req: Request, res: Response) => {
+// Deduplication & Merge Engine
+protectedApi.get('/dedupe/candidates', (req: Request, res: Response) => {
   const leads = storage.getLeads();
   const candidates = detectDuplicates(leads);
   res.json({ candidates, count: candidates.length });
 });
 
-app.post('/api/dedupe/merge', (req: Request, res: Response) => {
+protectedApi.post('/dedupe/merge', (req: Request, res: Response) => {
   const { survivorId, absorbedId, reason } = req.body;
   if (!survivorId || !absorbedId) {
     res.status(400).json({ error: 'Both survivorId and absorbedId are required' });
@@ -396,11 +566,8 @@ app.post('/api/dedupe/merge', (req: Request, res: Response) => {
 
   const { updatedSurvivor, historyRecord } = mergeLeads(survivor, absorbed, reason || 'Manual Owner Merge');
 
-  // Update survivor
   storage.upsertLead(updatedSurvivor);
-  // Delete absorbed lead from active database
   storage.deleteLead(absorbedId);
-  // Record snapshot for 100% reliable undo
   storage.recordMerge(historyRecord);
 
   res.json({
@@ -410,7 +577,7 @@ app.post('/api/dedupe/merge', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/dedupe/undo/:historyId', (req: Request, res: Response) => {
+protectedApi.post('/dedupe/undo/:historyId', (req: Request, res: Response) => {
   const success = storage.undoMerge(req.params.historyId);
   if (!success) {
     res.status(404).json({ error: 'Merge history snapshot not found or already undone' });
@@ -419,12 +586,12 @@ app.post('/api/dedupe/undo/:historyId', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Merge successfully reversed. Absorbed lead restored.' });
 });
 
-app.get('/api/dedupe/history', (req: Request, res: Response) => {
+protectedApi.get('/dedupe/history', (req: Request, res: Response) => {
   res.json(storage.getMergeHistory());
 });
 
-// 6. Pipeline & Stages
-app.get('/api/pipeline/stages', (req: Request, res: Response) => {
+// Pipeline & Stages
+protectedApi.get('/pipeline/stages', (req: Request, res: Response) => {
   const stages = storage.getStages();
   const leads = storage.getLeads();
 
@@ -441,7 +608,7 @@ app.get('/api/pipeline/stages', (req: Request, res: Response) => {
   res.json(stagesWithMetrics);
 });
 
-app.put('/api/pipeline/move', (req: Request, res: Response) => {
+protectedApi.put('/pipeline/move', (req: Request, res: Response) => {
   const { leadId, stageId, lostReason } = req.body;
   const lead = storage.getLead(leadId);
   if (!lead) {
@@ -467,30 +634,35 @@ app.put('/api/pipeline/move', (req: Request, res: Response) => {
     lead.status = 'converted';
   }
 
+  const author = req.owner?.fullName || storage.getSettings().ownerName;
   lead.activities.unshift({
     id: `act-${Date.now()}`,
     type: 'stage_change',
     title: `Pipeline Stage Updated: ${targetStage.name}`,
     outcome: `Transitioned from ${prevStageName} to ${targetStage.name}${lostReason ? ` (${lostReason})` : ''}`,
     date: new Date().toISOString(),
-    actor: storage.getSettings().ownerName,
+    actor: author,
   });
 
   const updated = storage.upsertLead(lead);
   res.json(updated);
 });
 
-// 7. Tasks
-app.get('/api/tasks', (req: Request, res: Response) => {
+// Tasks
+protectedApi.get('/tasks', (req: Request, res: Response) => {
   res.json(storage.getTasks());
 });
 
-app.post('/api/tasks', (req: Request, res: Response) => {
-  const task = storage.createTask(req.body);
+protectedApi.post('/tasks', (req: Request, res: Response) => {
+  const author = req.owner?.fullName || storage.getSettings().ownerName;
+  const task = storage.createTask({
+    ...req.body,
+    assignedTo: req.body.assignedTo || author,
+  });
   res.status(201).json(task);
 });
 
-app.put('/api/tasks/:id', (req: Request, res: Response) => {
+protectedApi.put('/tasks/:id', (req: Request, res: Response) => {
   const updated = storage.updateTask(req.params.id, req.body);
   if (!updated) {
     res.status(404).json({ error: 'Task not found' });
@@ -499,22 +671,22 @@ app.put('/api/tasks/:id', (req: Request, res: Response) => {
   res.json(updated);
 });
 
-app.delete('/api/tasks/:id', (req: Request, res: Response) => {
+protectedApi.delete('/tasks/:id', (req: Request, res: Response) => {
   const success = storage.deleteTask(req.params.id);
   res.json({ success });
 });
 
-// 8. Outreach Campaigns & Approval Queue
-app.get('/api/campaigns', (req: Request, res: Response) => {
+// Outreach Campaigns & Approval Queue
+protectedApi.get('/campaigns', (req: Request, res: Response) => {
   res.json(storage.getCampaigns());
 });
 
-app.post('/api/campaigns', (req: Request, res: Response) => {
+protectedApi.post('/campaigns', (req: Request, res: Response) => {
   const campaign = storage.createCampaign(req.body);
   res.status(201).json(campaign);
 });
 
-app.post('/api/campaigns/:id/generate-messages', async (req: Request, res: Response) => {
+protectedApi.post('/campaigns/:id/generate-messages', async (req: Request, res: Response) => {
   const campaign = storage.getCampaigns().find((c) => c.id === req.params.id);
   if (!campaign) {
     res.status(404).json({ error: 'Campaign not found' });
@@ -524,28 +696,25 @@ app.post('/api/campaigns/:id/generate-messages', async (req: Request, res: Respo
   const { targetLeadIds } = req.body;
   const leads = storage.getLeads().filter((l) => (targetLeadIds ? targetLeadIds.includes(l.id) : true));
   const settings = storage.getSettings();
+  const author = req.owner?.fullName || settings.ownerName;
 
-  const generatedCount = 0;
   for (const lead of leads) {
-    // Respect suppression list & do not contact status
     if (lead.status === 'do_not_contact') continue;
     if (lead.domain && settings.suppressionDomains.includes(lead.domain.toLowerCase())) continue;
 
-    // Check if message already exists
     const exists = campaign.messages.some((m) => m.leadId === lead.id);
     if (exists) continue;
 
-    // Substitute tokens
-    let subject = campaign.subjectTemplate
+    const subject = campaign.subjectTemplate
       .replace(/{{company_name}}/g, lead.companyName)
       .replace(/{{industry}}/g, lead.industry)
       .replace(/{{city}}/g, lead.address?.city || 'your area');
 
-    let content = campaign.bodyTemplate
+    const content = campaign.bodyTemplate
       .replace(/{{company_name}}/g, lead.companyName)
       .replace(/{{industry}}/g, lead.industry)
       .replace(/{{city}}/g, lead.address?.city || 'your area')
-      .replace(/{{owner_name}}/g, settings.ownerName);
+      .replace(/{{owner_name}}/g, author);
 
     campaign.messages.push({
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -555,15 +724,15 @@ app.post('/api/campaigns/:id/generate-messages', async (req: Request, res: Respo
       recipientEmail: lead.email,
       subject,
       content,
-      status: 'pending_approval', // Strictly enforces Human Approval safeguard
+      status: 'pending_approval',
     });
   }
 
   res.json(campaign);
 });
 
-app.post('/api/campaigns/:id/messages/:messageId/action', (req: Request, res: Response) => {
-  const { action } = req.body; // 'approve' | 'reject' | 'send'
+protectedApi.post('/campaigns/:id/messages/:messageId/action', (req: Request, res: Response) => {
+  const { action } = req.body;
   const newStatus =
     action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : action === 'send' ? 'sent' : 'pending_approval';
 
@@ -573,7 +742,6 @@ app.post('/api/campaigns/:id/messages/:messageId/action', (req: Request, res: Re
     return;
   }
 
-  // If sent, log activity on the lead
   if (action === 'send') {
     const camp = storage.getCampaigns().find((c) => c.id === req.params.id);
     const msg = camp?.messages.find((m) => m.id === req.params.messageId);
@@ -586,7 +754,7 @@ app.post('/api/campaigns/:id/messages/:messageId/action', (req: Request, res: Re
           title: `Campaign Message Dispatched: ${msg.subject}`,
           outcome: `Provider ID ${msg.deliveryId} confirmed dispatch`,
           date: new Date().toISOString(),
-          actor: storage.getSettings().ownerName,
+          actor: req.owner?.fullName || storage.getSettings().ownerName,
         });
         lead.status = 'contacted';
         lead.pipelineStageId = 'stage-contacted';
@@ -598,8 +766,8 @@ app.post('/api/campaigns/:id/messages/:messageId/action', (req: Request, res: Re
   res.json({ success: true, newStatus });
 });
 
-// 9. AI Sales Intelligence
-app.post('/api/ai/analyze-lead', async (req: Request, res: Response) => {
+// AI Sales Intelligence
+protectedApi.post('/ai/analyze-lead', async (req: Request, res: Response) => {
   const { leadId } = req.body;
   const lead = storage.getLead(leadId);
   if (!lead) {
@@ -618,7 +786,7 @@ app.post('/api/ai/analyze-lead', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/ai/generate-pitch', async (req: Request, res: Response) => {
+protectedApi.post('/ai/generate-pitch', async (req: Request, res: Response) => {
   const { leadId, valueProposition } = req.body;
   const lead = storage.getLead(leadId);
   if (!lead) {
@@ -637,7 +805,7 @@ app.post('/api/ai/generate-pitch', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/ai/meeting-brief', async (req: Request, res: Response) => {
+protectedApi.post('/ai/meeting-brief', async (req: Request, res: Response) => {
   const { leadId } = req.body;
   const lead = storage.getLead(leadId);
   if (!lead) {
@@ -656,7 +824,7 @@ app.post('/api/ai/meeting-brief', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/ai/market-report', async (req: Request, res: Response) => {
+protectedApi.post('/ai/market-report', async (req: Request, res: Response) => {
   const { country, industry } = req.body;
   const allLeads = storage.getLeads();
   const filtered = allLeads.filter(
@@ -674,15 +842,14 @@ app.post('/api/ai/market-report', async (req: Request, res: Response) => {
   }
 });
 
-// 10. Connectors Health & Credentials
-app.get('/api/connectors', (req: Request, res: Response) => {
+// Connectors Health & Credentials
+protectedApi.get('/connectors', (req: Request, res: Response) => {
   res.json(storage.getConnectors());
 });
 
-// 11. Settings
-app.get('/api/settings', (req: Request, res: Response) => {
+// Settings
+protectedApi.get('/settings', (req: Request, res: Response) => {
   const current = storage.getSettings();
-  // Mask API key for security
   const masked = {
     ...current,
     companiesHouseApiKey: current.companiesHouseApiKey
@@ -692,13 +859,13 @@ app.get('/api/settings', (req: Request, res: Response) => {
   res.json(masked);
 });
 
-app.put('/api/settings', (req: Request, res: Response) => {
+protectedApi.put('/settings', (req: Request, res: Response) => {
   const updated = storage.updateSettings(req.body);
   res.json(updated);
 });
 
-// 12. Data Export
-app.get('/api/export/csv', (req: Request, res: Response) => {
+// Data Export
+protectedApi.get('/export/csv', (req: Request, res: Response) => {
   const leads = storage.getLeads();
   const headers = [
     'ID',
@@ -742,12 +909,15 @@ app.get('/api/export/csv', (req: Request, res: Response) => {
   res.send(csv);
 });
 
-app.get('/api/export/json', (req: Request, res: Response) => {
+protectedApi.get('/export/json', (req: Request, res: Response) => {
   const leads = storage.getLeads();
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', `attachment; filename=leads_export_${Date.now()}.json`);
   res.send(JSON.stringify(leads, null, 2));
 });
+
+// Mount protected API router
+app.use('/api', protectedApi);
 
 // --- VITE DEV / PRODUCTION STATIC SERVING ---
 async function startServer() {

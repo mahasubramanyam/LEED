@@ -1,0 +1,10 @@
+{
+  "id": "owner-1794343413266",
+  "email": "owner@leedplatform.local",
+  "fullName": "Test Lead Owner",
+  "passwordHash": "$2b$12$4O9NZmoi8MOFjOWJULVjB.dLtT/ONo9.Yv7Oya8az4eJ3YgMaVuEy",
+  "role": "owner",
+  "isActive": true,
+  "createdAt": "2026-11-10T20:43:33.266Z",
+  "updatedAt": "2026-11-10T20:43:33.266Z"
+}
