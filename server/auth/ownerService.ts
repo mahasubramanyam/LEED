@@ -57,6 +57,7 @@ export class OwnerService {
 
   /**
    * Checks whether the single owner account has been initialized.
+   * When PostgreSQL is configured and connected, owner_users in PostgreSQL is the exclusive source of truth.
    */
   public async isOwnerInitialized(): Promise<boolean> {
     const pool = dbManager.getPool();
@@ -66,18 +67,25 @@ export class OwnerService {
         client = await pool.connect();
         const res = await client.query(`SELECT COUNT(*) as count FROM owner_users WHERE is_active = TRUE`);
         const count = parseInt(res.rows[0]?.count || '0', 10);
-        if (count > 0) return true;
+        return count > 0;
       } catch (err) {
-        console.warn('[OwnerService] Failed to check owner count in DB, checking fallback:', err);
+        console.warn('[OwnerService] Failed to check owner count in DB:', err);
+        throw err;
       } finally {
         if (client) client.release();
       }
     }
 
-    if (!this.fallbackOwner) {
-      this.loadFallbackOwner();
+    // Preserve JSON fallback ONLY for genuinely isolated development environments where PostgreSQL is not configured
+    if (!dbManager.isConfigured()) {
+      if (!this.fallbackOwner) {
+        this.loadFallbackOwner();
+      }
+      return this.fallbackOwner !== null && this.fallbackOwner.isActive;
     }
-    return this.fallbackOwner !== null && this.fallbackOwner.isActive;
+
+    // If PostgreSQL is configured but not connected, do not fall back to old test JSON
+    return false;
   }
 
   /**
@@ -156,13 +164,27 @@ export class OwnerService {
           if (err?.code === '23505') {
             throw new Error('Initial setup already completed. LEED is a private single-owner platform.');
           }
-          console.warn('[OwnerService] Failed to insert owner to PostgreSQL, saving fallback:', err);
+          throw err;
         } finally {
           if (client) client.release();
         }
+
+        return {
+          id: ownerId,
+          email: normalizedEmail,
+          fullName: fullName.trim(),
+          role: 'owner',
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        };
       }
 
-      // Always keep fallback synchronized
+      if (dbManager.isConfigured()) {
+        throw new Error('Database is configured but not connected. Cannot initialize owner.');
+      }
+
+      // Preserve fallback ONLY for genuinely isolated development environments where PostgreSQL is not configured
       this.saveFallbackOwner(stored);
 
       return {
@@ -204,7 +226,7 @@ export class OwnerService {
     const normalizedEmail = email.trim().toLowerCase();
     let targetOwner: StoredOwner | null = null;
 
-    // Try finding in PostgreSQL first
+    // When PostgreSQL is connected, authenticate exclusively against owner_users
     const pool = dbManager.getPool();
     if (pool && dbManager.isDbConnected()) {
       let client: pg.PoolClient | null = null;
@@ -220,18 +242,20 @@ export class OwnerService {
           targetOwner = res.rows[0];
         }
       } catch (err) {
-        console.warn('[OwnerService] Postgres query failed, checking fallback:', err);
+        console.warn('[OwnerService] Postgres query failed during login:', err);
+        throw err;
       } finally {
         if (client) client.release();
       }
-    }
-
-    // Try fallback store
-    if (!targetOwner) {
+      // Never fall back to owner_auth.json when PostgreSQL is connected
+    } else if (!dbManager.isConfigured()) {
+      // Check fallback store ONLY when database is not configured
       this.loadFallbackOwner();
       if (this.fallbackOwner && this.fallbackOwner.email === normalizedEmail) {
         targetOwner = this.fallbackOwner;
       }
+    } else {
+      throw new Error('Database connection unavailable. Login disabled.');
     }
 
     if (!targetOwner) {
@@ -301,59 +325,74 @@ export class OwnerService {
         const res = await client.query(
           `SELECT id, email, password_hash as "passwordHash", full_name as "fullName",
                   role, is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"
-           FROM owner_users WHERE id = $1`,
+           FROM owner_users WHERE id = $1 AND is_active = TRUE`,
           [ownerId]
         );
         if (res.rows.length > 0) ownerRecord = res.rows[0];
       } catch (err) {
         console.warn('[OwnerService] Postgres check failed in changePassword:', err);
+        throw err;
       } finally {
         if (client) client.release();
       }
-    }
 
-    if (!ownerRecord && this.fallbackOwner && this.fallbackOwner.id === ownerId) {
-      ownerRecord = this.fallbackOwner;
-    }
+      if (!ownerRecord) {
+        throw new Error('Owner record not found');
+      }
 
-    if (!ownerRecord) {
-      throw new Error('Owner record not found');
-    }
+      const match = await verifyPassword(currentPass, ownerRecord.passwordHash);
+      if (!match) {
+        throw new Error('Current password is incorrect');
+      }
 
-    const match = await verifyPassword(currentPass, ownerRecord.passwordHash);
-    if (!match) {
-      throw new Error('Current password is incorrect');
-    }
+      const newHash = await hashPassword(newPass);
+      const now = new Date();
 
-    const newHash = await hashPassword(newPass);
-    const now = new Date();
-
-    if (pool && dbManager.isDbConnected()) {
-      let client: pg.PoolClient | null = null;
+      let updateClient: pg.PoolClient | null = null;
       try {
-        client = await pool.connect();
-        await client.query(`UPDATE owner_users SET password_hash = $1, updated_at = $2 WHERE id = $3`, [
+        updateClient = await pool.connect();
+        await updateClient.query(`UPDATE owner_users SET password_hash = $1, updated_at = $2 WHERE id = $3`, [
           newHash,
           now,
           ownerId,
         ]);
-      } catch (err) {
-        console.warn('[OwnerService] Failed to update password in Postgres:', err);
       } finally {
-        if (client) client.release();
+        if (updateClient) updateClient.release();
       }
+
+      // Revoke all previous sessions for security
+      await revokeAllOwnerSessions(ownerId);
+      return true;
     }
 
-    if (this.fallbackOwner && this.fallbackOwner.id === ownerId) {
-      this.fallbackOwner.passwordHash = newHash;
-      this.fallbackOwner.updatedAt = now.toISOString();
-      this.saveFallbackOwner(this.fallbackOwner);
+    if (!dbManager.isConfigured()) {
+      if (!ownerRecord && this.fallbackOwner && this.fallbackOwner.id === ownerId) {
+        ownerRecord = this.fallbackOwner;
+      }
+
+      if (!ownerRecord) {
+        throw new Error('Owner record not found');
+      }
+
+      const match = await verifyPassword(currentPass, ownerRecord.passwordHash);
+      if (!match) {
+        throw new Error('Current password is incorrect');
+      }
+
+      const newHash = await hashPassword(newPass);
+      const now = new Date();
+
+      if (this.fallbackOwner) {
+        this.fallbackOwner.passwordHash = newHash;
+        this.fallbackOwner.updatedAt = now.toISOString();
+        this.saveFallbackOwner(this.fallbackOwner);
+      }
+
+      await revokeAllOwnerSessions(ownerId);
+      return true;
     }
 
-    // Revoke all previous sessions for security
-    await revokeAllOwnerSessions(ownerId);
-
-    return true;
+    throw new Error('Database connection unavailable.');
   }
 
   /**
@@ -379,26 +418,30 @@ export class OwnerService {
             updatedAt: new Date(row.updatedAt),
           };
         }
+        return null;
       } catch (err) {
         console.warn('[OwnerService] Postgres user lookup failed:', err);
+        return null;
       } finally {
         if (client) client.release();
       }
     }
 
-    if (!this.fallbackOwner) {
-      this.loadFallbackOwner();
-    }
-    if (this.fallbackOwner && this.fallbackOwner.id === session.ownerId && this.fallbackOwner.isActive) {
-      return {
-        id: this.fallbackOwner.id,
-        email: this.fallbackOwner.email,
-        fullName: this.fallbackOwner.fullName,
-        role: 'owner',
-        isActive: this.fallbackOwner.isActive,
-        createdAt: new Date(this.fallbackOwner.createdAt),
-        updatedAt: new Date(this.fallbackOwner.updatedAt),
-      };
+    if (!dbManager.isConfigured()) {
+      if (!this.fallbackOwner) {
+        this.loadFallbackOwner();
+      }
+      if (this.fallbackOwner && this.fallbackOwner.id === session.ownerId && this.fallbackOwner.isActive) {
+        return {
+          id: this.fallbackOwner.id,
+          email: this.fallbackOwner.email,
+          fullName: this.fallbackOwner.fullName,
+          role: 'owner',
+          isActive: this.fallbackOwner.isActive,
+          createdAt: new Date(this.fallbackOwner.createdAt),
+          updatedAt: new Date(this.fallbackOwner.updatedAt),
+        };
+      }
     }
 
     return null;

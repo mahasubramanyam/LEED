@@ -60,20 +60,25 @@ export async function createSession(
 
   const pool = dbManager.getPool();
   if (pool && dbManager.isDbConnected()) {
+    let client: pg.PoolClient | null = null;
     try {
-      await pool.query(
+      client = await pool.connect();
+      await client.query(
         `INSERT INTO owner_sessions (id, token_hash, owner_id, ip_address, user_agent, expires_at, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [sessionId, tokenHash, ownerId, ipAddress || null, userAgent || null, expiresAt, createdAt]
       );
-    } catch (err) {
-      console.warn('[Session] Failed to persist session to Postgres, storing in-memory fallback:', err);
-      inMemorySessions.set(tokenHash, sessionObj);
+      return { rawToken, session: sessionObj };
+    } finally {
+      if (client) client.release();
     }
-  } else {
-    inMemorySessions.set(tokenHash, sessionObj);
   }
 
+  if (dbManager.isConfigured()) {
+    throw new Error('Database is configured but not connected. Cannot create session.');
+  }
+
+  inMemorySessions.set(tokenHash, sessionObj);
   return { rawToken, session: sessionObj };
 }
 
@@ -85,8 +90,10 @@ export async function validateSession(rawToken: string): Promise<OwnerSession | 
 
   const pool = dbManager.getPool();
   if (pool && dbManager.isDbConnected()) {
+    let client: pg.PoolClient | null = null;
     try {
-      const res = await pool.query(
+      client = await pool.connect();
+      const res = await client.query(
         `SELECT id, token_hash as "tokenHash", owner_id as "ownerId", ip_address as "ipAddress",
                 user_agent as "userAgent", expires_at as "expiresAt", revoked_at as "revokedAt", created_at as "createdAt"
          FROM owner_sessions
@@ -96,19 +103,25 @@ export async function validateSession(rawToken: string): Promise<OwnerSession | 
       if (res.rows.length > 0) {
         return res.rows[0];
       }
+      return null;
     } catch (err) {
-      console.warn('[Session] Failed to query Postgres for session, checking fallback:', err);
+      console.warn('[Session] Failed to query Postgres for session:', err);
+      return null;
+    } finally {
+      if (client) client.release();
     }
   }
 
-  // Check fallback store
-  const memSession = inMemorySessions.get(tokenHash);
-  if (memSession) {
-    if (memSession.revokedAt || memSession.expiresAt <= now) {
-      inMemorySessions.delete(tokenHash);
-      return null;
+  if (!dbManager.isConfigured()) {
+    // Check fallback store ONLY when database is not configured
+    const memSession = inMemorySessions.get(tokenHash);
+    if (memSession) {
+      if (memSession.revokedAt || memSession.expiresAt <= now) {
+        inMemorySessions.delete(tokenHash);
+        return null;
+      }
+      return memSession;
     }
-    return memSession;
   }
 
   return null;
@@ -123,23 +136,31 @@ export async function revokeSession(rawToken: string): Promise<boolean> {
 
   const pool = dbManager.getPool();
   if (pool && dbManager.isDbConnected()) {
+    let client: pg.PoolClient | null = null;
     try {
-      const res = await pool.query(
+      client = await pool.connect();
+      const res = await client.query(
         `UPDATE owner_sessions SET revoked_at = $1 WHERE token_hash = $2 AND revoked_at IS NULL`,
         [now, tokenHash]
       );
       if (res.rowCount && res.rowCount > 0) {
         revoked = true;
       }
+      return revoked;
     } catch (err) {
       console.warn('[Session] Failed to revoke session in Postgres:', err);
+      return false;
+    } finally {
+      if (client) client.release();
     }
   }
 
-  const mem = inMemorySessions.get(tokenHash);
-  if (mem) {
-    mem.revokedAt = now;
-    revoked = true;
+  if (!dbManager.isConfigured()) {
+    const mem = inMemorySessions.get(tokenHash);
+    if (mem) {
+      mem.revokedAt = now;
+      revoked = true;
+    }
   }
 
   return revoked;
@@ -151,21 +172,29 @@ export async function revokeAllOwnerSessions(ownerId: string): Promise<number> {
 
   const pool = dbManager.getPool();
   if (pool && dbManager.isDbConnected()) {
+    let client: pg.PoolClient | null = null;
     try {
-      const res = await pool.query(
+      client = await pool.connect();
+      const res = await client.query(
         `UPDATE owner_sessions SET revoked_at = $1 WHERE owner_id = $2 AND revoked_at IS NULL`,
         [now, ownerId]
       );
       count += res.rowCount || 0;
+      return count;
     } catch (err) {
       console.warn('[Session] Failed to revoke all sessions in Postgres:', err);
+      return 0;
+    } finally {
+      if (client) client.release();
     }
   }
 
-  for (const [key, sess] of inMemorySessions.entries()) {
-    if (sess.ownerId === ownerId && !sess.revokedAt) {
-      sess.revokedAt = now;
-      count++;
+  if (!dbManager.isConfigured()) {
+    for (const [key, sess] of inMemorySessions.entries()) {
+      if (sess.ownerId === ownerId && !sess.revokedAt) {
+        sess.revokedAt = now;
+        count++;
+      }
     }
   }
 
