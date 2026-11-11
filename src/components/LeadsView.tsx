@@ -1,22 +1,17 @@
 import React, { useState } from 'react';
 import {
   Search,
-  Filter,
-  ArrowUpDown,
   Building2,
-  MapPin,
   ExternalLink,
   Mail,
   Phone,
-  ShieldCheck,
-  Tag,
   Trash2,
-  MoreVertical,
-  Check,
-  ChevronDown,
   Layers,
+  ChevronDown,
+  Download,
+  Filter
 } from 'lucide-react';
-import { CanonicalLead, PipelineStage } from '../types.js';
+import { CanonicalLead, PipelineStage } from '../types.ts';
 
 interface LeadsViewProps {
   leads: CanonicalLead[];
@@ -28,7 +23,7 @@ interface LeadsViewProps {
   onBatchDelete: (leadIds: string[]) => void;
 }
 
-export const LeadsView: React.FC<LeadsViewProps> = ({
+export function LeadsView({
   leads,
   stages,
   onSelectLead,
@@ -36,7 +31,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   onDeleteLead,
   onBatchUpdateStage,
   onBatchDelete,
-}) => {
+}: LeadsViewProps) {
   const [search, setSearch] = useState('');
   const [selectedCountry, setSelectedCountry] = useState('ALL');
   const [selectedStage, setSelectedStage] = useState('ALL');
@@ -96,15 +91,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Search and Filters Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
           <div className="md:col-span-5 relative">
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter leads by company, CRN/ABN/OrgNr, city, domain, or tag..."
-              className="w-full bg-slate-950 border border-slate-800 text-white text-xs rounded px-3 py-2 pl-9 focus:outline-none focus:border-indigo-500"
+              placeholder="Filter leads by company, CRN/ABN/OrgNr, city, domain..."
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-2 pl-9 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             />
             <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
           </div>
@@ -113,7 +108,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             <select
               value={selectedCountry}
               onChange={(e) => setSelectedCountry(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 text-white text-xs rounded px-3 py-2 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             >
               <option value="ALL">All Countries ({leads.length})</option>
               {countries.map((c) => (
@@ -129,7 +124,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             <select
               value={selectedStage}
               onChange={(e) => setSelectedStage(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 text-white text-xs rounded px-3 py-2 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             >
               <option value="ALL">All Pipeline Stages</option>
               {stages.map((s) => (
@@ -142,15 +137,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         </div>
 
         {/* Attribute filter toggles */}
-        <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-slate-800 text-xs">
-          <div className="flex items-center gap-3 text-slate-300">
+        <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+          <div className="flex items-center gap-4 text-slate-600 dark:text-slate-300">
             <span className="text-slate-400 font-medium">Require:</span>
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
                 type="checkbox"
                 checked={onlyWithWebsite}
                 onChange={(e) => setOnlyWithWebsite(e.target.checked)}
-                className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-0"
+                className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-0"
               />
               <span>Has Website</span>
             </label>
@@ -159,7 +154,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 type="checkbox"
                 checked={onlyWithEmail}
                 onChange={(e) => setOnlyWithEmail(e.target.checked)}
-                className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-0"
+                className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-0"
               />
               <span>Has Email</span>
             </label>
@@ -168,28 +163,28 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 type="checkbox"
                 checked={onlyWithPhone}
                 onChange={(e) => setOnlyWithPhone(e.target.checked)}
-                className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-0"
+                className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-0"
               />
               <span>Has Phone</span>
             </label>
           </div>
 
-          <div className="text-slate-400">
-            Showing <span className="font-semibold text-white">{filtered.length}</span> of {leads.length} leads
+          <div className="text-slate-500 dark:text-slate-400 text-xs">
+            Showing <strong className="text-slate-900 dark:text-white font-mono">{filtered.length}</strong> of {leads.length} leads
           </div>
         </div>
       </div>
 
       {/* Batch Actions Bar (when items selected) */}
       {selectedIds.size > 0 && (
-        <div className="bg-indigo-950/80 border border-indigo-700/60 rounded-lg px-4 py-2 flex items-center justify-between text-xs text-indigo-200">
+        <div className="bg-blue-50 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-blue-900 dark:text-blue-200 shadow-xs">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-white">{selectedIds.size}</span>
+            <span className="font-bold font-mono text-blue-700 dark:text-blue-300">{selectedIds.size}</span>
             <span>leads selected</span>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-slate-400">Move to:</span>
+            <span className="text-slate-500 dark:text-slate-400">Move to:</span>
             <select
               onChange={(e) => {
                 if (e.target.value) {
@@ -198,7 +193,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 }
               }}
               defaultValue=""
-              className="bg-slate-900 border border-indigo-600 text-white text-xs rounded px-2 py-1"
+              className="bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1"
             >
               <option value="" disabled>
                 Select stage...
@@ -217,7 +212,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   setSelectedIds(new Set());
                 }
               }}
-              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded font-medium transition"
+              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition"
             >
               Delete Selected
             </button>
@@ -226,34 +221,35 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
       )}
 
       {/* Leads Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+            <thead className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
-                <th className="p-3 w-10">
+                <th className="p-3.5 w-10">
                   <input
                     type="checkbox"
                     checked={selectedIds.size > 0 && selectedIds.size === filtered.length}
                     onChange={(e) => handleSelectAll(e.target.checked)}
-                    className="rounded border-slate-700 bg-slate-900 text-indigo-600"
+                    className="rounded border-slate-300 dark:border-slate-700 text-blue-600"
                   />
                 </th>
-                <th className="p-3">Company & Registration</th>
-                <th className="p-3">Confidence & Signals</th>
-                <th className="p-3">Location</th>
-                <th className="p-3">Industry / Sector</th>
-                <th className="p-3">Channels</th>
-                <th className="p-3">Pipeline Stage</th>
-                <th className="p-3 text-right">Value</th>
-                <th className="p-3 text-right">Actions</th>
+                <th className="p-3.5">Company & Registration</th>
+                <th className="p-3.5">Confidence</th>
+                <th className="p-3.5">Location</th>
+                <th className="p-3.5">Industry</th>
+                <th className="p-3.5">Channels</th>
+                <th className="p-3.5">Stage</th>
+                <th className="p-3.5 text-right">Value</th>
+                <th className="p-3.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-400">
-                    No leads found matching your criteria. Try adjusting filters or discovering new leads in the Discovery Engine.
+                  <td colSpan={9} className="p-12 text-center text-slate-400">
+                    <Building2 className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                    No leads found matching your filters.
                   </td>
                 </tr>
               ) : (
@@ -264,57 +260,52 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   return (
                     <tr
                       key={lead.id}
-                      className={`hover:bg-slate-800/40 transition cursor-pointer ${
-                        isSelected ? 'bg-indigo-950/20' : ''
+                      className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition cursor-pointer ${
+                        isSelected ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
                       }`}
                       onClick={() => onSelectLead(lead)}
                     >
-                      <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="p-3.5" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => handleToggleSelect(lead.id)}
-                          className="rounded border-slate-700 bg-slate-900 text-indigo-600"
+                          className="rounded border-slate-300 dark:border-slate-700 text-blue-600"
                         />
                       </td>
 
                       {/* Company Name & Reg */}
-                      <td className="p-3">
-                        <div className="font-semibold text-white group-hover:text-indigo-400 flex items-center gap-1.5">
+                      <td className="p-3.5">
+                        <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
                           <span>{lead.companyName}</span>
                           {lead.registrationNumber && (
-                            <span className="text-[10px] text-cyan-400 bg-cyan-950/40 px-1 py-0.2 rounded border border-cyan-800/40">
+                            <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 px-1.5 py-0.2 rounded font-mono border border-blue-200 dark:border-blue-900">
                               {lead.registrationType || 'REG'}
                             </span>
                           )}
                         </div>
                         {lead.registrationNumber && (
-                          <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                          <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 mt-0.5">
                             {lead.registrationNumber}
                           </div>
                         )}
                       </td>
 
-                      {/* Confidence Score & Signals */}
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
-                              lead.confidenceScore >= 80
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                            }`}
-                          >
-                            {lead.confidenceScore}%
-                          </span>
-                          <span className="text-[11px] text-slate-400 truncate max-w-[140px]">
-                            {lead.confidenceSignals[0] || 'Unverified'}
-                          </span>
-                        </div>
+                      {/* Confidence Score */}
+                      <td className="p-3.5">
+                        <span
+                          className={`font-mono text-xs font-bold ${
+                            lead.confidenceScore >= 80
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-amber-600 dark:text-amber-400'
+                          }`}
+                        >
+                          {lead.confidenceScore}%
+                        </span>
                       </td>
 
                       {/* Location */}
-                      <td className="p-3 text-slate-300">
+                      <td className="p-3.5 text-slate-600 dark:text-slate-300">
                         <div className="flex items-center gap-1 truncate">
                           <span>
                             {lead.address?.countryCode === 'NO'
@@ -330,33 +321,33 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       </td>
 
                       {/* Industry */}
-                      <td className="p-3 text-slate-400">
-                        <div className="truncate max-w-[140px]" title={lead.industry}>
+                      <td className="p-3.5 text-slate-500 dark:text-slate-400">
+                        <div className="truncate max-w-[130px]" title={lead.industry}>
                           {lead.industry}
                         </div>
                       </td>
 
                       {/* Contact Channels */}
-                      <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="p-3.5" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
                           {lead.website ? (
                             <a
                               href={lead.website}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-indigo-400 hover:text-indigo-300 p-1 hover:bg-slate-800 rounded"
+                              className="text-blue-600 dark:text-blue-400 hover:underline p-1"
                               title={lead.website}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
                             </a>
                           ) : (
-                            <span className="text-slate-600 p-1">—</span>
+                            <span className="text-slate-300 dark:text-slate-600 p-1">—</span>
                           )}
 
                           {lead.email ? (
                             <a
                               href={`mailto:${lead.email}`}
-                              className="text-cyan-400 hover:text-cyan-300 p-1 hover:bg-slate-800 rounded"
+                              className="text-slate-600 dark:text-slate-300 hover:text-blue-600 p-1"
                               title={lead.email}
                             >
                               <Mail className="w-3.5 h-3.5" />
@@ -366,7 +357,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                           {lead.phone ? (
                             <a
                               href={`tel:${lead.phone}`}
-                              className="text-emerald-400 hover:text-emerald-300 p-1 hover:bg-slate-800 rounded"
+                              className="text-emerald-600 dark:text-emerald-400 p-1"
                               title={lead.phone}
                             >
                               <Phone className="w-3.5 h-3.5" />
@@ -376,13 +367,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       </td>
 
                       {/* Pipeline Stage Select */}
-                      <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="p-3.5" onClick={(e) => e.stopPropagation()}>
                         <select
                           value={lead.pipelineStageId}
                           onChange={(e) => onUpdateLeadStage(lead.id, e.target.value)}
-                          className="bg-slate-950 border border-slate-800 text-slate-300 text-[11px] rounded px-2 py-1 focus:outline-none focus:border-indigo-500 font-medium"
+                          className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-[11px] rounded px-2 py-1 focus:outline-hidden font-medium"
                           style={{
-                            borderLeftColor: stage?.color || '#64748b',
+                            borderLeftColor: stage?.color || '#3b82f6',
                             borderLeftWidth: '3px',
                           }}
                         >
@@ -395,18 +386,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       </td>
 
                       {/* Opportunity Value */}
-                      <td className="p-3 text-right font-medium text-slate-300">
+                      <td className="p-3.5 text-right font-medium font-mono text-slate-900 dark:text-white">
                         {lead.opportunityValue
-                          ? `${lead.currency === 'GBP' ? '£' : lead.currency === 'EUR' ? '€' : lead.currency === 'NOK' ? 'kr ' : '$'}${lead.opportunityValue.toLocaleString()}`
+                          ? `$${lead.opportunityValue.toLocaleString()}`
                           : '—'}
                       </td>
 
                       {/* Actions */}
-                      <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <td className="p-3.5 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => onSelectLead(lead)}
-                            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition"
+                            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                             title="Inspect Lead Details"
                           >
                             <Layers className="w-3.5 h-3.5" />
@@ -417,7 +408,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                                 onDeleteLead(lead.id);
                               }
                             }}
-                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition"
+                            className="p-1.5 text-slate-400 hover:text-red-600 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                             title="Delete Lead"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -434,4 +425,4 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
       </div>
     </div>
   );
-};
+}

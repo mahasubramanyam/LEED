@@ -27,9 +27,16 @@ import {
   clearSessionCookie,
   SESSION_COOKIE_NAME,
 } from './server/auth/middleware.js';
+import {
+  listOwnerSessions,
+  revokeSessionById,
+  revokeOtherOwnerSessions,
+  hashSessionToken,
+} from './server/auth/session.js';
 import { ownerService } from './server/auth/ownerService.js';
 import { generateCsrfToken, setCsrfCookie, validateCsrf } from './server/auth/csrf.js';
 import { normalizeClientIp } from './server/auth/rateLimit.js';
+
 
 dotenv.config();
 
@@ -210,11 +217,53 @@ protectedApi.use(requireOwnerAuth);
 protectedApi.use(validateCsrf);
 
 // Current Authenticated Owner Profile
+
 protectedApi.get('/auth/me', (req: Request, res: Response) => {
   res.json({
     owner: req.owner,
     authenticated: true,
   });
+});
+
+// Update Owner Profile (Display Name)
+protectedApi.put('/owner/profile', async (req: Request, res: Response) => {
+  const { fullName } = req.body;
+  if (!req.owner) {
+    res.status(401).json({ error: 'Unauthenticated' });
+    return;
+  }
+  if (!fullName || typeof fullName !== 'string' || !fullName.trim()) {
+    res.status(400).json({ error: 'Valid full name is required' });
+    return;
+  }
+
+  try {
+    const pool = dbManager.getPool();
+    if (pool && dbManager.isDbConnected()) {
+      await pool.query(
+        'UPDATE owner_users SET full_name = $1, updated_at = NOW() WHERE id = $2',
+        [fullName.trim(), req.owner.id]
+      );
+      await postgresStorage.recordAuditEvent(
+        'OWNER_PROFILE_UPDATED',
+        req.owner.email,
+        'owner_user',
+        req.owner.id,
+        { fullName: fullName.trim() },
+        normalizeClientIp(req)
+      );
+    }
+    res.json({
+      success: true,
+      owner: {
+        ...req.owner,
+        fullName: fullName.trim(),
+      },
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
 });
 
 // Change Owner Password
@@ -230,6 +279,14 @@ protectedApi.post('/auth/change-password', async (req: Request, res: Response) =
     await ownerService.changePassword(req.owner.id, currentPassword, newPassword, req.sessionToken);
     const freshLogin = await ownerService.login(req.owner.email, newPassword, ip, req.headers['user-agent']);
     setSessionCookie(res, freshLogin.rawToken);
+    await postgresStorage.recordAuditEvent(
+      'PASSWORD_CHANGED',
+      req.owner.email,
+      'owner_user',
+      req.owner.id,
+      { ip },
+      ip
+    );
     res.json({
       success: true,
       token: freshLogin.rawToken,
@@ -240,6 +297,135 @@ protectedApi.post('/auth/change-password', async (req: Request, res: Response) =
     res.status(400).json({ error: msg });
   }
 });
+
+// List Active Sessions for Owner
+protectedApi.get('/owner/sessions', async (req: Request, res: Response) => {
+  if (!req.owner) {
+    res.status(401).json({ error: 'Unauthenticated' });
+    return;
+  }
+
+  try {
+    const currentHash = req.sessionToken ? hashSessionToken(req.sessionToken) : '';
+    const sessions = await listOwnerSessions(req.owner.id);
+    const formatted = sessions.map((s) => ({
+      id: s.id,
+      ipAddress: s.ipAddress || '127.0.0.1',
+      userAgent: s.userAgent || 'Unknown browser',
+      createdAt: s.createdAt.toISOString(),
+      expiresAt: s.expiresAt.toISOString(),
+      revokedAt: s.revokedAt?.toISOString(),
+      isActive: s.isActive,
+      isCurrent: s.tokenHash === currentHash,
+    }));
+    res.json({ sessions: formatted });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Revoke a specific session
+protectedApi.delete('/owner/sessions/:id', async (req: Request, res: Response) => {
+  if (!req.owner) {
+    res.status(401).json({ error: 'Unauthenticated' });
+    return;
+  }
+
+  const sessionId = req.params.id;
+  try {
+    const success = await revokeSessionById(sessionId, req.owner.id);
+    if (!success) {
+      res.status(404).json({ error: 'Session not found or already revoked' });
+      return;
+    }
+    await postgresStorage.recordAuditEvent(
+      'SESSION_REVOKED',
+      req.owner.email,
+      'owner_session',
+      sessionId,
+      { revokedSessionId: sessionId },
+      normalizeClientIp(req)
+    );
+    res.json({ success: true, message: 'Session successfully revoked' });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Revoke all other sessions except current
+protectedApi.post('/owner/sessions/revoke-others', async (req: Request, res: Response) => {
+  if (!req.owner || !req.sessionToken) {
+    res.status(401).json({ error: 'Unauthenticated' });
+    return;
+  }
+
+  try {
+    const currentHash = hashSessionToken(req.sessionToken);
+    const revokedCount = await revokeOtherOwnerSessions(req.owner.id, currentHash);
+    await postgresStorage.recordAuditEvent(
+      'OTHER_SESSIONS_REVOKED',
+      req.owner.email,
+      'owner_user',
+      req.owner.id,
+      { count: revokedCount },
+      normalizeClientIp(req)
+    );
+    res.json({ success: true, revokedCount });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Audit History Log
+protectedApi.get('/owner/audit-log', async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const events = await postgresStorage.getAuditEvents(limit);
+    res.json({ events });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Live Database Diagnostics & Telemetry
+protectedApi.get('/owner/diagnostics', async (req: Request, res: Response) => {
+  try {
+    const isPg = dbManager.isDbConnected();
+    const dbHealth = dbManager.getHealthStatus();
+
+    let details: any = null;
+    if (isPg) {
+      details = await postgresStorage.getDetailedDiagnostics();
+    }
+
+    res.json({
+      connected: isPg,
+      engine: isPg ? 'PostgreSQL 18.6 (Neon Serverless)' : 'json_store',
+      health: dbHealth,
+      diagnostics: details,
+      security: {
+        singleOwnerEnforced: true,
+        singletonConstraint: 'uq_owner_singleton on owner_users',
+        cookieSecurity: {
+          sameSite: 'none',
+          secure: true,
+          partitioned: true,
+          httpOnly: true,
+        },
+        bearerDualAuth: true,
+        csrfProtection: true,
+      },
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
 
 // Database Diagnostics & Health
 protectedApi.get('/database/status', async (req: Request, res: Response) => {

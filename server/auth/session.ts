@@ -200,3 +200,139 @@ export async function revokeAllOwnerSessions(ownerId: string): Promise<number> {
 
   return count;
 }
+
+export async function listOwnerSessions(ownerId: string): Promise<Array<{
+  id: string;
+  tokenHash: string;
+  ipAddress?: string;
+  userAgent?: string;
+  expiresAt: Date;
+  revokedAt?: Date;
+  createdAt: Date;
+  isActive: boolean;
+}>> {
+  const now = new Date();
+  const pool = dbManager.getPool();
+
+  if (pool && dbManager.isDbConnected()) {
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const res = await client.query(
+        `SELECT id, token_hash as "tokenHash", ip_address as "ipAddress",
+                user_agent as "userAgent", expires_at as "expiresAt", revoked_at as "revokedAt", created_at as "createdAt"
+         FROM owner_sessions
+         WHERE owner_id = $1
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [ownerId]
+      );
+      return res.rows.map((row: any) => ({
+        id: row.id,
+        tokenHash: row.tokenHash,
+        ipAddress: row.ipAddress || undefined,
+        userAgent: row.userAgent || undefined,
+        expiresAt: new Date(row.expiresAt),
+        revokedAt: row.revokedAt ? new Date(row.revokedAt) : undefined,
+        createdAt: new Date(row.createdAt),
+        isActive: !row.revokedAt && new Date(row.expiresAt) > now,
+      }));
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  if (!dbManager.isConfigured()) {
+    const list: Array<{
+      id: string;
+      tokenHash: string;
+      ipAddress?: string;
+      userAgent?: string;
+      expiresAt: Date;
+      revokedAt?: Date;
+      createdAt: Date;
+      isActive: boolean;
+    }> = [];
+    for (const [hash, sess] of inMemorySessions.entries()) {
+      if (sess.ownerId === ownerId) {
+        list.push({
+          id: sess.id,
+          tokenHash: hash,
+          ipAddress: sess.ipAddress,
+          userAgent: sess.userAgent,
+          expiresAt: sess.expiresAt,
+          revokedAt: sess.revokedAt,
+          createdAt: sess.createdAt,
+          isActive: !sess.revokedAt && sess.expiresAt > now,
+        });
+      }
+    }
+    return list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  return [];
+}
+
+export async function revokeSessionById(sessionId: string, ownerId: string): Promise<boolean> {
+  const now = new Date();
+  const pool = dbManager.getPool();
+
+  if (pool && dbManager.isDbConnected()) {
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const res = await client.query(
+        `UPDATE owner_sessions SET revoked_at = $1 WHERE id = $2 AND owner_id = $3 AND revoked_at IS NULL`,
+        [now, sessionId, ownerId]
+      );
+      return (res.rowCount || 0) > 0;
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  if (!dbManager.isConfigured()) {
+    for (const sess of inMemorySessions.values()) {
+      if (sess.id === sessionId && sess.ownerId === ownerId && !sess.revokedAt) {
+        sess.revokedAt = now;
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+export async function revokeOtherOwnerSessions(ownerId: string, currentTokenHash: string): Promise<number> {
+  const now = new Date();
+  let count = 0;
+  const pool = dbManager.getPool();
+
+  if (pool && dbManager.isDbConnected()) {
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const res = await client.query(
+        `UPDATE owner_sessions
+         SET revoked_at = $1
+         WHERE owner_id = $2 AND token_hash != $3 AND revoked_at IS NULL`,
+        [now, ownerId, currentTokenHash]
+      );
+      return res.rowCount || 0;
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  if (!dbManager.isConfigured()) {
+    for (const [hash, sess] of inMemorySessions.entries()) {
+      if (sess.ownerId === ownerId && hash !== currentTokenHash && !sess.revokedAt) {
+        sess.revokedAt = now;
+        count++;
+      }
+    }
+  }
+
+  return count;
+}
+

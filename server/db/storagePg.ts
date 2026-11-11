@@ -1134,6 +1134,113 @@ export class PostgresStorage {
     }
   }
 
+  public async getAuditEvents(limit = 100): Promise<Array<{
+
+    id: string;
+    action: string;
+    actorEmail: string;
+    entityType?: string;
+    entityId?: string;
+    details?: any;
+    ipAddress?: string;
+    createdAt: string;
+  }>> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const { rows } = await client.query(
+        `SELECT id, action, actor_email as "actorEmail", entity_type as "entityType",
+                entity_id as "entityId", details, ip_address as "ipAddress", created_at as "createdAt"
+         FROM audit_events
+         ORDER BY created_at DESC
+         LIMIT $1`,
+        [limit]
+      );
+      return rows.map((r: any) => ({
+        ...r,
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+      }));
+    } catch (err) {
+      console.warn('[PostgresStorage] Could not fetch audit events:', err);
+      return [];
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async getDetailedDiagnostics(): Promise<{
+    version: string;
+    currentDatabase: string;
+    currentUser: string;
+    databaseSize: string;
+    pool: { total: number; idle: number; waiting: number };
+    tables: Array<{ name: string; count: number }>;
+    totalRows: number;
+  }> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const [verRes, dbRes, userRes, sizeRes] = await Promise.all([
+        client.query('SELECT version()'),
+        client.query('SELECT current_database()'),
+        client.query('SELECT current_user'),
+        client.query('SELECT pg_size_pretty(pg_database_size(current_database())) as size'),
+      ]);
+
+      const tableNames = [
+        'owner_users',
+        'owner_sessions',
+        'pipeline_stages',
+        'leads',
+        'lead_sources',
+        'lead_identifiers',
+        'lead_notes',
+        'activities',
+        'tasks',
+        'campaigns',
+        'campaign_messages',
+        'dedupe_candidates',
+        'merge_history',
+        'connector_credentials',
+        'connector_runs',
+        'audit_events',
+        'app_settings',
+      ];
+
+      const counts = await Promise.all(
+        tableNames.map(async (table) => {
+          try {
+            const r = await client!.query(`SELECT COUNT(*) FROM "${table}"`);
+            return { name: table, count: parseInt(r.rows[0].count, 10) };
+          } catch {
+            return { name: table, count: 0 };
+          }
+        })
+      );
+
+      const totalRows = counts.reduce((acc, curr) => acc + curr.count, 0);
+
+      return {
+        version: verRes.rows[0]?.version || 'Unknown',
+        currentDatabase: dbRes.rows[0]?.current_database || 'Unknown',
+        currentUser: userRes.rows[0]?.current_user || 'Unknown',
+        databaseSize: sizeRes.rows[0]?.size || 'Unknown',
+        pool: {
+          total: pool.totalCount,
+          idle: pool.idleCount,
+          waiting: pool.waitingCount,
+        },
+        tables: counts,
+        totalRows,
+      };
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+
   // ==========================================
   // ROW MAPPER
   // ==========================================

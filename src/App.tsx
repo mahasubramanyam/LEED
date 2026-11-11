@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Header } from './components/Header.tsx';
+import { Sidebar } from './components/Sidebar.tsx';
+import { TopBar } from './components/TopBar.tsx';
+import { DashboardView } from './components/DashboardView.tsx';
 import { DiscoveryEngine } from './components/DiscoveryEngine.tsx';
 import { LeadsView } from './components/LeadsView.tsx';
 import { PipelineBoard } from './components/PipelineBoard.tsx';
@@ -8,6 +10,7 @@ import { OutreachCampaigns } from './components/OutreachCampaigns.tsx';
 import { DedupeHub } from './components/DedupeHub.tsx';
 import { ConnectorsView } from './components/ConnectorsView.tsx';
 import { TasksView } from './components/TasksView.tsx';
+import { OwnerControlCentre } from './components/OwnerControlCentre.tsx';
 import { LeadDetailModal } from './components/LeadDetailModal.tsx';
 import { ImportModal } from './components/ImportModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
@@ -28,7 +31,7 @@ interface OwnerProfile {
 }
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<string>('discovery');
+  const [currentTab, setCurrentTab] = useState<string>('dashboard');
   const [leads, setLeads] = useState<CanonicalLead[]>([]);
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [tasks, setTasks] = useState<LeadTask[]>([]);
@@ -46,18 +49,51 @@ export default function App() {
     suppressionDomains: [],
   });
 
+  // Theme Management (Light mode default)
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('leed_theme') as 'light' | 'dark') || 'light';
+  });
+
+  // Sidebar collapse state
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('leed_sidebar_collapsed') === 'true';
+  });
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   // Owner Authentication & Storage Engine State
   const [owner, setOwner] = useState<OwnerProfile | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<'setup' | 'login' | 'change_password'>('login');
-  const [storageEngine, setStorageEngine] = useState<'postgresql' | 'json_store'>('json_store');
+  const [storageEngine, setStorageEngine] = useState<'postgresql' | 'json_store'>('postgresql');
   const [isDbConnected, setIsDbConnected] = useState<boolean>(false);
 
   const [selectedLeadForDetail, setSelectedLeadForDetail] = useState<CanonicalLead | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Sync theme with HTML class and localStorage
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('leed_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('leed_sidebar_collapsed', String(next));
+      return next;
+    });
+  };
 
   // Helper to extract CSRF token cookie
   const getCsrfToken = (): string => {
@@ -113,7 +149,7 @@ export default function App() {
       const setupData = await setupRes.json();
       const statusData = await statusRes.json();
 
-      setStorageEngine(statusData.storageEngine || 'json_store');
+      setStorageEngine(statusData.storageEngine || 'postgresql');
       setIsDbConnected(!!statusData.databaseConnected);
       setAiAvailable(statusData.aiEngineAvailable ?? true);
 
@@ -442,121 +478,194 @@ export default function App() {
     window.open('/api/export/csv', '_blank');
   };
 
-  const totalPipelineValue = leads.reduce((sum, l) => sum + (l.opportunityValue || 0), 0);
-  const activeConnectorsCount = connectors.filter((c) => c.status === 'healthy').length;
+  // Badges calculation
+  const pendingTasksCount = tasks.filter((t) => !t.completed).length;
+  const pendingApprovalsCount = campaigns.reduce(
+    (acc, c) => acc + (c.messages?.filter((m) => m.status === 'pending_approval').length || 0),
+    0
+  );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
-      {/* Header with Navigation and Live Metrics */}
-      <Header
-        currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
-        totalLeads={leads.length}
-        totalPipelineValue={totalPipelineValue}
-        activeConnectorsCount={activeConnectorsCount}
-        onOpenImport={() => setIsImportModalOpen(true)}
-        onExportCsv={handleExportCsv}
-        aiAvailable={aiAvailable}
-        owner={owner}
-        storageEngine={storageEngine}
-        isDbConnected={isDbConnected}
-        onOpenPasswordChange={() => {
-          setAuthModalMode('change_password');
-          setAuthModalOpen(true);
-        }}
-        onLogout={handleLogout}
-      />
+    <div className={`min-h-screen flex ${theme === 'dark' ? 'dark' : ''} bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans selection:bg-blue-600 selection:text-white`}>
+      {/* Desktop & Collapsible Sidebar */}
+      <div className="hidden lg:flex shrink-0">
+        <Sidebar
+          currentTab={currentTab}
+          onSelectTab={setCurrentTab}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={toggleSidebar}
+          leadsCount={leads.length}
+          pendingTasksCount={pendingTasksCount}
+          pendingApprovalsCount={pendingApprovalsCount}
+          ownerName={owner?.fullName || 'Maha'}
+          ownerEmail={owner?.email || 'mahasubramanyam0@gmail.com'}
+          isDbConnected={isDbConnected}
+          onLogout={handleLogout}
+        />
+      </div>
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {isLoading ? (
-          <div className="flex flex-col items-center justify-center min-h-[400px] space-y-3">
-            <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs text-slate-400 font-medium">
-              Verifying owner authentication & pipeline state...
-            </span>
+      {/* Mobile Sidebar Backdrop */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden flex">
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div className="relative z-50 flex w-72">
+            <Sidebar
+              currentTab={currentTab}
+              onSelectTab={(tab) => {
+                setCurrentTab(tab);
+                setMobileMenuOpen(false);
+              }}
+              collapsed={false}
+              onToggleCollapsed={() => setMobileMenuOpen(false)}
+              leadsCount={leads.length}
+              pendingTasksCount={pendingTasksCount}
+              pendingApprovalsCount={pendingApprovalsCount}
+              ownerName={owner?.fullName || 'Maha'}
+              ownerEmail={owner?.email || 'mahasubramanyam0@gmail.com'}
+              isDbConnected={isDbConnected}
+              onLogout={handleLogout}
+            />
           </div>
-        ) : (
-          <>
-            {currentTab === 'discovery' && (
-              <DiscoveryEngine
-                onAddLeadToCrm={handleAddLeadToCrm}
-                onBatchAddLeads={handleBatchAddLeads}
-                onInspectLead={(lead) => setSelectedLeadForDetail(lead)}
-              />
-            )}
+        </div>
+      )}
 
-            {currentTab === 'leads' && (
-              <LeadsView
-                leads={leads}
-                stages={stages}
-                onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
-                onUpdateLeadStage={handleMoveStage}
-                onDeleteLead={handleDeleteLead}
-                onBatchUpdateStage={handleBatchUpdateStage}
-                onBatchDelete={handleBatchDelete}
-              />
-            )}
+      {/* Main Application Shell */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+        {/* Top Navigation Bar */}
+        <TopBar
+          currentTab={currentTab}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          isDbConnected={isDbConnected}
+          onOpenImport={() => setIsImportModalOpen(true)}
+          onExportCsv={handleExportCsv}
+          onOpenPasswordChange={() => {
+            setAuthModalMode('change_password');
+            setAuthModalOpen(true);
+          }}
+          onMobileMenuToggle={() => setMobileMenuOpen(true)}
+          leads={leads}
+          onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+        />
 
-            {currentTab === 'pipeline' && (
-              <PipelineBoard
-                stages={stages}
-                leads={leads}
-                onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
-                onMoveLeadStage={handleMoveStage}
-              />
-            )}
+        {/* Dynamic Main Workspace */}
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center min-h-[400px] space-y-3">
+              <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-slate-500 font-medium">
+                Verifying owner authentication & Neon PostgreSQL state...
+              </span>
+            </div>
+          ) : (
+            <>
+              {currentTab === 'dashboard' && (
+                <DashboardView
+                  leads={leads}
+                  stages={stages}
+                  tasks={tasks}
+                  connectors={connectors}
+                  onNavigateTab={setCurrentTab}
+                  onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  onOpenImport={() => setIsImportModalOpen(true)}
+                />
+              )}
 
-            {currentTab === 'ai-agent' && (
-              <AiSalesAgent
-                leads={leads}
-                selectedLeadId={selectedLeadForDetail?.id}
-                onLeadSelect={(id) => {
-                  const found = leads.find((l) => l.id === id);
-                  if (found) setSelectedLeadForDetail(found);
-                }}
-                onAddActivityToLead={handleAddActivity}
-              />
-            )}
+              {currentTab === 'discovery' && (
+                <DiscoveryEngine
+                  onAddLeadToCrm={handleAddLeadToCrm}
+                  onBatchAddLeads={handleBatchAddLeads}
+                  onInspectLead={(lead) => setSelectedLeadForDetail(lead)}
+                />
+              )}
 
-            {currentTab === 'outreach' && (
-              <OutreachCampaigns
-                campaigns={campaigns}
-                leads={leads}
-                onRefreshCampaigns={fetchAllData}
-                onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
-              />
-            )}
+              {currentTab === 'leads' && (
+                <LeadsView
+                  leads={leads}
+                  stages={stages}
+                  onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  onUpdateLeadStage={handleMoveStage}
+                  onDeleteLead={handleDeleteLead}
+                  onBatchUpdateStage={handleBatchUpdateStage}
+                  onBatchDelete={handleBatchDelete}
+                />
+              )}
 
-            {currentTab === 'dedupe' && (
-              <DedupeHub
-                onRefreshLeads={fetchAllData}
-                onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
-              />
-            )}
+              {currentTab === 'pipeline' && (
+                <PipelineBoard
+                  stages={stages}
+                  leads={leads}
+                  onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  onMoveLeadStage={handleMoveStage}
+                />
+              )}
 
-            {currentTab === 'connectors' && (
-              <ConnectorsView
-                connectors={connectors}
-                settings={settings}
-                onUpdateSettings={handleUpdateSettings}
-                onRefreshConnectors={fetchAllData}
-              />
-            )}
+              {currentTab === 'ai-agent' && (
+                <AiSalesAgent
+                  leads={leads}
+                  selectedLeadId={selectedLeadForDetail?.id}
+                  onLeadSelect={(id) => {
+                    const found = leads.find((l) => l.id === id);
+                    if (found) setSelectedLeadForDetail(found);
+                  }}
+                  onAddActivityToLead={handleAddActivity}
+                />
+              )}
 
-            {currentTab === 'tasks' && (
-              <TasksView
-                tasks={tasks}
-                leads={leads}
-                onToggleTask={handleToggleTask}
-                onCreateTask={handleCreateTask}
-                onDeleteTask={handleDeleteTask}
-                onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
-              />
-            )}
-          </>
-        )}
-      </main>
+              {currentTab === 'outreach' && (
+                <OutreachCampaigns
+                  campaigns={campaigns}
+                  leads={leads}
+                  onRefreshCampaigns={fetchAllData}
+                  onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                />
+              )}
+
+              {currentTab === 'dedupe' && (
+                <DedupeHub
+                  onRefreshLeads={fetchAllData}
+                  onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                />
+              )}
+
+              {currentTab === 'connectors' && (
+                <ConnectorsView
+                  connectors={connectors}
+                  settings={settings}
+                  onUpdateSettings={handleUpdateSettings}
+                  onRefreshConnectors={fetchAllData}
+                />
+              )}
+
+              {currentTab === 'tasks' && (
+                <TasksView
+                  tasks={tasks}
+                  leads={leads}
+                  onToggleTask={handleToggleTask}
+                  onCreateTask={handleCreateTask}
+                  onDeleteTask={handleDeleteTask}
+                  onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                />
+              )}
+
+              {currentTab === 'control-centre' && (
+                <OwnerControlCentre
+                  owner={owner}
+                  settings={settings}
+                  connectors={connectors}
+                  onUpdateSettings={handleUpdateSettings}
+                  onRefreshConnectors={fetchAllData}
+                  onLogout={handleLogout}
+                  apiFetch={apiFetch}
+                />
+              )}
+            </>
+          )}
+        </main>
+      </div>
 
       {/* Deep Inspection Drawer / Modal */}
       <LeadDetailModal
