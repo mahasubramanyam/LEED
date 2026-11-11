@@ -16,24 +16,25 @@ declare global {
 }
 
 export function setSessionCookie(res: Response, token: string): void {
-  const isProduction = process.env.NODE_ENV === 'production';
+  // Cross-origin iframe deployment in Google AI Studio requires SameSite=None, Secure, and Partitioned (CHIPS)
   res.cookie(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: 'lax',
+    secure: true,
+    sameSite: 'none',
+    partitioned: true,
     path: '/',
     maxAge: SESSION_DURATION_MS,
-  });
+  } as any);
 }
 
 export function clearSessionCookie(res: Response): void {
-  const isProduction = process.env.NODE_ENV === 'production';
   res.clearCookie(SESSION_COOKIE_NAME, {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: 'lax',
+    secure: true,
+    sameSite: 'none',
+    partitioned: true,
     path: '/',
-  });
+  } as any);
 }
 
 export async function requireOwnerAuth(req: Request, res: Response, next: NextFunction): Promise<void> {

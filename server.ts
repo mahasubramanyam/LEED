@@ -152,11 +152,12 @@ app.post('/api/auth/setup', async (req: Request, res: Response) => {
     const owner = await ownerService.setupOwner(fullName, email, password, setupSecret);
     const loginResult = await ownerService.login(email, password, ip, req.headers['user-agent']);
 
-    // Set secure HTTP-only session cookie (Do not return raw token in JSON response)
+    // Set secure partitioned cookie and return token for resilient iframe authorization
     setSessionCookie(res, loginResult.rawToken);
 
     res.status(201).json({
       success: true,
+      token: loginResult.rawToken,
       owner: loginResult.owner,
       message: 'Owner initialized successfully. Platform locked to single-owner mode.',
     });
@@ -166,19 +167,20 @@ app.post('/api/auth/setup', async (req: Request, res: Response) => {
   }
 });
 
-// Owner Login (Rate-limited, sets HTTP-only cookie, no raw token in JSON)
+// Owner Login (Sets partitioned cookie and returns token for resilient iframe authorization)
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
   const ip = normalizeClientIp(req);
 
   try {
     const result = await ownerService.login(email, password, ip, req.headers['user-agent']);
-    // Set secure HTTP-only cookie
+    // Set secure partitioned cookie
     setSessionCookie(res, result.rawToken);
 
-    // Return owner identity WITHOUT raw token in JSON
+    // Return owner identity with session token
     res.json({
       success: true,
+      token: result.rawToken,
       owner: result.owner,
     });
   } catch (err: unknown) {
@@ -228,7 +230,11 @@ protectedApi.post('/auth/change-password', async (req: Request, res: Response) =
     await ownerService.changePassword(req.owner.id, currentPassword, newPassword, req.sessionToken);
     const freshLogin = await ownerService.login(req.owner.email, newPassword, ip, req.headers['user-agent']);
     setSessionCookie(res, freshLogin.rawToken);
-    res.json({ success: true, message: 'Password changed successfully. Prior sessions revoked.' });
+    res.json({
+      success: true,
+      token: freshLogin.rawToken,
+      message: 'Password changed successfully. Prior sessions revoked.',
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(400).json({ error: msg });

@@ -9,14 +9,14 @@ export function generateCsrfToken(): string {
 }
 
 export function setCsrfCookie(res: Response, token: string): void {
-  const isProduction = process.env.NODE_ENV === 'production';
   res.cookie(CSRF_COOKIE_NAME, token, {
     httpOnly: false, // Frontend reads this to attach x-leed-csrf-token header
-    secure: isProduction,
-    sameSite: 'lax',
+    secure: true,
+    sameSite: 'none',
+    partitioned: true,
     path: '/',
     maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
+  } as any);
 }
 
 /**

@@ -5,7 +5,7 @@ interface AuthModalProps {
   isOpen: boolean;
   mode: 'setup' | 'login' | 'change_password';
   onClose?: () => void;
-  onSuccess: (owner: any) => void;
+  onSuccess: (owner: any, token?: string) => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode, onClose, onSuccess }) => {
@@ -56,7 +56,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Owner setup failed');
 
-        onSuccess(data.owner);
+        onSuccess(data.owner, data.token);
       } else if (mode === 'login') {
         if (!email.trim() || !password) {
           throw new Error('Email and password are required');
@@ -72,7 +72,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Authentication failed');
 
-        onSuccess(data.owner);
+        onSuccess(data.owner, data.token);
       } else if (mode === 'change_password') {
         if (!currentPassword || !password) {
           throw new Error('Current and new password are required');
@@ -84,22 +84,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           throw new Error('New passwords do not match');
         }
 
-        // Retrieve CSRF token from cookie
+        // Retrieve CSRF token from cookie or header
         const csrfMatch = document.cookie.match(/leed_csrf=([^;]+)/);
         const csrfToken = csrfMatch ? csrfMatch[1] : '';
+        const storedToken = localStorage.getItem('leed_session_token');
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'x-leed-csrf-token': csrfToken,
+        };
+        if (storedToken) {
+          headers['Authorization'] = `Bearer ${storedToken}`;
+        }
 
         const res = await fetch('/api/auth/change-password', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-leed-csrf-token': csrfToken,
-          },
+          headers,
           credentials: 'include',
           body: JSON.stringify({ currentPassword, newPassword: password }),
         });
 
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to change password');
+
+        if (data.token) {
+          localStorage.setItem('leed_session_token', data.token);
+        }
 
         setSuccessMsg('Password updated successfully. All other active sessions have been revoked.');
         setPassword('');

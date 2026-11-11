@@ -70,6 +70,12 @@ export default function App() {
     const headers = new Headers(options.headers || {});
     const method = (options.method || 'GET').toUpperCase();
 
+    // Attach Bearer token if present for cross-origin iframe resilience
+    const token = localStorage.getItem('leed_session_token');
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
       const csrf = getCsrfToken();
       if (csrf && !headers.has('x-leed-csrf-token')) {
@@ -84,6 +90,7 @@ export default function App() {
     });
 
     if (response.status === 401 && !url.includes('/api/auth/')) {
+      localStorage.removeItem('leed_session_token');
       setIsAuthenticated(false);
       setAuthModalMode('login');
       setAuthModalOpen(true);
@@ -118,8 +125,17 @@ export default function App() {
         return;
       }
 
-      // 2. Check current session
-      const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+      // 2. Check current session with both Cookie and Bearer authorization
+      const storedToken = localStorage.getItem('leed_session_token');
+      const authHeaders: Record<string, string> = {};
+      if (storedToken) {
+        authHeaders['Authorization'] = `Bearer ${storedToken}`;
+      }
+
+      const meRes = await fetch('/api/auth/me', {
+        headers: authHeaders,
+        credentials: 'include',
+      });
       if (meRes.ok) {
         const meData = await meRes.json();
         setOwner(meData.owner);
@@ -127,6 +143,7 @@ export default function App() {
         setAuthModalOpen(false);
         await fetchAllData();
       } else {
+        localStorage.removeItem('leed_session_token');
         setIsAuthenticated(false);
         setAuthModalMode('login');
         setAuthModalOpen(true);
@@ -192,7 +209,10 @@ export default function App() {
   }, [leads]);
 
   // Auth Handlers
-  const handleAuthSuccess = (ownerProfile: OwnerProfile) => {
+  const handleAuthSuccess = (ownerProfile: OwnerProfile, token?: string) => {
+    if (token) {
+      localStorage.setItem('leed_session_token', token);
+    }
     setOwner(ownerProfile);
     setIsAuthenticated(true);
     setAuthModalOpen(false);
@@ -205,6 +225,7 @@ export default function App() {
     } catch (err) {
       console.error('Logout error:', err);
     }
+    localStorage.removeItem('leed_session_token');
     setOwner(null);
     setIsAuthenticated(false);
     setAuthModalMode('login');
