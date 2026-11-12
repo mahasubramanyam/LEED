@@ -50,9 +50,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     const webIdx = headers.findIndex((h) => h.includes('web') || h.includes('url') || h.includes('domain'));
     const emailIdx = headers.findIndex((h) => h.includes('email') || h.includes('mail'));
     const phoneIdx = headers.findIndex((h) => h.includes('phone') || h.includes('tel'));
+    const streetIdx = headers.findIndex((h) => h.includes('street') || h.includes('address'));
     const cityIdx = headers.findIndex((h) => h.includes('city') || h.includes('town'));
-    const countryIdx = headers.findIndex((h) => h.includes('country') || h.includes('nation'));
+    const regionIdx = headers.findIndex((h) => h.includes('region') || h.includes('state') || h.includes('province') || h.includes('county'));
+    const postalIdx = headers.findIndex((h) => h.includes('postal') || h.includes('postcode') || h.includes('zip'));
+    const countryIdx = headers.findIndex((h) => h.includes('country') || h.includes('nation') || h.includes('iso'));
     const indIdx = headers.findIndex((h) => h.includes('industry') || h.includes('sector') || h.includes('category'));
+    const vatIdx = headers.findIndex((h) => h.includes('vat') || h.includes('tax'));
+    const leiIdx = headers.findIndex((h) => h.includes('lei'));
 
     const existingDomains = new Set(existingLeads.map((l) => l.domain?.toLowerCase()).filter(Boolean));
     const existingRegs = new Set(existingLeads.map((l) => l.registrationNumber?.replace(/\s+/g, '')).filter(Boolean));
@@ -81,9 +86,35 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       const reg = regIdx >= 0 ? parts[regIdx] : undefined;
       const email = emailIdx >= 0 ? parts[emailIdx] : undefined;
       const phone = phoneIdx >= 0 ? parts[phoneIdx] : undefined;
+      const street = streetIdx >= 0 ? parts[streetIdx] : undefined;
       const city = cityIdx >= 0 ? parts[cityIdx] : 'Unknown';
-      const country = countryIdx >= 0 ? parts[countryIdx] : 'International';
+      const region = regionIdx >= 0 ? parts[regionIdx] : undefined;
+      const postalCode = postalIdx >= 0 ? parts[postalIdx] : undefined;
+      const rawCountry = countryIdx >= 0 ? parts[countryIdx] : 'International';
       const industry = indIdx >= 0 ? parts[indIdx] : 'Commercial Services';
+      const vatVal = vatIdx >= 0 ? parts[vatIdx] : undefined;
+      const leiVal = leiIdx >= 0 ? parts[leiIdx] : undefined;
+
+      // Deduce country code
+      let countryCode = 'US';
+      const clower = rawCountry.toLowerCase();
+      if (rawCountry.length === 2) {
+        countryCode = rawCountry.toUpperCase();
+      } else if (clower.includes('norway') || clower.includes('norge')) {
+        countryCode = 'NO';
+      } else if (clower.includes('kingdom') || clower.includes('britain') || clower.includes('england') || clower.includes('scotland')) {
+        countryCode = 'GB';
+      } else if (clower.includes('australia')) {
+        countryCode = 'AU';
+      } else if (clower.includes('germany') || clower.includes('deutschland')) {
+        countryCode = 'DE';
+      } else if (clower.includes('france')) {
+        countryCode = 'FR';
+      } else if (clower.includes('canada')) {
+        countryCode = 'CA';
+      } else if (clower.includes('india')) {
+        countryCode = 'IN';
+      }
 
       // Check duplicate
       const isDomainDupe = domain && existingDomains.has(domain.toLowerCase());
@@ -107,19 +138,61 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         signals.push('Registration Identifier Included');
       }
 
+      const identifiers: any[] = [];
+      if (domain) {
+        identifiers.push({ type: 'DOMAIN', value: domain, verified: false, source: 'csv_import', status: 'user_provided' });
+      }
+      if (reg) {
+        identifiers.push({
+          type: countryCode === 'NO' ? 'ORGNR' : countryCode === 'GB' ? 'CRN' : countryCode === 'AU' ? 'ABN' : 'REG',
+          value: reg,
+          normalizedValue: reg.replace(/[^A-Za-z0-9]/g, '').toUpperCase(),
+          countryCode,
+          source: 'csv_import',
+          status: 'user_provided',
+          verified: false,
+        });
+      }
+      if (vatVal) {
+        identifiers.push({
+          type: 'VAT',
+          value: vatVal,
+          normalizedValue: vatVal.replace(/[^A-Za-z0-9]/g, '').toUpperCase(),
+          countryCode,
+          source: 'csv_import',
+          status: 'user_provided',
+          verified: false,
+        });
+      }
+      if (leiVal) {
+        identifiers.push({
+          type: 'LEI',
+          value: leiVal,
+          normalizedValue: leiVal.replace(/[^A-Za-z0-9]/g, '').toUpperCase(),
+          countryCode,
+          source: 'csv_import',
+          status: 'user_provided',
+          verified: false,
+        });
+      }
+
       result.push({
         id: `import-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
         companyName,
         registrationNumber: reg,
+        registrationType: countryCode === 'NO' ? 'ORGNR' : countryCode === 'GB' ? 'CRN' : countryCode === 'AU' ? 'ABN' : 'REG',
         website,
         domain,
         email,
         phone,
         address: {
+          street,
           city,
-          country,
-          countryCode: country.toLowerCase().includes('norway') ? 'NO' : country.toLowerCase().includes('kingdom') ? 'GB' : country.toLowerCase().includes('australia') ? 'AU' : 'US',
-          formattedAddress: `${city}, ${country}`,
+          region,
+          postalCode,
+          country: rawCountry,
+          countryCode,
+          formattedAddress: [street, city, region, postalCode, rawCountry].filter(Boolean).join(', '),
         },
         industry,
         category: 'Imported Prospect',
@@ -132,11 +205,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             attribution: 'User supplied data file',
           },
         ],
-        identifiers: domain ? [{ type: 'DOMAIN', value: domain, verified: false }] : [],
+        identifiers,
         status: 'new',
         pipelineStageId: 'stage-discovered',
-        currency: 'USD',
-        tags: ['CSV Import', country].filter(Boolean),
+        currency: countryCode === 'GB' ? 'GBP' : countryCode === 'NO' ? 'NOK' : countryCode === 'AU' ? 'AUD' : countryCode === 'DE' || countryCode === 'FR' ? 'EUR' : 'USD',
+        tags: ['CSV Import', countryCode].filter(Boolean),
         notes: [],
         activities: [
           {
@@ -159,9 +232,16 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const handleFinishImport = async () => {
     try {
+      const token = localStorage.getItem('leed_session_token');
+      const csrfMatch = document.cookie.match(/leed_csrf=([^;]+)/);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (csrfMatch) headers['x-leed-csrf-token'] = csrfMatch[1];
+
       const res = await fetch('/api/leads/batch-import', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
+        credentials: 'include',
         body: JSON.stringify({ leads: previewLeads }),
       });
       if (res.ok) {

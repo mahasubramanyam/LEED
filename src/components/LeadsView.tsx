@@ -9,14 +9,30 @@ import {
   Layers,
   ChevronDown,
   Download,
-  Filter
+  Filter,
+  Plus,
+  X,
 } from 'lucide-react';
 import { CanonicalLead, PipelineStage } from '../types.ts';
+import { GeoSelector } from './GeoSelector.tsx';
+import { apiFetch } from '../utils/apiFetch.ts';
+
+function getCountryFlag(code?: string): string {
+  if (!code || code.length !== 2) return '🌐';
+  try {
+    const c = code.toUpperCase();
+    const codePoints = [...c].map((char) => 127397 + char.charCodeAt(0));
+    return String.fromCodePoint(...codePoints);
+  } catch {
+    return '🌐';
+  }
+}
 
 interface LeadsViewProps {
   leads: CanonicalLead[];
   stages: PipelineStage[];
   onSelectLead: (lead: CanonicalLead) => void;
+  onCreateLead?: (lead: CanonicalLead) => void;
   onUpdateLeadStage: (leadId: string, stageId: string) => void;
   onDeleteLead: (leadId: string) => void;
   onBatchUpdateStage: (leadIds: string[], stageId: string) => void;
@@ -27,6 +43,7 @@ export function LeadsView({
   leads,
   stages,
   onSelectLead,
+  onCreateLead,
   onUpdateLeadStage,
   onDeleteLead,
   onBatchUpdateStage,
@@ -34,11 +51,185 @@ export function LeadsView({
 }: LeadsViewProps) {
   const [search, setSearch] = useState('');
   const [selectedCountry, setSelectedCountry] = useState('ALL');
+  const [selectedRegion, setSelectedRegion] = useState('');
+  const [selectedCity, setSelectedCity] = useState('');
   const [selectedStage, setSelectedStage] = useState('ALL');
+  const [selectedIdentifierType, setSelectedIdentifierType] = useState('ALL');
   const [onlyWithWebsite, setOnlyWithWebsite] = useState(false);
   const [onlyWithEmail, setOnlyWithEmail] = useState(false);
   const [onlyWithPhone, setOnlyWithPhone] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // New Lead Modal State
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newIndustry, setNewIndustry] = useState('Commercial Services');
+  const [newWebsite, setNewWebsite] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newIdentType, setNewIdentType] = useState('CRN');
+  const [newIdentValue, setNewIdentValue] = useState('');
+  const [newGeo, setNewGeo] = useState({
+    countryCode: 'GB',
+    countryName: 'United Kingdom',
+    region: '',
+    city: '',
+    postalCode: '',
+    street: '',
+    currency: 'GBP',
+  });
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  const handleCreateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim() || !onCreateLead) return;
+    setIsCreating(true);
+    setCreateError(null);
+
+    try {
+      let formattedAddress = [newGeo.street, newGeo.city, newGeo.region, newGeo.postalCode, newGeo.countryName]
+        .filter(Boolean)
+        .join(', ');
+      const addrRes = await apiFetch('/api/geo/format-address', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          street: newGeo.street,
+          city: newGeo.city,
+          region: newGeo.region,
+          postalCode: newGeo.postalCode,
+          country: newGeo.countryName,
+          countryCode: newGeo.countryCode,
+        }),
+      });
+      if (addrRes.ok) {
+        const addrData = await addrRes.json();
+        if (addrData.postalValidation && !addrData.postalValidation.valid && newGeo.postalCode.trim()) {
+          setCreateError(addrData.postalValidation.message || 'Invalid postal code format');
+          setIsCreating(false);
+          return;
+        }
+        if (addrData.formattedAddress) formattedAddress = addrData.formattedAddress;
+      }
+
+      let finalPhone = newPhone.trim() || undefined;
+      if (finalPhone) {
+        const pRes = await apiFetch('/api/geo/normalize-phone', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: finalPhone, countryCode: newGeo.countryCode }),
+        });
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          if (pData.e164) finalPhone = pData.e164;
+        }
+      }
+
+      let domain: string | undefined;
+      if (newWebsite.trim()) {
+        try {
+          const u = new URL(newWebsite.trim().startsWith('http') ? newWebsite.trim() : `https://${newWebsite.trim()}`);
+          domain = u.hostname.replace(/^www\./, '');
+        } catch {
+          domain = undefined;
+        }
+      }
+
+      const identifiers: any[] = [];
+      if (domain) {
+        identifiers.push({ type: 'DOMAIN', value: domain, normalizedValue: domain, source: 'owner_manual_entry', status: 'user_provided', verified: false });
+      }
+      if (newIdentValue.trim()) {
+        const valRes = await apiFetch('/api/identifiers/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: newIdentType, value: newIdentValue.trim(), countryCode: newGeo.countryCode }),
+        });
+        let status = 'user_provided';
+        let normalizedValue = newIdentValue.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        let issuingAuthority: string | undefined;
+        if (valRes.ok) {
+          const valData = await valRes.json();
+          status = valData.status || (valData.valid ? 'syntax_validated' : 'user_provided');
+          normalizedValue = valData.normalizedValue || normalizedValue;
+          issuingAuthority = valData.issuingAuthority;
+        }
+        identifiers.push({
+          type: newIdentType,
+          value: newIdentValue.trim(),
+          normalizedValue,
+          countryCode: newGeo.countryCode,
+          issuingAuthority,
+          source: 'owner_manual_entry',
+          status,
+          verified: false,
+        });
+      }
+
+      const now = new Date().toISOString();
+      const lead: CanonicalLead = {
+        id: `manual-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        companyName: newName.trim(),
+        registrationNumber: newIdentValue.trim() || undefined,
+        registrationType: newIdentValue.trim() ? newIdentType : undefined,
+        website: newWebsite.trim() || undefined,
+        domain,
+        email: newEmail.trim() || undefined,
+        phone: finalPhone,
+        address: {
+          street: newGeo.street.trim() || undefined,
+          city: newGeo.city.trim() || undefined,
+          region: newGeo.region.trim() || undefined,
+          postalCode: newGeo.postalCode.trim() || undefined,
+          country: newGeo.countryName,
+          countryCode: newGeo.countryCode,
+          formattedAddress,
+        },
+        industry: newIndustry.trim() || 'Commercial Services',
+        category: 'Manual Entry',
+        confidenceScore: newIdentValue.trim() ? 70 : 55,
+        confidenceSignals: ['Owner Manual Entry'],
+        sources: [
+          {
+            sourceName: 'Owner Manual Entry',
+            retrievedAt: now,
+            attribution: 'Manually created by owner',
+          },
+        ],
+        identifiers,
+        status: 'new',
+        pipelineStageId: stages[0]?.id || 'stage-discovered',
+        currency: newGeo.currency || 'USD',
+        tags: [newGeo.countryCode],
+        notes: [],
+        activities: [
+          {
+            id: `act-${Date.now()}`,
+            type: 'enrichment',
+            title: 'Lead Created Manually',
+            date: now,
+            actor: 'Owner',
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      onCreateLead(lead);
+      setIsCreateOpen(false);
+      setNewName('');
+      setNewWebsite('');
+      setNewEmail('');
+      setNewPhone('');
+      setNewIdentValue('');
+    } catch (err) {
+      console.error(err);
+      setCreateError('Failed to create lead');
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   // Filter leads
   const filtered = leads.filter((lead) => {
@@ -46,10 +237,12 @@ export function LeadsView({
       const q = search.toLowerCase();
       const matchName = lead.companyName.toLowerCase().includes(q);
       const matchCity = (lead.address?.city || '').toLowerCase().includes(q);
+      const matchRegion = (lead.address?.region || '').toLowerCase().includes(q);
       const matchReg = (lead.registrationNumber || '').toLowerCase().includes(q);
       const matchDomain = (lead.domain || '').toLowerCase().includes(q);
       const matchTag = lead.tags.some((t) => t.toLowerCase().includes(q));
-      if (!matchName && !matchCity && !matchReg && !matchDomain && !matchTag) {
+      const matchIdVal = lead.identifiers?.some((id) => (id.value || '').toLowerCase().includes(q) || (id.normalizedValue || '').toLowerCase().includes(q));
+      if (!matchName && !matchCity && !matchRegion && !matchReg && !matchDomain && !matchTag && !matchIdVal) {
         return false;
       }
     }
@@ -58,8 +251,27 @@ export function LeadsView({
       return false;
     }
 
+    if (selectedRegion.trim()) {
+      const r = selectedRegion.toLowerCase();
+      if (!(lead.address?.region || '').toLowerCase().includes(r)) return false;
+    }
+
+    if (selectedCity.trim()) {
+      const c = selectedCity.toLowerCase();
+      if (!(lead.address?.city || '').toLowerCase().includes(c)) return false;
+    }
+
     if (selectedStage !== 'ALL' && lead.pipelineStageId !== selectedStage) {
       return false;
+    }
+
+    if (selectedIdentifierType !== 'ALL') {
+      const hasType =
+        lead.identifiers?.some((id) => id.type.toUpperCase() === selectedIdentifierType.toUpperCase()) ||
+        (selectedIdentifierType === 'CRN' && lead.registrationType === 'CRN') ||
+        (selectedIdentifierType === 'ORGNR' && lead.registrationType === 'ORGNR') ||
+        (selectedIdentifierType === 'ABN' && lead.registrationType === 'ABN');
+      if (!hasType) return false;
     }
 
     if (onlyWithWebsite && !lead.website) return false;
@@ -93,52 +305,84 @@ export function LeadsView({
       {/* Search and Filters Header */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-          <div className="md:col-span-5 relative">
+          <div className="md:col-span-4 relative">
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter leads by company, CRN/ABN/OrgNr, city, domain..."
+              placeholder="Filter leads by company, CRN/ABN/OrgNr, domain..."
               className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-2 pl-9 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             />
             <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
           </div>
 
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
             <select
               value={selectedCountry}
               onChange={(e) => setSelectedCountry(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-2 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             >
               <option value="ALL">All Countries ({leads.length})</option>
               {countries.map((c) => (
                 <option key={c} value={c}>
-                  {c === 'NO' ? '🇳🇴 Norway' : c === 'GB' ? '🇬🇧 United Kingdom' : c === 'AU' ? '🇦🇺 Australia' : c} (
-                  {leads.filter((l) => l.address?.countryCode === c).length})
+                  {getCountryFlag(c)} {c} ({leads.filter((l) => l.address?.countryCode === c).length})
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="md:col-span-4">
+          <div className="md:col-span-2">
+            <input
+              type="text"
+              value={selectedRegion}
+              onChange={(e) => setSelectedRegion(e.target.value)}
+              placeholder="Region / State..."
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-2 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <input
+              type="text"
+              value={selectedCity}
+              onChange={(e) => setSelectedCity(e.target.value)}
+              placeholder="City..."
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-2 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <select
+              value={selectedIdentifierType}
+              onChange={(e) => setSelectedIdentifierType(e.target.value)}
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-2 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="ALL">All ID Types</option>
+              <option value="CRN">CRN (UK)</option>
+              <option value="ORGNR">ORGNR (NO)</option>
+              <option value="ABN">ABN (AU)</option>
+              <option value="EIN">EIN (US)</option>
+              <option value="VAT">VAT / Tax</option>
+              <option value="LEI">LEI (20-char)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Attribute filter toggles + New Lead Action */}
+        <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+          <div className="flex items-center gap-4 flex-wrap text-slate-600 dark:text-slate-300">
             <select
               value={selectedStage}
               onChange={(e) => setSelectedStage(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1 focus:outline-hidden"
             >
-              <option value="ALL">All Pipeline Stages</option>
+              <option value="ALL">All Stages</option>
               {stages.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name} ({leads.filter((l) => l.pipelineStageId === s.id).length})
                 </option>
               ))}
             </select>
-          </div>
-        </div>
-
-        {/* Attribute filter toggles */}
-        <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-          <div className="flex items-center gap-4 text-slate-600 dark:text-slate-300">
             <span className="text-slate-400 font-medium">Require:</span>
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
@@ -147,7 +391,7 @@ export function LeadsView({
                 onChange={(e) => setOnlyWithWebsite(e.target.checked)}
                 className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-0"
               />
-              <span>Has Website</span>
+              <span>Website</span>
             </label>
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
@@ -156,7 +400,7 @@ export function LeadsView({
                 onChange={(e) => setOnlyWithEmail(e.target.checked)}
                 className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-0"
               />
-              <span>Has Email</span>
+              <span>Email</span>
             </label>
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
@@ -165,15 +409,174 @@ export function LeadsView({
                 onChange={(e) => setOnlyWithPhone(e.target.checked)}
                 className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-0"
               />
-              <span>Has Phone</span>
+              <span>Phone</span>
             </label>
           </div>
 
-          <div className="text-slate-500 dark:text-slate-400 text-xs">
-            Showing <strong className="text-slate-900 dark:text-white font-mono">{filtered.length}</strong> of {leads.length} leads
+          <div className="flex items-center gap-3">
+            <div className="text-slate-500 dark:text-slate-400 text-xs">
+              Showing <strong className="text-slate-900 dark:text-white font-mono">{filtered.length}</strong> of {leads.length}
+            </div>
+            {onCreateLead && (
+              <button
+                onClick={() => setIsCreateOpen(true)}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg flex items-center gap-1.5 text-xs transition shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New Lead</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Create International Lead Modal */}
+      {isCreateOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-blue-400" />
+                Create International Organization Lead
+              </h3>
+              <button onClick={() => setIsCreateOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateSubmit} className="p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Company / Organization Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="e.g. Nordic Robotics AS"
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Industry / Sector</label>
+                  <input
+                    type="text"
+                    value={newIndustry}
+                    onChange={(e) => setNewIndustry(e.target.value)}
+                    placeholder="e.g. Manufacturing & Technology"
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
+                <GeoSelector
+                  countryCode={newGeo.countryCode}
+                  region={newGeo.region}
+                  city={newGeo.city}
+                  postalCode={newGeo.postalCode}
+                  street={newGeo.street}
+                  onChange={(geo) =>
+                    setNewGeo({
+                      countryCode: geo.countryCode,
+                      countryName: geo.countryName,
+                      region: geo.region || '',
+                      city: geo.city || '',
+                      postalCode: geo.postalCode || '',
+                      street: geo.street || '',
+                      currency: geo.currency || 'USD',
+                    })
+                  }
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Phone (Auto-normalizes E.164)</label>
+                  <input
+                    type="text"
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value)}
+                    placeholder="+44 20 7946 0912"
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Public Email</label>
+                  <input
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="contact@company.com"
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Website</label>
+                  <input
+                    type="text"
+                    value={newWebsite}
+                    onChange={(e) => setNewWebsite(e.target.value)}
+                    placeholder="https://company.com"
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-800">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Primary ID Type</label>
+                  <select
+                    value={newIdentType}
+                    onChange={(e) => setNewIdentType(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5"
+                  >
+                    <option value="CRN">CRN (UK)</option>
+                    <option value="ORGNR">ORGNR (NO)</option>
+                    <option value="ABN">ABN (AU)</option>
+                    <option value="EIN">EIN (US)</option>
+                    <option value="SIREN">SIREN (FR)</option>
+                    <option value="VAT">VAT / Tax ID</option>
+                    <option value="LEI">LEI (20-char)</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Business Identifier Number (Optional)</label>
+                  <input
+                    type="text"
+                    value={newIdentValue}
+                    onChange={(e) => setNewIdentValue(e.target.value)}
+                    placeholder="e.g. 01234567 or 974760673"
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 font-mono"
+                  />
+                </div>
+              </div>
+
+              {createError && (
+                <div className="p-2.5 bg-rose-950/50 border border-rose-800 rounded text-rose-300">
+                  {createError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateOpen(false)}
+                  className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreating}
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded"
+                >
+                  {isCreating ? 'Creating...' : 'Create Lead'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Batch Actions Bar (when items selected) */}
       {selectedIds.size > 0 && (
@@ -306,17 +709,15 @@ export function LeadsView({
 
                       {/* Location */}
                       <td className="p-3.5 text-slate-600 dark:text-slate-300">
-                        <div className="flex items-center gap-1 truncate">
-                          <span>
-                            {lead.address?.countryCode === 'NO'
-                              ? '🇳🇴'
-                              : lead.address?.countryCode === 'GB'
-                              ? '🇬🇧'
-                              : lead.address?.countryCode === 'AU'
-                              ? '🇦🇺'
-                              : '🌐'}
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="text-base" title={lead.address?.country || lead.address?.countryCode}>
+                            {getCountryFlag(lead.address?.countryCode)}
                           </span>
-                          <span>{lead.address?.city || lead.address?.country || 'Unknown'}</span>
+                          <span className="truncate">
+                            {[lead.address?.city, lead.address?.region, lead.address?.countryCode || lead.address?.country]
+                              .filter(Boolean)
+                              .join(', ') || 'Global'}
+                          </span>
                         </div>
                       </td>
 

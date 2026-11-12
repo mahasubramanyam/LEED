@@ -14,6 +14,7 @@ import { OwnerControlCentre } from './components/OwnerControlCentre.tsx';
 import { LeadDetailModal } from './components/LeadDetailModal.tsx';
 import { ImportModal } from './components/ImportModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
+import { CountryMatrixView } from './components/CountryMatrixView.tsx';
 import {
   CanonicalLead,
   PipelineStage,
@@ -69,6 +70,7 @@ export default function App() {
   const [isDbConnected, setIsDbConnected] = useState<boolean>(false);
 
   const [selectedLeadForDetail, setSelectedLeadForDetail] = useState<CanonicalLead | null>(null);
+  const [discoveryInitialCountry, setDiscoveryInitialCountry] = useState<string | undefined>(undefined);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
@@ -579,6 +581,7 @@ export default function App() {
                   onAddLeadToCrm={handleAddLeadToCrm}
                   onBatchAddLeads={handleBatchAddLeads}
                   onInspectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  initialCountry={discoveryInitialCountry}
                 />
               )}
 
@@ -587,6 +590,7 @@ export default function App() {
                   leads={leads}
                   stages={stages}
                   onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  onCreateLead={handleAddLeadToCrm}
                   onUpdateLeadStage={handleMoveStage}
                   onDeleteLead={handleDeleteLead}
                   onBatchUpdateStage={handleBatchUpdateStage}
@@ -637,6 +641,7 @@ export default function App() {
                   settings={settings}
                   onUpdateSettings={handleUpdateSettings}
                   onRefreshConnectors={fetchAllData}
+                  onOpenMatrix={() => setCurrentTab('country-matrix')}
                 />
               )}
 
@@ -648,6 +653,15 @@ export default function App() {
                   onCreateTask={handleCreateTask}
                   onDeleteTask={handleDeleteTask}
                   onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                />
+              )}
+
+              {currentTab === 'country-matrix' && (
+                <CountryMatrixView
+                  onNavigateToDiscovery={(countryCode) => {
+                    setDiscoveryInitialCountry(countryCode);
+                    setCurrentTab('discovery');
+                  }}
                 />
               )}
 

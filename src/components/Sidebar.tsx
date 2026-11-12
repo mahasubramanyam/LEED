@@ -14,7 +14,8 @@ import {
   ChevronRight,
   LogOut,
   User,
-  ExternalLink
+  ExternalLink,
+  Globe2,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -47,6 +48,7 @@ export function Sidebar({
   const navItems = [
     { id: 'dashboard', label: 'Executive Dashboard', shortLabel: 'Dashboard', icon: LayoutDashboard },
     { id: 'discovery', label: 'Registry Discovery', shortLabel: 'Discovery', icon: Search, badge: '4 Sources' },
+    { id: 'country-matrix', label: 'Country Matrix', shortLabel: 'Matrix', icon: Globe2, badge: '195 States' },
     { id: 'leads', label: 'Leads Intelligence', shortLabel: 'Leads', icon: Building2, count: leadsCount },
     { id: 'pipeline', label: 'Pipeline Kanban', shortLabel: 'Pipeline', icon: Kanban },
     { id: 'tasks', label: 'Tasks & Follow-ups', shortLabel: 'Tasks', icon: CheckSquare, count: pendingTasksCount },

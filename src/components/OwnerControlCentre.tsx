@@ -20,7 +20,7 @@ import {
   Check,
   AlertCircle
 } from 'lucide-react';
-import { AppSettings, ConnectorStatus } from '../types.ts';
+import { AppSettings, ConnectorStatus, AuditVerificationResult } from '../types.ts';
 
 interface OwnerProfile {
   id: string;
@@ -42,6 +42,7 @@ interface SessionItem {
 
 interface AuditItem {
   id: string;
+  sequenceNumber?: number;
   action: string;
   actorEmail: string;
   entityType?: string;
@@ -49,6 +50,9 @@ interface AuditItem {
   details?: any;
   ipAddress?: string;
   createdAt: string;
+  prevHash?: string;
+  currentHash?: string;
+  hashVersion?: number;
 }
 
 interface DiagnosticsData {
@@ -116,6 +120,23 @@ export function OwnerControlCentre({
   // Audit State
   const [auditLog, setAuditLog] = useState<AuditItem[]>([]);
   const [loadingAudit, setLoadingAudit] = useState(false);
+  const [chainVerification, setChainVerification] = useState<AuditVerificationResult | null>(null);
+  const [verifyingChain, setVerifyingChain] = useState(false);
+
+  const handleVerifyChain = async () => {
+    setVerifyingChain(true);
+    try {
+      const res = await apiFetch('/api/owner/audit-log/verify');
+      if (res.ok) {
+        const data = await res.json();
+        setChainVerification(data);
+      }
+    } catch (err) {
+      console.error('Failed to verify audit chain:', err);
+    } finally {
+      setVerifyingChain(false);
+    }
+  };
 
   // Profile Form State
   const [fullNameInput, setFullNameInput] = useState(owner?.fullName || '');
@@ -941,63 +962,151 @@ export function OwnerControlCentre({
 
       {/* TAB 6: AUDIT TRAIL */}
       {activeTab === 'audit' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Security & Administrative Audit Log</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Persistent tamper-evident log in Neon <code className="font-mono">audit_events</code>
-              </p>
+        <div className="space-y-6">
+          {/* Cryptographic Hash Chain Integrity & Immutability Card */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                    Cryptographic Audit Immutability & Hash Chain
+                  </h3>
+                  <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-md ${
+                    chainVerification?.valid === false
+                      ? 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300 border border-red-200'
+                      : chainVerification?.valid === true
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
+                      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                  }`}>
+                    {chainVerification?.valid === false
+                      ? 'Integrity Failure'
+                      : chainVerification?.valid === true
+                      ? 'Chain Verified'
+                      : 'Unverified Chain'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Sequential SHA-256 hash chaining with database-level row (<code className="font-mono">UPDATE/DELETE</code>) and statement (<code className="font-mono">TRUNCATE</code>) triggers.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleVerifyChain}
+                disabled={verifyingChain}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${verifyingChain ? 'animate-spin' : ''}`} />
+                {verifyingChain ? 'Verifying Digests...' : 'Verify Hash Chain'}
+              </button>
             </div>
-            <button
-              onClick={fetchAuditLog}
-              className="p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-            >
-              <RefreshCw className={`w-4 h-4 ${loadingAudit ? 'animate-spin' : ''}`} />
-            </button>
+
+            {chainVerification && (
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block uppercase font-mono">Chain Head Sequence</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    #{chainVerification.latestSequence ?? chainVerification.totalEvents ?? 0} ({chainVerification.totalEvents} events)
+                  </span>
+                </div>
+                <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block uppercase font-mono">Head Hash</span>
+                  <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300 truncate block" title={chainVerification.headHash || 'Genesis'}>
+                    {chainVerification.headHash ? `${chainVerification.headHash.slice(0, 16)}...` : 'Genesis baseline'}
+                  </span>
+                </div>
+                <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block uppercase font-mono">Verification Status</span>
+                  <span className={`font-semibold ${chainVerification.valid ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600'}`}>
+                    {chainVerification.valid ? '100% Contiguous & Valid' : `Broken at #${chainVerification.firstInvalidSequence}`}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Documented Security Baseline & Limitations Notice */}
+            <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-lg text-xs text-amber-800 dark:text-amber-300">
+              <span className="font-semibold block mb-0.5">Integrity & Architectural Limitation Notice:</span>
+              <span>
+                Database triggers prevent row updates, deletions, and table truncations through standard application SQL. However, because the application connects with administrative DDL schema privileges, a privileged database owner could modify database triggers. For ultimate enterprise tamper-proofing, external WORM checkpoints (e.g. S3 Object Lock, GCP Bucket Lock, or an external KMS-signed ledger) are recommended.
+              </span>
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-semibold">
-                  <th className="py-3 px-4">Action</th>
-                  <th className="py-3 px-4">Actor</th>
-                  <th className="py-3 px-4">Entity</th>
-                  <th className="py-3 px-4">IP Address</th>
-                  <th className="py-3 px-4">Timestamp</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
-                {auditLog.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-400">
-                      No audit events recorded yet.
-                    </td>
+          {/* Audit Events Table */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Security & Administrative Events</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Append-only immutable event log with SHA-256 parent hash verification
+                </p>
+              </div>
+              <button
+                onClick={fetchAuditLog}
+                className="p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingAudit ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-semibold">
+                    <th className="py-3 px-3">#</th>
+                    <th className="py-3 px-4">Action</th>
+                    <th className="py-3 px-4">Actor</th>
+                    <th className="py-3 px-4">Entity</th>
+                    <th className="py-3 px-4">Hash Digest</th>
+                    <th className="py-3 px-4">IP Address</th>
+                    <th className="py-3 px-4">Timestamp</th>
                   </tr>
-                ) : (
-                  auditLog.map((event) => (
-                    <tr key={event.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                      <td className="py-3 px-4 font-semibold text-blue-600 dark:text-blue-400">
-                        {event.action}
-                      </td>
-                      <td className="py-3 px-4 text-slate-700 dark:text-slate-300">
-                        {event.actorEmail}
-                      </td>
-                      <td className="py-3 px-4 text-slate-500 dark:text-slate-400">
-                        {event.entityType ? `${event.entityType}:${event.entityId || ''}` : '—'}
-                      </td>
-                      <td className="py-3 px-4 text-slate-500 dark:text-slate-400">
-                        {event.ipAddress || '127.0.0.1'}
-                      </td>
-                      <td className="py-3 px-4 text-slate-400 text-[11px]">
-                        {new Date(event.createdAt).toLocaleString()}
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+                  {auditLog.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                        No audit events recorded yet.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    auditLog.map((event) => (
+                      <tr key={event.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                        <td className="py-3 px-3 text-slate-400 font-semibold">
+                          #{event.sequenceNumber ?? '—'}
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-blue-600 dark:text-blue-400">
+                          {event.action}
+                        </td>
+                        <td className="py-3 px-4 text-slate-700 dark:text-slate-300">
+                          {event.actorEmail}
+                        </td>
+                        <td className="py-3 px-4 text-slate-500 dark:text-slate-400">
+                          {event.entityType ? `${event.entityType}:${event.entityId || ''}` : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-[11px] text-slate-500 dark:text-slate-400">
+                          {event.currentHash ? (
+                            <span title={`Current: ${event.currentHash}\nPrev: ${event.prevHash || 'None'}`}>
+                              {event.currentHash.slice(0, 10)}...
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-slate-500 dark:text-slate-400">
+                          {event.ipAddress || '127.0.0.1'}
+                        </td>
+                        <td className="py-3 px-4 text-slate-400 text-[11px]">
+                          {new Date(event.createdAt).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

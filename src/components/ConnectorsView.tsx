@@ -19,6 +19,7 @@ interface ConnectorsViewProps {
   settings: AppSettings;
   onUpdateSettings: (newSettings: Partial<AppSettings>) => void;
   onRefreshConnectors: () => void;
+  onOpenMatrix?: () => void;
 }
 
 export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
@@ -26,10 +27,13 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
   settings,
   onUpdateSettings,
   onRefreshConnectors,
+  onOpenMatrix,
 }) => {
   const [activeTab, setActiveTab] = useState<'connectors' | 'settings'>('connectors');
   const [ownerName, setOwnerName] = useState(settings.ownerName);
   const [ownerEmail, setOwnerEmail] = useState(settings.ownerEmail);
+  const [defaultCountry, setDefaultCountry] = useState(settings.defaultCountry || 'GB');
+  const [defaultCurrency, setDefaultCurrency] = useState(settings.defaultCurrency || 'USD');
   const [companiesHouseApiKey, setCompaniesHouseApiKey] = useState(settings.companiesHouseApiKey || '');
   const [userAgent, setUserAgent] = useState(settings.userAgent);
   const [approvalRequired, setApprovalRequired] = useState(settings.outreachApprovalRequired);
@@ -40,6 +44,8 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
     onUpdateSettings({
       ownerName,
       ownerEmail,
+      defaultCountry,
+      defaultCurrency,
       companiesHouseApiKey: companiesHouseApiKey.trim() || undefined,
       userAgent,
       outreachApprovalRequired: approvalRequired,
@@ -63,6 +69,15 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenMatrix}
+            className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-blue-950/60 hover:bg-blue-900/70 border border-blue-800/80 rounded-lg text-xs text-blue-300 transition cursor-pointer"
+          >
+            <Globe2 className="w-4 h-4 text-blue-400" />
+            <span>195 Sovereign States Matrix</span>
+          </button>
+
           <button
             onClick={() => setActiveTab('connectors')}
             className={`px-3 py-1.5 text-xs font-semibold rounded transition ${
@@ -200,6 +215,49 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
                 className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded p-2 focus:outline-none focus:border-indigo-500"
                 required
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Default Discovery Jurisdiction (ISO Alpha-2)</label>
+              <select
+                value={defaultCountry}
+                onChange={(e) => setDefaultCountry(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded p-2 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="GB">🇬🇧 United Kingdom (GB)</option>
+                <option value="NO">🇳🇴 Norway (NO)</option>
+                <option value="AU">🇦🇺 Australia (AU)</option>
+                <option value="US">🇺🇸 United States (US)</option>
+                <option value="DE">🇩🇪 Germany (DE)</option>
+                <option value="FR">🇫🇷 France (FR)</option>
+                <option value="CA">🇨🇦 Canada (CA)</option>
+                <option value="JP">🇯🇵 Japan (JP)</option>
+                <option value="IN">🇮🇳 India (IN)</option>
+                <option value="SG">🇸🇬 Singapore (SG)</option>
+                <option value="AE">🇦🇪 United Arab Emirates (AE)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Default Pipeline Currency (ISO 4217)</label>
+              <select
+                value={defaultCurrency}
+                onChange={(e) => setDefaultCurrency(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded p-2 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="USD">USD — US Dollar ($)</option>
+                <option value="GBP">GBP — British Pound (£)</option>
+                <option value="EUR">EUR — Euro (€)</option>
+                <option value="NOK">NOK — Norwegian Krone (kr)</option>
+                <option value="AUD">AUD — Australian Dollar ($)</option>
+                <option value="CAD">CAD — Canadian Dollar ($)</option>
+                <option value="CHF">CHF — Swiss Franc</option>
+                <option value="JPY">JPY — Japanese Yen (¥)</option>
+                <option value="INR">INR — Indian Rupee (₹)</option>
+                <option value="SGD">SGD — Singapore Dollar ($)</option>
+              </select>
             </div>
           </div>
 

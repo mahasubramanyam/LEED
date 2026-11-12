@@ -8,10 +8,84 @@ export interface LeadSource {
 }
 
 export interface LeadIdentifier {
-  type: 'CRN' | 'BRREG_ORG' | 'ABN' | 'DOMAIN' | 'PHONE' | 'EMAIL' | 'TAX_ID';
+  id?: string;
+  type: string;
   value: string;
+  normalizedValue?: string;
+  countryCode?: string;
+  issuingAuthority?: string;
+  source?: string;
+  status?: 'user_provided' | 'discovered' | 'syntax_validated' | 'officially_verified';
   verified: boolean;
+  createdAt?: string;
 }
+
+export interface AdministrativeDivision {
+  code: string;
+  name: string;
+  type: string;
+  nativeName?: string;
+}
+
+export interface AddressFormatSpec {
+  hasRegions: boolean;
+  regionLabel: string;
+  hasPostalCodes: boolean;
+  postalCodeLabel: string;
+  postalCodePattern?: string;
+  postalCodeExample?: string;
+  addressOrder: 'street_first' | 'city_first' | 'postal_first';
+}
+
+export interface CountryReference {
+  code: string;
+  alpha3: string;
+  numericCode?: string;
+  name: string;
+  officialName: string;
+  nativeName?: string;
+  flag: string;
+  callingCode: string;
+  currency: string;
+  currencySymbol: string;
+  timezones: string[];
+  languages: string[];
+  isSovereignState: boolean;
+  unMember: boolean;
+  continent: string;
+  addressFormat: AddressFormatSpec;
+  primaryIdentifierType?: string;
+  supportedIdentifierTypes: string[];
+  divisions?: AdministrativeDivision[];
+}
+
+export interface CityReference {
+  id: string;
+  name: string;
+  countryCode: string;
+  divisionCode?: string;
+  divisionName?: string;
+  population?: number;
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface CountrySourceCapability {
+  id: string;
+  countryCode: string;
+  countryName: string;
+  flag: string;
+  providerName: string;
+  sourceType: string;
+  integrationStatus: string;
+  authRequirement: string;
+  sourceUrl: string;
+  lastCheckedAt?: string;
+  notes: string;
+  licensingInfo: string;
+  coverageFeatures: string[];
+}
+
 
 export interface LeadNote {
   id: string;
@@ -196,3 +270,32 @@ export interface AppSettings {
   autoDedupeThreshold: number;
   suppressionDomains: string[];
 }
+
+export interface AuditEvent {
+  id: string;
+  sequenceNumber?: number;
+  action: string;
+  actorEmail: string;
+  entityType?: string;
+  entityId?: string;
+  details?: any;
+  ipAddress?: string;
+  createdAt: string;
+  prevHash?: string;
+  currentHash?: string;
+  hashVersion?: number;
+}
+
+export interface AuditVerificationResult {
+  valid: boolean;
+  totalEvents: number;
+  latestSequence?: number;
+  genesisHash: string;
+  headHash?: string;
+  firstInvalidSequence?: number;
+  error?: string;
+  details?: string;
+  verifiedAt: string;
+  note?: string;
+}
+

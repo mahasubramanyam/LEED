@@ -15,6 +15,35 @@ import {
   LeadActivity,
 } from '../types.js';
 
+export const AUDIT_GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
+
+export interface AuditEventRecord {
+  id: string;
+  sequenceNumber?: number;
+  action: string;
+  actorEmail: string;
+  entityType?: string;
+  entityId?: string;
+  details?: any;
+  ipAddress?: string;
+  createdAt: string;
+  prevHash?: string;
+  currentHash?: string;
+  hashVersion?: number;
+}
+
+export interface AuditVerificationResult {
+  valid: boolean;
+  totalEvents: number;
+  latestSequence?: number;
+  genesisHash: string;
+  headHash?: string;
+  firstInvalidSequence?: number;
+  error?: string;
+  details?: string;
+  verifiedAt: string;
+}
+
 export class PostgresStorage {
   private getClient(): pg.Pool {
     const pool = dbManager.getPool();
@@ -29,6 +58,9 @@ export class PostgresStorage {
   public async getLeads(filters: {
     search?: string;
     country?: string;
+    region?: string;
+    city?: string;
+    identifierType?: string;
     status?: string;
     stage?: string;
     category?: string;
@@ -55,8 +87,14 @@ export class PostgresStorage {
           ) as sources_json,
           COALESCE(
             json_agg(DISTINCT jsonb_build_object(
+              'id', i.id,
               'type', i.type,
               'value', i.value,
+              'normalizedValue', i.normalized_value,
+              'countryCode', i.country_code,
+              'issuingAuthority', i.issuing_authority,
+              'source', i.source,
+              'status', i.status,
               'verified', i.verified
             )) FILTER (WHERE i.id IS NOT NULL), '[]'::json
           ) as identifiers_json,
@@ -95,6 +133,7 @@ export class PostgresStorage {
           l.company_name ILIKE $${paramIdx} OR
           l.registration_number ILIKE $${paramIdx} OR
           l.city ILIKE $${paramIdx} OR
+          l.region ILIKE $${paramIdx} OR
           l.domain ILIKE $${paramIdx}
         )`;
         values.push(`%${filters.search}%`);
@@ -104,6 +143,24 @@ export class PostgresStorage {
       if (filters.country && filters.country !== 'ALL') {
         query += ` AND (l.country_code = $${paramIdx} OR l.country = $${paramIdx})`;
         values.push(filters.country);
+        paramIdx++;
+      }
+
+      if (filters.region && filters.region !== 'ALL') {
+        query += ` AND l.region ILIKE $${paramIdx}`;
+        values.push(`%${filters.region}%`);
+        paramIdx++;
+      }
+
+      if (filters.city && filters.city !== 'ALL') {
+        query += ` AND l.city ILIKE $${paramIdx}`;
+        values.push(`%${filters.city}%`);
+        paramIdx++;
+      }
+
+      if (filters.identifierType && filters.identifierType !== 'ALL') {
+        query += ` AND EXISTS (SELECT 1 FROM lead_identifiers li WHERE li.lead_id = l.id AND li.type = $${paramIdx})`;
+        values.push(filters.identifierType);
         paramIdx++;
       }
 
@@ -160,8 +217,14 @@ export class PostgresStorage {
           ) as sources_json,
           COALESCE(
             json_agg(DISTINCT jsonb_build_object(
+              'id', i.id,
               'type', i.type,
               'value', i.value,
+              'normalizedValue', i.normalized_value,
+              'countryCode', i.country_code,
+              'issuingAuthority', i.issuing_authority,
+              'source', i.source,
+              'status', i.status,
               'verified', i.verified
             )) FILTER (WHERE i.id IS NOT NULL), '[]'::json
           ) as identifiers_json,
@@ -325,13 +388,32 @@ export class PostgresStorage {
       if (lead.identifiers && lead.identifiers.length > 0) {
         for (let idx = 0; idx < lead.identifiers.length; idx++) {
           const ident = lead.identifiers[idx];
-          const identId = `ident-${lead.id}-${idx}`;
+          const identId = ident.id || `ident-${lead.id}-${idx}`;
+          const normVal = ident.normalizedValue || (ident.value ? ident.value.toUpperCase().replace(/[^A-Z0-9]/g, '') : null);
+          const cCode = ident.countryCode || lead.address?.countryCode || null;
+          const status = ident.status || (ident.verified ? 'officially_verified' : 'user_provided');
           await client.query(
-            `INSERT INTO lead_identifiers (id, lead_id, type, value, verified, created_at)
-             VALUES ($1, $2, $3, $4, $5, NOW())
+            `INSERT INTO lead_identifiers (id, lead_id, type, value, verified, country_code, normalized_value, issuing_authority, source, status, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
              ON CONFLICT (lead_id, type, value) DO UPDATE SET
-               verified = EXCLUDED.verified`,
-            [identId, lead.id, ident.type, ident.value, ident.verified ?? false]
+               verified = EXCLUDED.verified,
+               country_code = COALESCE(EXCLUDED.country_code, lead_identifiers.country_code),
+               normalized_value = COALESCE(EXCLUDED.normalized_value, lead_identifiers.normalized_value),
+               issuing_authority = COALESCE(EXCLUDED.issuing_authority, lead_identifiers.issuing_authority),
+               source = COALESCE(EXCLUDED.source, lead_identifiers.source),
+               status = EXCLUDED.status`,
+            [
+              identId,
+              lead.id,
+              ident.type,
+              ident.value,
+              ident.verified ?? false,
+              cCode,
+              normVal,
+              ident.issuingAuthority || null,
+              ident.source || null,
+              status,
+            ]
           );
         }
       }
@@ -1116,49 +1198,54 @@ export class PostgresStorage {
     entityId?: string,
     details?: any,
     ipAddress?: string
-  ): Promise<void> {
+  ): Promise<AuditEventRecord | null> {
     const pool = this.getClient();
     let client: pg.PoolClient | null = null;
     const id = `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     try {
       client = await pool.connect();
-      await client.query(
+      const res = await client.query(
         `INSERT INTO audit_events (id, action, actor_email, entity_type, entity_id, details, ip_address, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         RETURNING id, sequence_number as "sequenceNumber", action, actor_email as "actorEmail",
+                   entity_type as "entityType", entity_id as "entityId", details, ip_address as "ipAddress",
+                   created_at as "createdAt", prev_hash as "prevHash", current_hash as "currentHash", hash_version as "hashVersion"`,
         [id, action, actorEmail, entityType || null, entityId || null, details ? JSON.stringify(details) : null, ipAddress || null]
       );
+      if (res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          ...r,
+          sequenceNumber: r.sequenceNumber ? parseInt(r.sequenceNumber, 10) : undefined,
+          createdAt: new Date(r.createdAt).toISOString(),
+        };
+      }
+      return null;
     } catch (err) {
       console.warn('[PostgresStorage] Could not record audit event:', err);
+      return null;
     } finally {
       if (client) client.release();
     }
   }
 
-  public async getAuditEvents(limit = 100): Promise<Array<{
-
-    id: string;
-    action: string;
-    actorEmail: string;
-    entityType?: string;
-    entityId?: string;
-    details?: any;
-    ipAddress?: string;
-    createdAt: string;
-  }>> {
+  public async getAuditEvents(limit = 100): Promise<AuditEventRecord[]> {
     const pool = this.getClient();
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
       const { rows } = await client.query(
-        `SELECT id, action, actor_email as "actorEmail", entity_type as "entityType",
-                entity_id as "entityId", details, ip_address as "ipAddress", created_at as "createdAt"
+        `SELECT id, sequence_number as "sequenceNumber", action, actor_email as "actorEmail", entity_type as "entityType",
+                entity_id as "entityId", details, ip_address as "ipAddress", created_at as "createdAt",
+                prev_hash as "prevHash", current_hash as "currentHash", hash_version as "hashVersion"
          FROM audit_events
-         ORDER BY created_at DESC
+         ORDER BY sequence_number DESC NULLS LAST, created_at DESC
          LIMIT $1`,
         [limit]
       );
       return rows.map((r: any) => ({
         ...r,
+        sequenceNumber: r.sequenceNumber ? parseInt(r.sequenceNumber, 10) : undefined,
         createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
       }));
     } catch (err) {
@@ -1166,6 +1253,140 @@ export class PostgresStorage {
       return [];
     } finally {
       if (client) client.release();
+    }
+  }
+
+  /**
+   * Cryptographically verifies the sequential integrity of the audit_events hash chain.
+   * Checks sequence continuity (1..N), genesis/prev_hash linking, and recalculates SHA-256 digests.
+   * Reports the first broken, missing, or tampered sequence number with full diagnostic context.
+   */
+  public async verifyAuditLogIntegrity(customClient?: pg.PoolClient | pg.Pool): Promise<AuditVerificationResult> {
+    const pool = customClient || this.getClient();
+    let client: pg.PoolClient | null = null;
+    const isDedicatedPool = 'connect' in pool && typeof (pool as any).connect === 'function';
+
+    try {
+      client = isDedicatedPool ? await (pool as pg.Pool).connect() : (pool as pg.PoolClient);
+
+      const { rows } = await client.query(`
+        SELECT 
+          id,
+          sequence_number as "sequenceNumber",
+          action,
+          actor_email as "actorEmail",
+          entity_type as "entityType",
+          entity_id as "entityId",
+          details,
+          ip_address as "ipAddress",
+          created_at as "createdAt",
+          prev_hash as "prevHash",
+          current_hash as "currentHash",
+          hash_version as "hashVersion",
+          LAG(current_hash) OVER (ORDER BY sequence_number ASC) as "expectedPrevHash",
+          LAG(sequence_number) OVER (ORDER BY sequence_number ASC) as "prevSeqNumber",
+          encode(sha256((
+            sequence_number::TEXT || '|' ||
+            id || '|' ||
+            action || '|' ||
+            actor_email || '|' ||
+            COALESCE(entity_type, '') || '|' ||
+            COALESCE(entity_id, '') || '|' ||
+            COALESCE(details::TEXT, '{}') || '|' ||
+            COALESCE(ip_address, '') || '|' ||
+            TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') || '|' ||
+            prev_hash
+          )::bytea), 'hex') as "computedHash"
+        FROM audit_events
+        ORDER BY sequence_number ASC
+      `);
+
+      if (rows.length === 0) {
+        return {
+          valid: true,
+          totalEvents: 0,
+          genesisHash: AUDIT_GENESIS_HASH,
+          verifiedAt: new Date().toISOString(),
+        };
+      }
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const seq = parseInt(row.sequenceNumber, 10);
+        const expectedSeq = i + 1;
+
+        // 1. Contiguous sequence verification
+        if (seq !== expectedSeq) {
+          return {
+            valid: false,
+            totalEvents: rows.length,
+            firstInvalidSequence: expectedSeq,
+            genesisHash: AUDIT_GENESIS_HASH,
+            error: `Sequence gap or out-of-order event detected. Expected sequence ${expectedSeq}, found ${seq}.`,
+            details: `Event ID: ${row.id}`,
+            verifiedAt: new Date().toISOString(),
+          };
+        }
+
+        // 2. Genesis / previous hash chain continuity
+        if (i === 0) {
+          if (row.prevHash !== AUDIT_GENESIS_HASH) {
+            return {
+              valid: false,
+              totalEvents: rows.length,
+              firstInvalidSequence: 1,
+              genesisHash: AUDIT_GENESIS_HASH,
+              error: `Invalid genesis prev_hash on first audit event. Expected ${AUDIT_GENESIS_HASH}, found ${row.prevHash}.`,
+              details: `Event ID: ${row.id}`,
+              verifiedAt: new Date().toISOString(),
+            };
+          }
+        } else {
+          const expectedPrevHash = row.expectedPrevHash;
+          if (row.prevHash !== expectedPrevHash) {
+            return {
+              valid: false,
+              totalEvents: rows.length,
+              firstInvalidSequence: seq,
+              genesisHash: AUDIT_GENESIS_HASH,
+              error: `Broken cryptographic chain at sequence ${seq}. prev_hash does not match prior record's current_hash.`,
+              details: `Expected: ${expectedPrevHash}, Found: ${row.prevHash}`,
+              verifiedAt: new Date().toISOString(),
+            };
+          }
+        }
+
+        // 3. Cryptographic hash content integrity
+        if (row.currentHash !== row.computedHash) {
+          return {
+            valid: false,
+            totalEvents: rows.length,
+            firstInvalidSequence: seq,
+            genesisHash: AUDIT_GENESIS_HASH,
+            error: `Hash digest mismatch at sequence ${seq}. Event content or metadata has been altered after record insertion.`,
+            details: `Stored Hash: ${row.currentHash}, Recomputed Digest: ${row.computedHash}`,
+            verifiedAt: new Date().toISOString(),
+          };
+        }
+      }
+
+      const lastRow = rows[rows.length - 1];
+      return {
+        valid: true,
+        totalEvents: rows.length,
+        latestSequence: parseInt(lastRow.sequenceNumber, 10),
+        genesisHash: AUDIT_GENESIS_HASH,
+        headHash: lastRow.currentHash,
+        verifiedAt: new Date().toISOString(),
+      };
+    } finally {
+      if (client && isDedicatedPool && 'release' in client) {
+        try {
+          (client as pg.PoolClient).release();
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 

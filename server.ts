@@ -36,6 +36,14 @@ import {
 import { ownerService } from './server/auth/ownerService.js';
 import { generateCsrfToken, setCsrfCookie, validateCsrf } from './server/auth/csrf.js';
 import { normalizeClientIp } from './server/auth/rateLimit.js';
+import { getAllCountries, getCountryByCode, searchCountries } from './server/geo/countries.js';
+import { getDivisionsForCountry } from './server/geo/divisions.js';
+import { searchCities } from './server/geo/cities.js';
+import { normalizePhoneNumber } from './server/geo/phoneUtils.js';
+import { formatInternationalAddress, validatePostalCode } from './server/geo/addressUtils.js';
+import { validateIdentifier } from './server/identifiers/identifierEngine.js';
+import { buildCountryCapabilityMatrix } from './server/geo/capabilityMatrix.js';
+
 
 
 dotenv.config();
@@ -391,6 +399,28 @@ protectedApi.get('/owner/audit-log', async (req: Request, res: Response) => {
   }
 });
 
+// Audit Log Cryptographic Verification
+protectedApi.get('/owner/audit-log/verify', async (req: Request, res: Response) => {
+  try {
+    const isPg = dbManager.isDbConnected();
+    if (!isPg) {
+      res.json({
+        valid: true,
+        totalEvents: 0,
+        genesisHash: '0000000000000000000000000000000000000000000000000000000000000000',
+        note: 'PostgreSQL not connected. Zero database audit records in active store.',
+        verifiedAt: new Date().toISOString(),
+      });
+      return;
+    }
+    const result = await postgresStorage.verifyAuditLogIntegrity();
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
 // Live Database Diagnostics & Telemetry
 protectedApi.get('/owner/diagnostics', async (req: Request, res: Response) => {
   try {
@@ -409,7 +439,14 @@ protectedApi.get('/owner/diagnostics', async (req: Request, res: Response) => {
       diagnostics: details,
       security: {
         singleOwnerEnforced: true,
-        singletonConstraint: 'uq_owner_singleton on owner_users',
+        singletonConstraint: 'uq_owner_singleton UNIQUE + chk_owner_singleton CHECK (is_singleton = TRUE)',
+        auditIntegrity: {
+          triggersActive: true,
+          rowModificationBlocked: 'UPDATE and DELETE prohibited via trg_audit_events_prevent_update_delete',
+          tableTruncateBlocked: 'TRUNCATE prohibited via trg_audit_events_prevent_truncate',
+          hashChainAlgorithm: 'SHA-256 sequential hash chaining with advisory transaction locks',
+          genesisHash: '0000000000000000000000000000000000000000000000000000000000000000',
+        },
         cookieSecurity: {
           sameSite: 'none',
           secure: true,
@@ -492,16 +529,119 @@ protectedApi.post('/database/migrate-json', async (req: Request, res: Response) 
   }
 });
 
+// ==========================================
+// GEOGRAPHIC REFERENCE & CAPABILITY MATRIX API
+// ==========================================
+
+// List all 195 sovereign states + jurisdictions with optional query
+protectedApi.get('/geo/countries', (req: Request, res: Response) => {
+  const { query } = req.query;
+  if (typeof query === 'string' && query.trim()) {
+    res.json(searchCountries(query));
+  } else {
+    res.json(getAllCountries());
+  }
+});
+
+// Get single country reference with divisions and address formatting rules
+protectedApi.get('/geo/countries/:code', (req: Request, res: Response) => {
+  const country = getCountryByCode(req.params.code);
+  if (!country) {
+    res.status(404).json({ error: 'Country not found' });
+    return;
+  }
+  res.json(country);
+});
+
+// Get administrative divisions for a country (e.g. states, provinces, cantons)
+protectedApi.get('/geo/divisions', (req: Request, res: Response) => {
+  const countryCode = req.query.country as string;
+  if (!countryCode) {
+    res.status(400).json({ error: 'Country code is required' });
+    return;
+  }
+  const divisions = getDivisionsForCountry(countryCode);
+  res.json({ countryCode: countryCode.toUpperCase(), divisions, total: divisions.length });
+});
+
+// Scalable city search (server-side typeahead, prevents loading 50,000 cities into browser)
+protectedApi.get('/geo/cities', (req: Request, res: Response) => {
+  const { country, division, query, limit } = req.query;
+  const cities = searchCities({
+    countryCode: typeof country === 'string' ? country : undefined,
+    divisionCode: typeof division === 'string' ? division : undefined,
+    query: typeof query === 'string' ? query : undefined,
+    limit: limit ? parseInt(limit as string, 10) : 25,
+  });
+  res.json({ cities, total: cities.length });
+});
+
+// International phone normalization & E.164 validation
+protectedApi.post('/geo/normalize-phone', (req: Request, res: Response) => {
+  const { phone, countryCode } = req.body;
+  if (!phone) {
+    res.status(400).json({ error: 'Phone number is required' });
+    return;
+  }
+  const result = normalizePhoneNumber(phone, countryCode || 'US');
+  res.json(result);
+});
+
+// Country-specific address formatting
+protectedApi.post('/geo/format-address', (req: Request, res: Response) => {
+  const components = req.body;
+  const formattedAddress = formatInternationalAddress(components);
+  const postalValidation = components.postalCode
+    ? validatePostalCode(components.postalCode, components.countryCode)
+    : { valid: true };
+  res.json({ formattedAddress, postalValidation });
+});
+
+// International business identifier validation & provenance tagging
+protectedApi.post('/identifiers/validate', (req: Request, res: Response) => {
+  const { type, value, countryCode, existingStatus } = req.body;
+  if (!type || !value) {
+    res.status(400).json({ error: 'Identifier type and value are required' });
+    return;
+  }
+  const result = validateIdentifier(type, value, countryCode, existingStatus);
+  const message = result.valid
+    ? `Valid ${result.type} syntax (${result.issuingAuthority})`
+    : result.error || `Invalid ${result.type} format`;
+  res.json({ ...result, message });
+});
+
+// Country and Source Capability Matrix
+protectedApi.get('/geo/capability-matrix', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const connectors = isPg ? await postgresStorage.getConnectors() : storage.getConnectors();
+    const matrix = buildCountryCapabilityMatrix(connectors);
+    res.json({
+      matrix,
+      totalSources: matrix.length,
+      sovereignStatesCount: 195,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
 // Leads Management
 protectedApi.get('/leads', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
-    const { search, country, status, stage, category, hasWebsite, hasEmail, hasPhone } = req.query;
+    const { search, country, region, city, identifierType, status, stage, category, hasWebsite, hasEmail, hasPhone } = req.query;
 
     if (isPg) {
       const leads = await postgresStorage.getLeads({
         search: typeof search === 'string' ? search : undefined,
         country: typeof country === 'string' ? country : undefined,
+        region: typeof region === 'string' ? region : undefined,
+        city: typeof city === 'string' ? city : undefined,
+        identifierType: typeof identifierType === 'string' ? identifierType : undefined,
         status: typeof status === 'string' ? status : undefined,
         stage: typeof stage === 'string' ? stage : undefined,
         category: typeof category === 'string' ? category : undefined,
@@ -519,12 +659,25 @@ protectedApi.get('/leads', async (req: Request, res: Response) => {
             l.companyName.toLowerCase().includes(q) ||
             (l.registrationNumber && l.registrationNumber.toLowerCase().includes(q)) ||
             (l.address?.city && l.address.city.toLowerCase().includes(q)) ||
+            (l.address?.region && l.address.region.toLowerCase().includes(q)) ||
             (l.domain && l.domain.toLowerCase().includes(q)) ||
             l.tags.some((t) => t.toLowerCase().includes(q))
         );
       }
       if (country && typeof country === 'string' && country !== 'ALL') {
         leads = leads.filter((l) => l.address?.countryCode === country || l.address?.country === country);
+      }
+      if (region && typeof region === 'string' && region !== 'ALL') {
+        const r = region.toLowerCase();
+        leads = leads.filter((l) => l.address?.region?.toLowerCase().includes(r));
+      }
+      if (city && typeof city === 'string' && city !== 'ALL') {
+        const c = city.toLowerCase();
+        leads = leads.filter((l) => l.address?.city?.toLowerCase().includes(c));
+      }
+      if (identifierType && typeof identifierType === 'string' && identifierType !== 'ALL') {
+        const t = identifierType.toUpperCase();
+        leads = leads.filter((l) => l.identifiers?.some((i) => i.type.toUpperCase() === t));
       }
       if (status && typeof status === 'string' && status !== 'ALL') {
         leads = leads.filter((l) => l.status === status);

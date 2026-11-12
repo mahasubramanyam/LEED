@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search,
   Globe2,
@@ -13,23 +13,30 @@ import {
   Info,
   Check,
   ChevronRight,
+  Filter,
 } from 'lucide-react';
-import { CanonicalLead } from '../types.js';
+import { CanonicalLead, CountryReference, AdministrativeDivision, CityReference } from '../types.js';
+import { apiFetch } from '../utils/apiFetch.ts';
 
 interface DiscoveryEngineProps {
   onAddLeadToCrm: (lead: CanonicalLead) => void;
   onBatchAddLeads: (leads: CanonicalLead[]) => void;
   onInspectLead: (lead: CanonicalLead) => void;
+  initialCountry?: string;
 }
 
-const COUNTRIES = [
-  { code: 'NO', name: 'Norway', flag: '🇳🇴', defaultConnector: 'conn-brreg', note: '100% Free Open API (Brreg)' },
-  { code: 'GB', name: 'United Kingdom', flag: '🇬🇧', defaultConnector: 'conn-companies-house', note: 'Companies House Official Registry' },
-  { code: 'AU', name: 'Australia', flag: '🇦🇺', defaultConnector: 'conn-abn', note: 'ABN Checksum & Official Register' },
-  { code: 'US', name: 'United States', flag: '🇺🇸', defaultConnector: 'conn-osm', note: 'OpenStreetMap POI & Web Crawler' },
-  { code: 'DE', name: 'Germany', flag: '🇩🇪', defaultConnector: 'conn-osm', note: 'Commercial Register & OSM POI' },
-  { code: 'FR', name: 'France', flag: '🇫🇷', defaultConnector: 'conn-osm', note: 'SIRENE & OpenStreetMap' },
-  { code: 'GLOBAL', name: 'Global / Any', flag: '🌐', defaultConnector: 'conn-osm', note: 'Multi-source Geographic Discovery' },
+const FEATURED_COUNTRIES = [
+  { code: 'NO', name: 'Norway', flag: '🇳🇴', defaultConnector: 'conn-brreg' },
+  { code: 'GB', name: 'United Kingdom', flag: '🇬🇧', defaultConnector: 'conn-companies-house' },
+  { code: 'AU', name: 'Australia', flag: '🇦🇺', defaultConnector: 'conn-abn' },
+  { code: 'US', name: 'United States', flag: '🇺🇸', defaultConnector: 'conn-osm' },
+  { code: 'DE', name: 'Germany', flag: '🇩🇪', defaultConnector: 'conn-osm' },
+  { code: 'FR', name: 'France', flag: '🇫🇷', defaultConnector: 'conn-osm' },
+  { code: 'CA', name: 'Canada', flag: '🇨🇦', defaultConnector: 'conn-osm' },
+  { code: 'JP', name: 'Japan', flag: '🇯🇵', defaultConnector: 'conn-osm' },
+  { code: 'IN', name: 'India', flag: '🇮🇳', defaultConnector: 'conn-osm' },
+  { code: 'SG', name: 'Singapore', flag: '🇸🇬', defaultConnector: 'conn-osm' },
+  { code: 'GLOBAL', name: 'Global', flag: '🌐', defaultConnector: 'conn-osm' },
 ];
 
 const PRESET_CATEGORIES = [
@@ -46,9 +53,14 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
   onAddLeadToCrm,
   onBatchAddLeads,
   onInspectLead,
+  initialCountry,
 }) => {
-  const [selectedCountry, setSelectedCountry] = useState('NO');
-  const [city, setCity] = useState('');
+  const [countries, setCountries] = useState<CountryReference[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState(initialCountry || 'NO');
+  const [divisions, setDivisions] = useState<AdministrativeDivision[]>([]);
+  const [selectedDivision, setSelectedDivision] = useState('');
+  const [city, setCity] = useState(initialCountry && initialCountry !== 'NO' ? '' : 'Trondheim');
+  const [citySuggestions, setCitySuggestions] = useState<CityReference[]>([]);
   const [query, setQuery] = useState('Semiconductor');
   const [connectorId, setConnectorId] = useState('conn-brreg');
   const [isLoading, setIsLoading] = useState(false);
@@ -58,24 +70,98 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
   const [errors, setErrors] = useState<string[]>([]);
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
 
+  // Sync initialCountry when changed from Capability Matrix navigation
+  useEffect(() => {
+    if (initialCountry) {
+      handleCountryChange(initialCountry);
+    }
+  }, [initialCountry]);
+
+  // Load countries on mount
+  useEffect(() => {
+    apiFetch('/api/geo/countries')
+      .then((res) => res.json())
+      .then((data: CountryReference[]) => {
+        if (Array.isArray(data)) {
+          setCountries(data);
+        }
+      })
+      .catch((err) => console.error('Failed to load countries:', err));
+  }, []);
+
+  // When selected country changes, load divisions and adjust default connector
+  useEffect(() => {
+    if (selectedCountry === 'GLOBAL') {
+      setDivisions([]);
+      setSelectedDivision('');
+      setConnectorId('conn-osm');
+      return;
+    }
+
+    // Auto-select best connector
+    if (selectedCountry === 'NO') {
+      setConnectorId('conn-brreg');
+    } else if (selectedCountry === 'GB') {
+      setConnectorId('conn-companies-house');
+    } else if (selectedCountry === 'AU') {
+      setConnectorId('conn-abn');
+    } else {
+      setConnectorId('conn-osm');
+    }
+
+    // Fetch administrative divisions
+    apiFetch(`/api/geo/divisions?country=${selectedCountry}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setDivisions(data.divisions || []);
+        setSelectedDivision('');
+      })
+      .catch(() => setDivisions([]));
+
+    // Fetch popular cities for quick selection
+    apiFetch(`/api/geo/cities?country=${selectedCountry}&limit=8`)
+      .then((res) => res.json())
+      .then((data) => setCitySuggestions(data.cities || []))
+      .catch(() => setCitySuggestions([]));
+  }, [selectedCountry]);
+
+  // When division or city search query changes, refresh city suggestions via server
+  useEffect(() => {
+    if (selectedCountry !== 'GLOBAL') {
+      const params = new URLSearchParams();
+      params.set('country', selectedCountry);
+      if (selectedDivision) params.set('division', selectedDivision);
+      if (city.trim()) params.set('query', city.trim());
+      params.set('limit', '8');
+      apiFetch(`/api/geo/cities?${params.toString()}`)
+        .then((res) => res.json())
+        .then((data) => setCitySuggestions(data.cities || []))
+        .catch(() => setCitySuggestions([]));
+    }
+  }, [selectedDivision, selectedCountry, city]);
+
+  const currentCountryObj = countries.find((c) => c.code === selectedCountry);
+
   const handleCountryChange = (code: string) => {
     setSelectedCountry(code);
-    const countryObj = COUNTRIES.find((c) => c.code === code);
-    if (countryObj) {
-      setConnectorId(countryObj.defaultConnector);
-      if (code === 'NO') {
-        setQuery('Semiconductor');
-        setCity('Trondheim');
-      } else if (code === 'GB') {
-        setQuery('Artificial Intelligence');
-        setCity('London');
-      } else if (code === 'AU') {
-        setQuery('Technology');
-        setCity('Sydney');
-      } else {
-        setQuery('Clinic');
-        setCity('Berlin');
-      }
+    if (code === 'NO') {
+      setQuery('Semiconductor');
+      setCity('Trondheim');
+    } else if (code === 'GB') {
+      setQuery('Artificial Intelligence');
+      setCity('London');
+    } else if (code === 'AU') {
+      setQuery('Technology');
+      setCity('Sydney');
+    } else if (code === 'US') {
+      setQuery('Biotech');
+      setCity('Boston');
+    } else if (code === 'DE') {
+      setQuery('Engineering');
+      setCity('Munich');
+    } else {
+      setQuery('Commercial');
+      setCity('');
     }
   };
 
@@ -90,12 +176,13 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     setProviderNote('');
 
     try {
-      const res = await fetch('/api/discovery/search', {
+      const res = await apiFetch('/api/discovery/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query,
           countryCode: selectedCountry === 'GLOBAL' ? undefined : selectedCountry,
+          region: selectedDivision || undefined,
           city: city.trim() || undefined,
           connectorId,
         }),
@@ -143,13 +230,13 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
               Global Business Discovery & Official Registry Engine
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Query official corporate registers and geographic POI data sources with transparent provenance.
+              Query official corporate registers, company numbers, and geographic POI across 195 sovereign states.
             </p>
           </div>
 
-          {/* Country Selection Chips */}
+          {/* Quick Country Buttons */}
           <div className="flex items-center gap-1.5 flex-wrap">
-            {COUNTRIES.map((c) => {
+            {FEATURED_COUNTRIES.map((c) => {
               const isSelected = selectedCountry === c.code;
               return (
                 <button
@@ -170,6 +257,53 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
           </div>
         </div>
 
+        {/* Global Country Picker & Info Badge */}
+        <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">{currentCountryObj?.flag || '🌐'}</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-white">
+                  {currentCountryObj?.name || 'Global Multilateral Jurisdiction'}
+                </span>
+                {currentCountryObj?.nativeName && (
+                  <span className="text-[11px] text-slate-400 font-medium">
+                    ({currentCountryObj.nativeName})
+                  </span>
+                )}
+                {currentCountryObj?.isSovereignState && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800">
+                    Sovereign State
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2">
+                <span>ISO: {currentCountryObj?.code || 'GLOBAL'} / {currentCountryObj?.alpha3 || 'WLD'}</span>
+                <span>•</span>
+                <span>Dialing: {currentCountryObj?.callingCode || 'E.164'}</span>
+                <span>•</span>
+                <span>Currency: {currentCountryObj?.currency || 'USD'} ({currentCountryObj?.currencySymbol || '$'})</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <label className="text-[11px] text-slate-400 font-medium">All 195 States:</label>
+            <select
+              value={selectedCountry}
+              onChange={(e) => handleCountryChange(e.target.value)}
+              className="bg-slate-900 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 max-w-[200px]"
+            >
+              <option value="GLOBAL">🌐 Global / Any Jurisdiction</option>
+              {countries.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.flag} {c.name} ({c.code})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         {/* Search Form */}
         <form onSubmit={handleSearch} className="grid grid-cols-1 md:grid-cols-12 gap-3">
           <div className="md:col-span-4">
@@ -181,16 +315,38 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="e.g. Nordic Semiconductor, DeepMind, Dental..."
+                placeholder="e.g. Nordic Semiconductor, DeepMind, Clinic, 923609016..."
                 className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-3 py-2 pl-9 focus:outline-none focus:border-indigo-500"
               />
               <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
             </div>
           </div>
 
-          <div className="md:col-span-3">
+          {/* Administrative Division (if present) */}
+          {divisions.length > 0 ? (
+            <div className="md:col-span-2">
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                {currentCountryObj?.addressFormat.regionLabel || 'Region'}
+              </label>
+              <select
+                value={selectedDivision}
+                onChange={(e) => setSelectedDivision(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-3 py-2 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">All {currentCountryObj?.addressFormat.regionLabel || 'Regions'} ({divisions.length})</option>
+                {divisions.map((d) => (
+                  <option key={d.code} value={d.code}>
+                    {d.name} ({d.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
+          {/* City / Locality input */}
+          <div className={divisions.length > 0 ? 'md:col-span-3' : 'md:col-span-4'}>
             <label className="block text-[11px] font-medium text-slate-400 mb-1">
-              City or Region (Optional)
+              City or Locality (Optional)
             </label>
             <div className="relative">
               <input
@@ -204,7 +360,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
             </div>
           </div>
 
-          <div className="md:col-span-3">
+          {/* Connector Selector */}
+          <div className={divisions.length > 0 ? 'md:col-span-3' : 'md:col-span-4'}>
             <label className="block text-[11px] font-medium text-slate-400 mb-1">
               Active Data Source Connector
             </label>
@@ -216,20 +373,56 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
               <option value="conn-brreg">🇳🇴 Brreg (Norway Official Registry)</option>
               <option value="conn-companies-house">🇬🇧 UK Companies House (Official)</option>
               <option value="conn-abn">🇦🇺 ABN Lookup (Australia Business Register)</option>
-              <option value="conn-osm">🌐 OpenStreetMap / Nominatim POI (Global)</option>
+              <option value="conn-osm">🌐 OpenStreetMap POI Directory (195 States)</option>
             </select>
           </div>
 
-          <div className="md:col-span-2 flex items-end">
+          {/* City Quick Suggestions */}
+          {citySuggestions.length > 0 && (
+            <div className="md:col-span-12 flex items-center gap-1.5 flex-wrap -mt-1">
+              <span className="text-[10px] text-slate-400 font-medium">Popular Cities:</span>
+              {citySuggestions.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setCity(c.name)}
+                  className={`text-[10px] px-2 py-0.5 rounded transition ${
+                    city.toLowerCase() === c.name.toLowerCase()
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Action Row */}
+          <div className="md:col-span-12 flex items-center justify-between pt-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-slate-400">Presets:</span>
+              {PRESET_CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setQuery(cat)}
+                  className="px-2 py-0.5 text-[10px] rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
             <button
               type="submit"
-              disabled={isLoading || !query.trim()}
-              className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded flex items-center justify-center gap-2 transition"
+              disabled={isLoading}
+              className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded shadow-sm transition disabled:opacity-50"
             >
               {isLoading ? (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Querying...</span>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Querying Registry...</span>
                 </>
               ) : (
                 <>
@@ -240,217 +433,199 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
             </button>
           </div>
         </form>
-
-        {/* Quick Category Chips */}
-        <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-slate-400">Quick Sectors:</span>
-          {PRESET_CATEGORIES.map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => {
-                setQuery(cat.split('&')[0].trim());
-                handleSearch();
-              }}
-              className="text-[11px] px-2 py-0.5 bg-slate-950 text-slate-400 hover:text-indigo-300 border border-slate-800 rounded transition"
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
       </div>
 
-      {/* Notifications / Error Banners */}
+      {/* Attribution & Legal Notice Banner */}
+      {attribution && (
+        <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg text-slate-400 text-xs flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+            <span>
+              <strong>Legal Provenance:</strong> {attribution}
+            </span>
+          </div>
+          {providerNote && <span className="text-amber-400 text-[11px]">{providerNote}</span>}
+        </div>
+      )}
+
+      {/* Errors Banner */}
       {errors.length > 0 && (
-        <div className="p-3 bg-rose-950/40 border border-rose-800/60 rounded-lg text-rose-300 text-xs flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <div className="font-semibold">Discovery Connector Alert:</div>
-            {errors.map((err, i) => (
-              <div key={i}>{err}</div>
-            ))}
+        <div className="p-3 bg-red-950/40 border border-red-800 rounded-lg text-red-300 text-xs space-y-1">
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+            <span>Data Connector Notice:</span>
           </div>
-        </div>
-      )}
-
-      {providerNote && (
-        <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-lg text-amber-200 text-xs flex items-start gap-2">
-          <Info className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-          <div>{providerNote}</div>
-        </div>
-      )}
-
-      {/* Search Results Section */}
-      {results.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80 px-4 py-3 rounded-lg border border-slate-800">
-            <div>
-              <span className="text-xs font-semibold text-white">
-                Discovered {results.length} Verified Real Business Records
-              </span>
-              {attribution && (
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  License: <span className="text-slate-300">{attribution}</span>
-                </p>
-              )}
+          {errors.map((err, i) => (
+            <div key={i} className="pl-6">
+              • {err}
             </div>
+          ))}
+        </div>
+      )}
 
-            <button
-              onClick={handleSaveAll}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded transition"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Import All to CRM Pipeline</span>
-            </button>
+      {/* Results Header */}
+      {results.length > 0 && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-white">Discovered Candidates</span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300">
+              {results.length} Organizations Found
+            </span>
           </div>
 
-          {/* Results Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {results.map((lead) => {
-              const isAdded = addedIds.has(lead.id);
-              const source = lead.sources[0];
+          <button
+            onClick={handleSaveAll}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded transition"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add All to CRM Pipeline</span>
+          </button>
+        </div>
+      )}
 
-              return (
-                <div
-                  key={lead.id}
-                  className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-lg p-4 flex flex-col justify-between transition group shadow-sm"
-                >
-                  <div className="space-y-2.5">
-                    {/* Header */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <h3 className="text-sm font-semibold text-white truncate group-hover:text-indigo-400 transition">
-                          {lead.companyName}
-                        </h3>
-                        {lead.registrationNumber && (
-                          <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-mono mt-0.5">
-                            <span className="text-slate-500">{lead.registrationType}:</span>
-                            <span>{lead.registrationNumber}</span>
-                          </div>
-                        )}
-                      </div>
+      {/* Results Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {results.map((lead) => {
+          const isAdded = addedIds.has(lead.id);
 
-                      {/* Confidence Score */}
-                      <div className="text-right flex-shrink-0">
-                        <span
-                          className={`inline-block px-1.5 py-0.5 text-[10px] font-bold rounded ${
-                            lead.confidenceScore >= 80
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                          }`}
-                        >
-                          {lead.confidenceScore}% Conf
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Metadata attributes */}
-                    <div className="space-y-1 text-xs text-slate-300">
-                      {lead.address?.formattedAddress && (
-                        <div className="flex items-start gap-1.5 text-slate-400">
-                          <MapPin className="w-3.5 h-3.5 text-slate-500 flex-shrink-0 mt-0.5" />
-                          <span className="truncate">{lead.address.formattedAddress}</span>
-                        </div>
-                      )}
-
-                      <div className="flex items-center gap-1.5 text-slate-400">
-                        <Building2 className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                        <span className="truncate">{lead.industry}</span>
-                      </div>
-
-                      {lead.website && (
-                        <div className="flex items-center gap-1.5 text-indigo-400">
-                          <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
-                          <a
-                            href={lead.website}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:underline truncate"
-                          >
-                            {lead.domain || lead.website}
-                          </a>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Signals preview */}
-                    <div className="pt-2 border-t border-slate-800/80 flex flex-wrap gap-1">
-                      {lead.confidenceSignals.slice(0, 2).map((sig, i) => (
-                        <span
-                          key={i}
-                          className="px-1.5 py-0.5 text-[10px] bg-slate-950 text-slate-400 rounded border border-slate-800"
-                        >
-                          {sig}
-                        </span>
-                      ))}
-                    </div>
+          return (
+            <div
+              key={lead.id}
+              className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition flex flex-col justify-between"
+            >
+              <div className="space-y-2.5">
+                {/* Header */}
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                      <Building2 className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                      <span>{lead.companyName}</span>
+                    </h3>
+                    {lead.legalName && lead.legalName !== lead.companyName && (
+                      <p className="text-[11px] text-slate-400 mt-0.5">Legal: {lead.legalName}</p>
+                    )}
                   </div>
 
-                  {/* Actions footer */}
-                  <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => onInspectLead(lead)}
-                      className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-medium transition"
-                    >
-                      <span>Deep Inspect</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      onClick={() => handleSaveIndividual(lead)}
-                      disabled={isAdded}
-                      className={`px-3 py-1 text-xs font-semibold rounded flex items-center gap-1.5 transition ${
-                        isAdded
-                          ? 'bg-slate-800 text-slate-400 cursor-default'
-                          : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                  {lead.confidenceScore >= 0 && (
+                    <div
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        lead.confidenceScore >= 80
+                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                          : lead.confidenceScore >= 60
+                          ? 'bg-blue-950 text-blue-400 border border-blue-800'
+                          : 'bg-amber-950 text-amber-400 border border-amber-800'
                       }`}
                     >
-                      {isAdded ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span>In Pipeline</span>
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="w-3 h-3" />
-                          <span>Add Lead</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                      {lead.confidenceScore}% Confidence
+                    </div>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
-      {/* Initial Explanatory Card when empty */}
-      {results.length === 0 && !isLoading && (
-        <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-6 text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-indigo-950/60 border border-indigo-800/40 flex items-center justify-center mx-auto text-indigo-400">
-            <Globe2 className="w-6 h-6" />
-          </div>
-          <div className="max-w-md mx-auto">
-            <h3 className="text-sm font-semibold text-white">Ready for Real Lead Discovery</h3>
-            <p className="text-xs text-slate-400 mt-1">
-              Select any country above, enter an industry keyword or company name, and query real open registries
-              (Norway Brreg, UK Companies House, Australia ABN, OpenStreetMap).
-            </p>
-          </div>
-          <div className="flex items-center justify-center gap-3 pt-2 text-xs text-slate-400">
-            <span className="flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> No mockups
-            </span>
-            <span className="flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Official Registries
-            </span>
-            <span className="flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Transparent Attributions
-            </span>
-          </div>
-        </div>
-      )}
+                {/* Key Attributes */}
+                <div className="grid grid-cols-2 gap-2 text-xs text-slate-400 pt-1 border-t border-slate-800/60">
+                  {lead.registrationNumber && (
+                    <div>
+                      <span className="text-slate-500 text-[10px] block">REGISTRATION ID</span>
+                      <span className="font-mono text-slate-200">
+                        {lead.registrationType ? `${lead.registrationType}: ` : ''}
+                        {lead.registrationNumber}
+                      </span>
+                    </div>
+                  )}
+
+                  {lead.address?.city && (
+                    <div>
+                      <span className="text-slate-500 text-[10px] block">LOCATION</span>
+                      <span className="text-slate-200">
+                        {lead.address.city}
+                        {lead.address.region ? `, ${lead.address.region}` : ''} ({lead.address.countryCode})
+                      </span>
+                    </div>
+                  )}
+
+                  {lead.industry && (
+                    <div className="col-span-2">
+                      <span className="text-slate-500 text-[10px] block">INDUSTRY CLASSIFICATION</span>
+                      <span className="text-slate-200">{lead.industry}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Address Display */}
+                {lead.address?.formattedAddress && (
+                  <div className="text-[11px] text-slate-400 flex items-start gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-slate-500 flex-shrink-0 mt-0.5" />
+                    <span>{lead.address.formattedAddress}</span>
+                  </div>
+                )}
+
+                {/* Signals */}
+                {lead.confidenceSignals && lead.confidenceSignals.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                    {lead.confidenceSignals.map((signal, idx) => (
+                      <span
+                        key={idx}
+                        className="text-[10px] px-2 py-0.5 bg-slate-950 text-slate-400 border border-slate-800 rounded"
+                      >
+                        {signal}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions Footer */}
+              <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-800">
+                <div className="flex items-center gap-2">
+                  {lead.website && (
+                    <a
+                      href={lead.website}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                    >
+                      <Globe2 className="w-3 h-3" />
+                      <span>Website</span>
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => onInspectLead(lead)}
+                    className="px-2.5 py-1 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded transition"
+                  >
+                    View Details
+                  </button>
+
+                  <button
+                    onClick={() => handleSaveIndividual(lead)}
+                    disabled={isAdded}
+                    className={`flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded transition ${
+                      isAdded
+                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-800 cursor-default'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    }`}
+                  >
+                    {isAdded ? (
+                      <>
+                        <Check className="w-3 h-3" />
+                        <span>Added to CRM</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-3 h-3" />
+                        <span>Add to CRM</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };

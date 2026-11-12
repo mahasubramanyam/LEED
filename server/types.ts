@@ -8,10 +8,18 @@ export interface LeadSource {
 }
 
 export interface LeadIdentifier {
-  type: 'CRN' | 'BRREG_ORG' | 'ABN' | 'DOMAIN' | 'PHONE' | 'EMAIL' | 'TAX_ID';
+  id?: string;
+  type: string;
   value: string;
+  normalizedValue?: string;
+  countryCode?: string;
+  issuingAuthority?: string;
+  source?: string;
+  status?: 'user_provided' | 'discovered' | 'syntax_validated' | 'officially_verified';
   verified: boolean;
+  createdAt?: string;
 }
+
 
 export interface LeadNote {
   id: string;

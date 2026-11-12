@@ -65,17 +65,44 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
         continue;
       }
 
-      // 2. Exact Registration Number Match
-      if (
-        a.registrationNumber &&
-        b.registrationNumber &&
-        a.registrationNumber.replace(/\s+/g, '') === b.registrationNumber.replace(/\s+/g, '')
-      ) {
+      // 2. Exact or Normalized Registration Number Match
+      const cleanRegA = (a.registrationNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const cleanRegB = (b.registrationNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (cleanRegA && cleanRegB && cleanRegA === cleanRegB) {
         matches.push({
           leadA: a,
           leadB: b,
           matchType: 'registration_number',
-          matchedValue: a.registrationNumber,
+          matchedValue: a.registrationNumber || cleanRegA,
+          similarityScore: 1.0,
+          recommendedSurvivorId: a.confidenceScore >= b.confidenceScore ? a.id : b.id,
+        });
+        continue;
+      }
+
+      // 2b. Match across multiple normalized identifiers (e.g. matching LEI, VAT, OrgNr, CRN)
+      let matchedIdent: string | null = null;
+      if (a.identifiers && b.identifiers) {
+        for (const idA of a.identifiers) {
+          const normA = (idA.normalizedValue || idA.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          if (!normA || normA.length < 5) continue;
+          for (const idB of b.identifiers) {
+            const normB = (idB.normalizedValue || idB.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            if (normA === normB && idA.type.toUpperCase() === idB.type.toUpperCase()) {
+              matchedIdent = `${idA.type}: ${idA.value}`;
+              break;
+            }
+          }
+          if (matchedIdent) break;
+        }
+      }
+
+      if (matchedIdent) {
+        matches.push({
+          leadA: a,
+          leadB: b,
+          matchType: 'registration_number',
+          matchedValue: matchedIdent,
           similarityScore: 1.0,
           recommendedSurvivorId: a.confidenceScore >= b.confidenceScore ? a.id : b.id,
         });
@@ -150,12 +177,15 @@ export function mergeLeads(
     }
   }
 
-  // Combine identifiers
-  const existingIdKeys = new Set(survivor.identifiers.map((i) => `${i.type}:${i.value}`));
+  // Combine identifiers with normalized deduplication
+  const normKey = (i: any) =>
+    `${(i.type || '').toUpperCase()}:${(i.normalizedValue || i.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')}`;
+  const existingIdKeys = new Set(survivor.identifiers.map(normKey));
   const combinedIdentifiers = [...survivor.identifiers];
   for (const ident of absorbed.identifiers) {
-    const key = `${ident.type}:${ident.value}`;
+    const key = normKey(ident);
     if (!existingIdKeys.has(key)) {
+      existingIdKeys.add(key);
       combinedIdentifiers.push(ident);
     }
   }
