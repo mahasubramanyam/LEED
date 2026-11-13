@@ -1,13 +1,25 @@
-import { CanonicalLead, MergeHistoryRecord } from '../types.js';
+import { CanonicalLead, DiscoveryDuplicateInfo, MergeHistoryRecord } from '../types.js';
 import { canonicalizeIdentifierType } from '../../shared/identifierRegistry.js';
 
 export interface DuplicateMatch {
   leadA: CanonicalLead;
   leadB: CanonicalLead;
-  matchType: 'domain' | 'registration_number' | 'phone' | 'fuzzy_name';
+  matchType: 'domain' | 'registration_number' | 'phone' | 'address' | 'fuzzy_name';
   matchedValue: string;
   similarityScore: number; // 0 to 1
   recommendedSurvivorId: string;
+  classification?: 'exact' | 'ambiguous';
+  autoMergeSafe?: boolean;
+}
+
+export interface DiscoveryDedupeAnalysis {
+  duplicateInfoByLeadId: Record<string, DiscoveryDuplicateInfo>;
+  counts: {
+    totalUnique: number;
+    existingCrmMatches: number;
+    ambiguousMatches: number;
+    crossSourceCorroborations: number;
+  };
 }
 
 // Simple Levenshtein distance for fuzzy name comparison
@@ -31,14 +43,43 @@ function levenshteinDistance(s1: string, s2: string): number {
   return dp[m][n];
 }
 
+function normalizeCompanyToken(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(ltd|limited|inc|incorporated|llc|gmbh|as|asa|pty|corp|corporation|plc)\b/gi, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
 function nameSimilarity(name1: string, name2: string): number {
-  const clean1 = name1.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
-  const clean2 = name2.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
-  if (clean1 === clean2) return 1.0;
+  const clean1 = normalizeCompanyToken(name1) || name1.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+  const clean2 = normalizeCompanyToken(name2) || name2.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+  if (clean1 === clean2 && clean1.length > 0) return 1.0;
   const maxLen = Math.max(clean1.length, clean2.length);
-  if (maxLen === 0) return 1.0;
+  if (maxLen === 0) return 0;
   const dist = levenshteinDistance(clean1, clean2);
   return Math.max(0, 1 - dist / maxLen);
+}
+
+export function normalizeAddressSignature(lead: CanonicalLead): string | null {
+  const street = (lead.address?.street || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+  const city = (lead.address?.city || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+  const postal = (lead.address?.postalCode || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+  const country = (lead.address?.countryCode || '').toUpperCase().trim();
+
+  if (street.length < 5 || (!city && !postal) || !country) {
+    return null;
+  }
+  return `${country}|${city || postal}|${street}`;
 }
 
 export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
@@ -62,6 +103,8 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
           matchedValue: a.domain,
           similarityScore: 1.0,
           recommendedSurvivorId: a.confidenceScore >= b.confidenceScore ? a.id : b.id,
+          classification: 'exact',
+          autoMergeSafe: true,
         });
         continue;
       }
@@ -77,6 +120,8 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
           matchedValue: a.registrationNumber || cleanRegA,
           similarityScore: 1.0,
           recommendedSurvivorId: a.confidenceScore >= b.confidenceScore ? a.id : b.id,
+          classification: 'exact',
+          autoMergeSafe: true,
         });
         continue;
       }
@@ -108,6 +153,8 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
           matchedValue: matchedIdent,
           similarityScore: 1.0,
           recommendedSurvivorId: a.confidenceScore >= b.confidenceScore ? a.id : b.id,
+          classification: 'exact',
+          autoMergeSafe: true,
         });
         continue;
       }
@@ -123,11 +170,31 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
           matchedValue: a.phoneNormalized || a.phone || phoneA,
           similarityScore: 0.95,
           recommendedSurvivorId: a.confidenceScore >= b.confidenceScore ? a.id : b.id,
+          classification: 'exact',
+          autoMergeSafe: true,
         });
         continue;
       }
 
-      // 4. Fuzzy Name Match (same city or same country)
+      // 4. Normalized Street Address Match (ambiguous unless names are also highly similar)
+      const addrA = normalizeAddressSignature(a);
+      const addrB = normalizeAddressSignature(b);
+      if (addrA && addrB && addrA === addrB) {
+        const sim = nameSimilarity(a.companyName, b.companyName);
+        matches.push({
+          leadA: a,
+          leadB: b,
+          matchType: 'address',
+          matchedValue: a.address?.formattedAddress || `${a.address?.street}, ${a.address?.city || a.address?.postalCode}`,
+          similarityScore: parseFloat(Math.max(0.85, sim).toFixed(2)),
+          recommendedSurvivorId: a.confidenceScore >= b.confidenceScore ? a.id : b.id,
+          classification: sim >= 0.85 ? 'exact' : 'ambiguous',
+          autoMergeSafe: sim >= 0.9,
+        });
+        continue;
+      }
+
+      // 5. Fuzzy Name Match (same country)
       const sameCountry =
         a.address?.countryCode &&
         b.address?.countryCode &&
@@ -143,6 +210,8 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
             matchedValue: `${a.companyName} ~ ${b.companyName}`,
             similarityScore: parseFloat(sim.toFixed(2)),
             recommendedSurvivorId: a.confidenceScore >= b.confidenceScore ? a.id : b.id,
+            classification: 'ambiguous',
+            autoMergeSafe: false,
           });
         }
       }
@@ -150,6 +219,264 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
   }
 
   return matches;
+}
+
+interface PairComparison {
+  classification: 'exact' | 'ambiguous';
+  matchType: DuplicateMatch['matchType'];
+  matchedValue: string;
+  similarityScore: number;
+  note: string;
+}
+
+function compareLeadPair(candidate: CanonicalLead, target: CanonicalLead): PairComparison | null {
+  if (candidate.id === target.id) {
+    return {
+      classification: 'exact',
+      matchType: 'registration_number',
+      matchedValue: target.id,
+      similarityScore: 1.0,
+      note: 'Identical canonical lead ID',
+    };
+  }
+
+  // 1. Registration number
+  const regA = (candidate.registrationNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const regB = (target.registrationNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (regA.length >= 4 && regB.length >= 4 && regA === regB) {
+    return {
+      classification: 'exact',
+      matchType: 'registration_number',
+      matchedValue: target.registrationNumber || regB,
+      similarityScore: 1.0,
+      note: `Exact registration number match (${target.registrationNumber || regB})`,
+    };
+  }
+
+  // 2. Canonical identifiers (VAT, LEI, ORG, CRN, etc.)
+  for (const idA of candidate.identifiers || []) {
+    const normA = (idA.normalizedValue || idA.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (normA.length < 5) continue;
+    const typeA = canonicalizeIdentifierType(idA.type, idA.countryCode || candidate.address?.countryCode);
+    if (typeA === 'DOMAIN' || typeA === 'PHONE' || typeA === 'EMAIL') continue;
+    for (const idB of target.identifiers || []) {
+      const normB = (idB.normalizedValue || idB.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const typeB = canonicalizeIdentifierType(idB.type, idB.countryCode || target.address?.countryCode);
+      if (normA === normB && typeA === typeB) {
+        return {
+          classification: 'exact',
+          matchType: 'registration_number',
+          matchedValue: `${typeA}: ${idB.value}`,
+          similarityScore: 1.0,
+          note: `Canonical identifier match (${typeA}: ${idB.value})`,
+        };
+      }
+    }
+  }
+
+  // 3. Domain match
+  if (candidate.domain && target.domain && candidate.domain.toLowerCase() === target.domain.toLowerCase()) {
+    return {
+      classification: 'exact',
+      matchType: 'domain',
+      matchedValue: target.domain,
+      similarityScore: 1.0,
+      note: `Exact domain match (${target.domain})`,
+    };
+  }
+
+  // 4. Phone match
+  const phoneA = (candidate.phoneNormalized || candidate.phone || '').replace(/[^0-9]/g, '');
+  const phoneB = (target.phoneNormalized || target.phone || '').replace(/[^0-9]/g, '');
+  if (phoneA.length >= 7 && phoneB.length >= 7 && phoneA === phoneB) {
+    return {
+      classification: 'exact',
+      matchType: 'phone',
+      matchedValue: target.phoneNormalized || target.phone || phoneB,
+      similarityScore: 0.96,
+      note: `Exact telephone match (${target.phoneNormalized || target.phone})`,
+    };
+  }
+
+  // 5. Normalized address match
+  const addrA = normalizeAddressSignature(candidate);
+  const addrB = normalizeAddressSignature(target);
+  const nameSim = nameSimilarity(candidate.companyName, target.companyName);
+  if (addrA && addrB && addrA === addrB) {
+    if (nameSim >= 0.85) {
+      return {
+        classification: 'exact',
+        matchType: 'address',
+        matchedValue: target.address?.formattedAddress || addrB,
+        similarityScore: parseFloat(Math.max(0.92, nameSim).toFixed(2)),
+        note: 'Exact street address and name match',
+      };
+    }
+    return {
+      classification: 'ambiguous',
+      matchType: 'address',
+      matchedValue: target.address?.formattedAddress || addrB,
+      similarityScore: parseFloat(nameSim.toFixed(2)),
+      note: 'Same physical address with different business name (requires owner review; not auto-merged)',
+    };
+  }
+
+  // 6. Fuzzy / cross-country name match
+  const sameCountry =
+    candidate.address?.countryCode &&
+    target.address?.countryCode &&
+    candidate.address.countryCode.toUpperCase() === target.address.countryCode.toUpperCase();
+  const sameCity =
+    candidate.address?.city &&
+    target.address?.city &&
+    candidate.address.city.toLowerCase().trim() === target.address.city.toLowerCase().trim();
+
+  if (sameCountry) {
+    if (nameSim === 1.0 && sameCity) {
+      return {
+        classification: 'exact',
+        matchType: 'fuzzy_name',
+        matchedValue: `${target.companyName} (${target.address?.city})`,
+        similarityScore: 1.0,
+        note: 'Exact company name and city match in same country',
+      };
+    }
+    if (nameSim >= 0.82) {
+      return {
+        classification: 'ambiguous',
+        matchType: 'fuzzy_name',
+        matchedValue: target.companyName,
+        similarityScore: parseFloat(nameSim.toFixed(2)),
+        note: `Similar business name (${Math.round(nameSim * 100)}%) in ${target.address?.countryCode} — requires owner review`,
+      };
+    }
+  } else if (nameSim >= 0.96) {
+    return {
+      classification: 'ambiguous',
+      matchType: 'fuzzy_name',
+      matchedValue: `${target.companyName} (${target.address?.countryCode || 'Foreign'})`,
+      similarityScore: parseFloat(nameSim.toFixed(2)),
+      note: `Matching corporate name in another country (${target.address?.countryCode}) — multi-national entity review required`,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Classifies discovered leads against existing CRM leads AND cross-source peers in the same batch.
+ * Never auto-merges uncertain/ambiguous pairs; surfaces explicit review metadata instead.
+ */
+export function detectDiscoveryDuplicates(
+  candidates: CanonicalLead[],
+  existingCrmLeads: CanonicalLead[]
+): DiscoveryDedupeAnalysis {
+  const duplicateInfoByLeadId: Record<string, DiscoveryDuplicateInfo> = {};
+  let existingCrmMatches = 0;
+  let ambiguousMatches = 0;
+  let crossSourceCorroborations = 0;
+  let totalUnique = 0;
+
+  for (const cand of candidates) {
+    let bestExact: { target: CanonicalLead; cmp: PairComparison } | null = null;
+    let bestAmbiguous: { target: CanonicalLead; cmp: PairComparison } | null = null;
+
+    for (const crm of existingCrmLeads) {
+      const cmp = compareLeadPair(cand, crm);
+      if (!cmp) continue;
+      if (cmp.classification === 'exact') {
+        if (!bestExact || cmp.similarityScore > bestExact.cmp.similarityScore) {
+          bestExact = { target: crm, cmp };
+        }
+      } else if (!bestAmbiguous || cmp.similarityScore > bestAmbiguous.cmp.similarityScore) {
+        bestAmbiguous = { target: crm, cmp };
+      }
+    }
+
+    const crossMatches: string[] = [];
+    let bestCrossAmbiguous: { target: CanonicalLead; cmp: PairComparison } | null = null;
+
+    for (const peer of candidates) {
+      if (peer.id === cand.id) continue;
+      const cmp = compareLeadPair(cand, peer);
+      if (!cmp) continue;
+      if (cmp.classification === 'exact') {
+        crossMatches.push(peer.id);
+      } else if (!bestCrossAmbiguous || cmp.similarityScore > bestCrossAmbiguous.cmp.similarityScore) {
+        bestCrossAmbiguous = { target: peer, cmp };
+      }
+    }
+
+    if (bestExact) {
+      existingCrmMatches++;
+      duplicateInfoByLeadId[cand.id] = {
+        status: 'existing_crm',
+        classification: 'exact',
+        requiresReview: false,
+        matchedLeadId: bestExact.target.id,
+        matchedLeadName: bestExact.target.companyName,
+        matchType: bestExact.cmp.matchType,
+        matchedValue: bestExact.cmp.matchedValue,
+        similarityScore: bestExact.cmp.similarityScore,
+        crossSourceLeadIds: crossMatches.length > 0 ? crossMatches : undefined,
+        note: bestExact.cmp.note,
+      };
+    } else if (bestAmbiguous) {
+      ambiguousMatches++;
+      duplicateInfoByLeadId[cand.id] = {
+        status: 'ambiguous_crm',
+        classification: 'ambiguous',
+        requiresReview: true,
+        matchedLeadId: bestAmbiguous.target.id,
+        matchedLeadName: bestAmbiguous.target.companyName,
+        matchType: bestAmbiguous.cmp.matchType,
+        matchedValue: bestAmbiguous.cmp.matchedValue,
+        similarityScore: bestAmbiguous.cmp.similarityScore,
+        crossSourceLeadIds: crossMatches.length > 0 ? crossMatches : undefined,
+        note: bestAmbiguous.cmp.note,
+      };
+    } else if (crossMatches.length > 0) {
+      crossSourceCorroborations++;
+      totalUnique++;
+      duplicateInfoByLeadId[cand.id] = {
+        status: 'cross_source_match',
+        classification: 'exact',
+        requiresReview: false,
+        crossSourceLeadIds: crossMatches,
+        note: `Corroborated across ${crossMatches.length + 1} discovered records`,
+      };
+    } else if (bestCrossAmbiguous) {
+      ambiguousMatches++;
+      duplicateInfoByLeadId[cand.id] = {
+        status: 'cross_source_match',
+        classification: 'ambiguous',
+        requiresReview: true,
+        matchedLeadId: bestCrossAmbiguous.target.id,
+        matchedLeadName: bestCrossAmbiguous.target.companyName,
+        matchType: bestCrossAmbiguous.cmp.matchType,
+        matchedValue: bestCrossAmbiguous.cmp.matchedValue,
+        similarityScore: bestCrossAmbiguous.cmp.similarityScore,
+        note: bestCrossAmbiguous.cmp.note,
+      };
+    } else {
+      totalUnique++;
+      duplicateInfoByLeadId[cand.id] = {
+        status: 'unique',
+        classification: 'none',
+        requiresReview: false,
+      };
+    }
+  }
+
+  return {
+    duplicateInfoByLeadId,
+    counts: {
+      totalUnique,
+      existingCrmMatches,
+      ambiguousMatches,
+      crossSourceCorroborations,
+    },
+  };
 }
 
 export function mergeLeads(

@@ -169,9 +169,23 @@ export class AbnConnector implements IConnector {
 
     const res = await searchAbn(query);
     const retrievedAt = new Date().toISOString();
+    const cityFilter = request.city?.trim().toLowerCase();
+    const postalFilter = request.postalCode?.trim().toLowerCase().replace(/\s+/g, '');
+    const industryFilter = (request.industry || request.category || request.businessType || '').trim().toLowerCase();
+
     const results = res.leads
       .map((l) => this.normalizeResult(l, retrievedAt))
-      .filter((r): r is StandardizedConnectorResult => r !== null);
+      .filter((r): r is StandardizedConnectorResult => r !== null)
+      .filter((r) => {
+        if (cityFilter && !(r.company.address?.city || '').toLowerCase().includes(cityFilter)) return false;
+        if (postalFilter && !(r.company.address?.postalCode || '').toLowerCase().replace(/\s+/g, '').includes(postalFilter)) {
+          return false;
+        }
+        if (industryFilter && !`${r.company.industry || ''} ${r.company.category || ''}`.toLowerCase().includes(industryFilter)) {
+          return false;
+        }
+        return true;
+      });
 
     const notes = [res.message];
     if (request.region?.trim()) {

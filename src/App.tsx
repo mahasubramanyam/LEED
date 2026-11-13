@@ -600,6 +600,7 @@ export default function App() {
                   onAddLeadToCrm={handleAddLeadToCrm}
                   onBatchAddLeads={handleBatchAddLeads}
                   onInspectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  onRefreshLeads={fetchAllData}
                   initialCountry={discoveryInitialCountry}
                 />
               )}

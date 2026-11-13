@@ -59,6 +59,9 @@ const BRREG_METADATA: ConnectorMetadata = {
   supportsAllCountries: false,
   supportsRegionFilter: false,
   supportsCityFilter: true,
+  supportsPostalCodeFilter: true,
+  supportsRadiusFilter: false,
+  supportsIndustryFilter: true,
   supportedIdentifierTypes: ['NO_ORG'],
   capabilities: ['company_search', 'registry_lookup', 'pagination', 'connection_test'],
   credentialRequirements: {
@@ -149,7 +152,11 @@ export class BrregConnector implements IConnector {
     request: ConnectorSearchRequest,
     context: ConnectorExecutionContext
   ): Promise<ConnectorSearchResponse> {
-    const query = request.query.trim();
+    const rawDomain = (request.domain || request.website || '').trim();
+    const cleanDomainFilter = rawDomain
+      ? rawDomain.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].toLowerCase()
+      : undefined;
+    const query = (request.query || cleanDomainFilter?.split('.')[0] || '').trim();
     if (!query) {
       throw new ConnectorError({
         category: 'invalid_request',
@@ -172,6 +179,9 @@ export class BrregConnector implements IConnector {
       url.searchParams.set('organisasjonsnummer', cleanDigits);
     } else {
       url.searchParams.set('navn', query);
+    }
+    if (request.postalCode?.trim()) {
+      url.searchParams.set('postnummer', request.postalCode.trim().replace(/\s+/g, ''));
     }
     url.searchParams.set('page', String(pageZeroBased));
     url.searchParams.set('size', String(size));
@@ -214,12 +224,28 @@ export class BrregConnector implements IConnector {
     const enheter = data._embedded?.enheter || [];
     const retrievedAt = new Date().toISOString();
     const cityFilter = request.city?.trim().toLowerCase();
+    const postalFilter = request.postalCode?.trim().replace(/\s+/g, '').toLowerCase();
+    const industryFilter = (request.industry || request.category || request.businessType || '').trim().toLowerCase();
 
     const filtered = enheter.filter((e) => {
-      if (!cityFilter) return true;
       const addr = e.forretningsadresse || e.postadresse;
-      const city = addr?.poststed || '';
-      return city.toLowerCase().includes(cityFilter);
+      if (cityFilter) {
+        const city = addr?.poststed || '';
+        if (!city.toLowerCase().includes(cityFilter)) return false;
+      }
+      if (postalFilter) {
+        const pCode = (addr?.postnummer || '').replace(/\s+/g, '').toLowerCase();
+        if (pCode && !pCode.startsWith(postalFilter)) return false;
+      }
+      if (industryFilter) {
+        const hay = `${e.naeringskode1?.beskrivelse || ''} ${e.naeringskode1?.kode || ''} ${e.organisasjonsform?.beskrivelse || ''} ${e.organisasjonsform?.kode || ''}`.toLowerCase();
+        if (!hay.includes(industryFilter)) return false;
+      }
+      if (cleanDomainFilter) {
+        const site = (e.hjemmeside || '').toLowerCase();
+        if (!site.includes(cleanDomainFilter)) return false;
+      }
+      return true;
     });
 
     const results = filtered
@@ -231,7 +257,7 @@ export class BrregConnector implements IConnector {
     const notes: string[] = [];
     if (request.region?.trim()) {
       notes.push(
-        `Brreg search endpoint filters by company name/org number (and city poststed) only; region "${request.region.trim()}" was not applied by the upstream registry.`
+        `Brreg search endpoint filters by company name/org number (plus postnummer/city poststed) only; region "${request.region.trim()}" was not applied by the upstream registry.`
       );
     }
 

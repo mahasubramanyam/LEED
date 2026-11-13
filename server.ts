@@ -20,7 +20,8 @@ import {
   generateMeetingBriefWithAi,
   generateMarketReportWithAi,
 } from './server/gemini.js';
-import { CanonicalLead } from './server/types.js';
+import { CanonicalLead, DiscoverySearchRequest } from './server/types.js';
+import { discoveryService } from './server/discovery/discoveryService.js';
 import {
   requireOwnerAuth,
   setSessionCookie,
@@ -1156,13 +1157,17 @@ protectedApi.post('/leads/batch-import', async (req: Request, res: Response) => 
       ? await postgresStorage.batchUpsertLeads(validLeads, { skipDuplicates })
       : storage.batchUpsertLeads(validLeads, { skipDuplicates });
 
+    const allErrors = [...errors, ...(result.errors || [])];
+    const totalFailed = errors.length + (result.failed || 0);
+
     res.json({
       success: true,
       added: result.added,
       updated: result.updated,
       skipped: result.skipped,
-      failed: errors.length,
-      errors: errors.length > 0 ? errors : undefined,
+      failed: totalFailed,
+      errors: allErrors.length > 0 ? allErrors : undefined,
+      savedLeadIds: result.savedLeadIds,
       totalProcessed: leads.length,
     });
   } catch (err: unknown) {
@@ -1269,166 +1274,306 @@ protectedApi.post('/leads/:id/activities', async (req: Request, res: Response) =
   }
 });
 
-// Multi-Source Discovery Engine (Unified Connector Execution Engine)
+// Phase 5 Global Business Discovery Engine (Unified Connector Execution Engine)
 protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
-  const { query, countryCode, region, city, connectorId, autoSave, page, pageSize, fetchAllPages, maxPages, requestId } =
-    req.body;
+  const payload = (req.body || {}) as DiscoverySearchRequest;
 
-  if (!query || typeof query !== 'string' || query.trim().length === 0) {
-    res.status(400).json({ error: 'Search query is required' });
+  ensureConnectorsRegistered();
+
+  const { isPg } = checkStorageEngine();
+  try {
+    const [settings, configs, existingCrmLeads] = await Promise.all([
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+      isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+      isPg ? postgresStorage.getLeads() : Promise.resolve(storage.getLeads()),
+    ]);
+
+    for (const [id, cfg] of Object.entries(configs)) {
+      if (typeof cfg?.enabled === 'boolean') {
+        connectorRegistry.setEnabledOverride(id, cfg.enabled);
+      }
+    }
+
+    const result = await discoveryService.executeSearch(payload, {
+      registry: connectorRegistry,
+      executionEngine: connectorExecutionEngine,
+      configs,
+      userAgent: settings.userAgent,
+      existingCrmLeads,
+      onRecordRun: async (run) => {
+        if (isPg) await postgresStorage.recordConnectorRun(run);
+        else storage.recordConnectorRun(run);
+      },
+    });
+
+    if (payload.autoSave && result.leads.length > 0) {
+      const session = discoveryService.getSession(result.searchId);
+      const toSave = session ? session.leads : result.leads;
+      const skipDuplicates = payload.duplicatePolicy === 'skip';
+      if (isPg) await postgresStorage.batchUpsertLeads(toSave, { skipDuplicates });
+      else storage.batchUpsertLeads(toSave, { skipDuplicates });
+    }
+
+    res.json(result);
+  } catch (globalErr: unknown) {
+    if (globalErr instanceof ConnectorError) {
+      const status =
+        globalErr.category === 'invalid_request' || globalErr.category === 'configuration_error'
+          ? 400
+          : globalErr.category === 'rate_limited'
+          ? 429
+          : 500;
+      res.status(status).json({
+        error: redactSecrets(globalErr.safeMessage),
+        errorCategory: globalErr.category,
+      });
+      return;
+    }
+    const msg = globalErr instanceof Error ? globalErr.message : String(globalErr);
+    res.status(500).json({ error: `Discovery failed: ${redactSecrets(msg)}` });
+  }
+});
+
+// Server-side paginated results & filtering for an active discovery session
+protectedApi.get('/discovery/results/:searchId', (req: Request, res: Response) => {
+  const { searchId } = req.params;
+  const page = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+  const pageSize = req.query.pageSize ? parseInt(String(req.query.pageSize), 10) : 25;
+  const duplicateFilter = (req.query.duplicateFilter as any) || 'all';
+  const connectorId = req.query.connectorId ? String(req.query.connectorId) : undefined;
+  const countryCode = req.query.countryCode ? String(req.query.countryCode) : undefined;
+  const minConfidence = req.query.minConfidence ? parseInt(String(req.query.minConfidence), 10) : undefined;
+  const sortBy = req.query.sortBy === 'name_asc' ? 'name_asc' : 'confidence_desc';
+
+  const pageData = discoveryService.getPaginatedResults(searchId, {
+    page,
+    pageSize,
+    duplicateFilter,
+    connectorId,
+    countryCode,
+    minConfidence,
+    sortBy,
+  });
+
+  if (!pageData) {
+    res.status(404).json({
+      error: 'Discovery search session expired or not found. Re-run the discovery query.',
+      code: 'SEARCH_SESSION_NOT_FOUND',
+    });
+    return;
+  }
+
+  res.json(pageData);
+});
+
+// Cancel an in-flight discovery search cleanly
+protectedApi.post('/discovery/cancel/:requestId', async (req: Request, res: Response) => {
+  const { requestId } = req.params;
+  const cancelledDiscovery = discoveryService.cancelSearch(requestId);
+  const cancelledConnector = connectorExecutionEngine.cancelExecution(requestId);
+  const cancelled = cancelledDiscovery || cancelledConnector;
+
+  const { isPg } = checkStorageEngine();
+  if (isPg && req.owner) {
+    await postgresStorage.recordAuditEvent(
+      'DISCOVERY_SEARCH_CANCELLED',
+      req.owner.email,
+      'discovery_search',
+      requestId,
+      { cancelledDiscovery, cancelledConnector },
+      normalizeClientIp(req)
+    );
+  }
+
+  res.json({
+    success: true,
+    cancelled,
+    requestId,
+    message: cancelled ? 'Discovery search aborted cleanly.' : 'No active execution matched that request ID.',
+  });
+});
+
+// Recent discovery execution history (from connector_runs, secrets redacted)
+protectedApi.get('/discovery/history', async (req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  const limit = req.query.limit ? Math.min(100, Math.max(1, parseInt(String(req.query.limit), 10) || 25)) : 25;
+
+  try {
+    const { isPg } = checkStorageEngine();
+    const runs = isPg
+      ? await postgresStorage.getConnectorRuns(undefined, limit * 2)
+      : storage.getConnectorRuns(undefined, limit * 2);
+
+    const history = runs
+      .filter((r) => r.operation === 'search' || r.operation === 'enrich' || r.operation === 'ai_inference')
+      .slice(0, limit)
+      .map((r) => {
+        const meta = connectorRegistry.getById(r.connectorId)?.getMetadata();
+        return {
+          id: r.id,
+          connectorId: r.connectorId,
+          connectorName: meta?.shortName || meta?.name || r.connectorId,
+          operation: r.operation,
+          queryParams: r.queryParams,
+          startedAt: r.startedAt,
+          completedAt: r.completedAt,
+          durationMs: r.durationMs,
+          status: r.status,
+          recordsDiscovered: r.recordsDiscovered,
+          recordsNormalized: r.recordsNormalized,
+          errorCategory: r.errorCategory,
+          diagnosticSummary: r.diagnosticSummary ? redactSecrets(r.diagnosticSummary) : undefined,
+          requestId: r.requestId,
+        };
+      });
+
+    res.json({ history });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Enrich a discovered business candidate via Web Inspector &/or Gemini AI
+protectedApi.post('/discovery/enrich', async (req: Request, res: Response) => {
+  const { searchId, leadId, lead, runWebInspector = true, runAi = true } = req.body || {};
+
+  let targetLead: CanonicalLead | undefined = lead;
+  if (!targetLead && searchId && leadId) {
+    const session = discoveryService.getSession(String(searchId));
+    targetLead = session?.leads.find((l) => l.id === leadId);
+  }
+
+  if (!targetLead || !targetLead.companyName) {
+    res.status(400).json({ error: 'Valid lead object or active searchId + leadId is required for enrichment.' });
     return;
   }
 
   ensureConnectorsRegistered();
 
-  const trimmedQuery = query.trim();
-  const cCode = (countryCode || '').toUpperCase().trim();
-  const cleanCity = typeof city === 'string' && city.trim() ? city.trim() : undefined;
-  const cleanRegion = typeof region === 'string' && region.trim() ? region.trim() : undefined;
-  const results: CanonicalLead[] = [];
-  const errors: string[] = [];
-  const errorDetails: Array<{ connectorId: string; category: string; message: string }> = [];
-  const notes: string[] = [];
-  let attribution = '';
-  let abnLookupInfo: { isLiveApi: boolean; lookupMode: string; isChecksumValid?: boolean } | undefined;
-  let pagination: any;
-  let lastRunId: string | undefined;
+  try {
+    const { isPg } = checkStorageEngine();
+    const configs = isPg ? await postgresStorage.getConnectorConfigs() : storage.getConnectorConfigs();
 
-  const { isPg } = checkStorageEngine();
-  const [settings, configs] = await Promise.all([
-    isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
-    isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
-  ]);
+    const enriched = await discoveryService.enrichCandidate(
+      {
+        searchId: searchId ? String(searchId) : undefined,
+        lead: targetLead,
+        runWebInspector: Boolean(runWebInspector),
+        runAi: Boolean(runAi),
+      },
+      {
+        configs,
+        onRecordRun: async (run) => {
+          if (isPg) await postgresStorage.recordConnectorRun(run);
+          else storage.recordConnectorRun(run);
+        },
+      }
+    );
 
-  for (const [id, cfg] of Object.entries(configs)) {
-    if (typeof cfg?.enabled === 'boolean') {
-      connectorRegistry.setEnabledOverride(id, cfg.enabled);
+    res.json(enriched);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Enrichment failed: ${redactSecrets(msg)}` });
+  }
+});
+
+// Duplicate-aware transactional save from Discovery results into CRM
+protectedApi.post('/discovery/save', async (req: Request, res: Response) => {
+  const { searchId, leadIds, leads: inlineLeads, duplicatePolicy = 'merge_preserve_crm' } = req.body || {};
+
+  let candidateLeads: CanonicalLead[] = [];
+  const session = searchId ? discoveryService.getSession(String(searchId)) : undefined;
+
+  if (Array.isArray(inlineLeads) && inlineLeads.length > 0) {
+    candidateLeads = inlineLeads;
+  } else if (session) {
+    if (Array.isArray(leadIds) && leadIds.length > 0) {
+      const idSet = new Set(leadIds.map(String));
+      candidateLeads = session.leads.filter((l) => idSet.has(l.id));
+    } else {
+      candidateLeads = session.leads;
     }
+  }
+
+  if (candidateLeads.length === 0) {
+    res.status(400).json({ error: 'No valid discovered leads supplied to save to CRM.' });
+    return;
   }
 
   try {
-    const targetIds: string[] = [];
-    if (connectorId) {
-      const explicit = connectorRegistry.getById(connectorId);
-      if (!explicit) {
-        res.status(404).json({ error: `Unknown connector "${connectorId}"` });
-        return;
-      }
-      const cfg = configs[connectorId];
-      if (!(cfg?.enabled ?? connectorRegistry.isEnabled(connectorId))) {
-        res.status(400).json({
-          error: `${explicit.getMetadata().name} is currently disabled. Enable it in Connectors Hub before running searches.`,
-          errorCategory: 'configuration_error',
-        });
-        return;
-      }
-      targetIds.push(connectorId);
-    } else {
-      if (cCode === 'NO') targetIds.push('conn-brreg');
-      else if (cCode === 'GB') targetIds.push('conn-companies-house');
-      else if (cCode === 'AU') targetIds.push('conn-abn');
-      else targetIds.push('conn-osm');
-    }
+    const { isPg } = checkStorageEngine();
+    const skipDuplicates = duplicatePolicy === 'skip';
+    const result = isPg
+      ? await postgresStorage.batchUpsertLeads(candidateLeads, { skipDuplicates })
+      : storage.batchUpsertLeads(candidateLeads, { skipDuplicates });
 
-    const runConnectorSearch = async (targetId: string) => {
-      const connector = connectorRegistry.getById(targetId);
-      if (!connector) return;
-      const meta = connector.getMetadata();
-      const cfg = configs[targetId] || {
-        connectorId: targetId,
-        enabled: connectorRegistry.isEnabled(targetId),
-      };
-      if (!cfg.enabled) {
-        notes.push(`${meta.shortName} is disabled; skipped.`);
-        return;
-      }
-
-      try {
-        const outcome = await connectorExecutionEngine.executeSearch(
-          connector,
-          {
-            query: trimmedQuery,
-            countryCode: cCode || undefined,
-            region: cleanRegion,
-            city: cleanCity,
-            page: typeof page === 'number' ? page : undefined,
-            pageSize: typeof pageSize === 'number' ? pageSize : undefined,
-            fetchAllPages: Boolean(fetchAllPages),
-            maxPages: typeof maxPages === 'number' ? maxPages : undefined,
-          },
-          {
-            config: cfg,
-            userAgent: settings.userAgent,
-            requestId: typeof requestId === 'string' ? requestId : undefined,
-          }
-        );
-
-        results.push(...outcome.normalization.leads);
-        if (!attribution) attribution = outcome.response.attribution;
-        pagination = outcome.response.pagination;
-        lastRunId = outcome.runRecord.id;
-        for (const n of outcome.response.notes || []) {
-          if (n && !notes.includes(n)) notes.push(n);
+    const ambiguousMatches: Array<{ leadId: string; companyName: string; note?: string; matchedLeadName?: string }> = [];
+    if (session) {
+      for (const l of candidateLeads) {
+        const dup = session.duplicateInfoByLeadId[l.id];
+        if (dup?.requiresReview) {
+          ambiguousMatches.push({
+            leadId: l.id,
+            companyName: l.companyName,
+            note: dup.note,
+            matchedLeadName: dup.matchedLeadName,
+          });
         }
-
-        if (targetId === 'conn-abn' && outcome.response.providerMetadata) {
-          const pm = outcome.response.providerMetadata;
-          abnLookupInfo = {
-            isLiveApi: Boolean(pm.isLiveApi),
-            lookupMode: String(pm.lookupMode || 'offline_reference'),
-            isChecksumValid:
-              typeof pm.isChecksumValid === 'boolean' ? pm.isChecksumValid : undefined,
-          };
-        }
-      } catch (err: unknown) {
-        const classified =
-          err instanceof ConnectorError ? err.toClassified() : connector.classifyError(err);
-        const safeMsg = redactSecrets(classified.safeMessage);
-        errors.push(`${meta.shortName}: ${safeMsg}`);
-        errorDetails.push({
-          connectorId: targetId,
-          category: classified.category,
-          message: safeMsg,
-        });
       }
-    };
-
-    for (const id of targetIds) {
-      await runConnectorSearch(id);
     }
 
-    // Fallback to OpenStreetMap if auto-selected primary registry yielded 0 leads
-    if (!connectorId && results.length === 0 && !targetIds.includes('conn-osm')) {
-      await runConnectorSearch('conn-osm');
-    }
-
-    if (autoSave && results.length > 0) {
-      if (isPg) await postgresStorage.batchUpsertLeads(results);
-      else storage.batchUpsertLeads(results);
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'DISCOVERY_LEADS_SAVED',
+        req.owner.email,
+        'leads',
+        searchId || 'inline',
+        {
+          requested: candidateLeads.length,
+          added: result.added,
+          updated: result.updated,
+          skipped: result.skipped,
+          failed: result.failed,
+          duplicatePolicy,
+        },
+        normalizeClientIp(req)
+      );
     }
 
     res.json({
-      leads: results,
-      totalDiscovered: results.length,
-      pagination,
-      runId: lastRunId,
-      errors: errors.length > 0 ? errors : undefined,
-      errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
-      attribution,
-      providerNote: notes.join(' '),
-      abnLookupInfo,
-      appliedFilters: {
-        query: trimmedQuery,
-        countryCode: cCode || undefined,
-        region: cleanRegion || undefined,
-        city: cleanCity || undefined,
-        regionSupportedByConnector: connectorId === 'conn-osm' || (!connectorId && !['NO', 'GB', 'AU'].includes(cCode)),
-      },
+      success: true,
+      added: result.added,
+      updated: result.updated,
+      skipped: result.skipped,
+      failed: result.failed,
+      errors: result.errors.length > 0 ? result.errors : undefined,
+      savedLeadIds: result.savedLeadIds,
+      ambiguousMatches: ambiguousMatches.length > 0 ? ambiguousMatches : undefined,
     });
-  } catch (globalErr: unknown) {
-    const msg = globalErr instanceof Error ? globalErr.message : String(globalErr);
-    res.status(500).json({ error: `Discovery failed: ${msg}`, errors });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
   }
+});
+
+// Export genuine discovery results as RFC 4180 CSV
+protectedApi.get('/discovery/export/:searchId', (req: Request, res: Response) => {
+  const { searchId } = req.params;
+  const idsParam = typeof req.query.ids === 'string' ? req.query.ids : undefined;
+  const selectedIds = idsParam
+    ? idsParam.split(',').map((s) => s.trim()).filter(Boolean)
+    : undefined;
+
+  const csv = discoveryService.exportSessionCsv(searchId, selectedIds);
+  if (!csv) {
+    res.status(404).json({ error: 'Discovery search session expired or not found.' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename=leed_discovery_${searchId}_${Date.now()}.csv`);
+  res.send(csv);
 });
 
 // SSRF-Safe Web Inspector

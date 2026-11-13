@@ -415,10 +415,113 @@ export interface ConnectorStatus {
 export interface DuplicateMatch {
   leadA: CanonicalLead;
   leadB: CanonicalLead;
-  matchType: 'domain' | 'registration_number' | 'phone' | 'fuzzy_name';
+  matchType: 'domain' | 'registration_number' | 'phone' | 'address' | 'fuzzy_name';
   matchedValue: string;
   similarityScore: number;
   recommendedSurvivorId: string;
+}
+
+export interface DiscoveryDuplicateInfo {
+  status: 'unique' | 'existing_crm' | 'ambiguous_crm' | 'cross_source_match';
+  classification: 'none' | 'exact' | 'ambiguous';
+  requiresReview: boolean;
+  matchedLeadId?: string;
+  matchedLeadName?: string;
+  matchType?: 'domain' | 'registration_number' | 'phone' | 'address' | 'fuzzy_name';
+  matchedValue?: string;
+  similarityScore?: number;
+  crossSourceLeadIds?: string[];
+  note?: string;
+}
+
+export interface DiscoveryConnectorSummary {
+  connectorId: string;
+  connectorName: string;
+  shortName: string;
+  sourceCategory: SourceCategory;
+  accessMode: ConnectorAccessMode;
+  isLiveApi: boolean;
+  countryCode?: string;
+  query: string;
+  status: 'success' | 'error' | 'skipped' | 'cancelled';
+  recordsDiscovered: number;
+  recordsNormalized: number;
+  durationMs: number;
+  runId?: string;
+  attribution?: string;
+  errorCategory?: ConnectorErrorCategory;
+  message?: string;
+  notes?: string[];
+}
+
+export interface DiscoveryPagination {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
+export interface DiscoverySearchResponse {
+  searchId: string;
+  requestId: string;
+  leads: CanonicalLead[];
+  duplicateInfoByLeadId: Record<string, DiscoveryDuplicateInfo>;
+  totalDiscovered: number;
+  totalUnique: number;
+  existingCrmMatches: number;
+  ambiguousMatches: number;
+  crossSourceCorroborations: number;
+  pagination: DiscoveryPagination;
+  connectorSummaries: DiscoveryConnectorSummary[];
+  selectedConnectorIds: string[];
+  runId?: string;
+  errors?: string[];
+  errorDetails?: Array<{ connectorId: string; category: string; message: string }>;
+  attribution: string;
+  providerNote: string;
+  abnLookupInfo?: {
+    isLiveApi: boolean;
+    lookupMode: string;
+    isChecksumValid?: boolean;
+  };
+  appliedFilters: {
+    query: string;
+    queries?: string[];
+    countryCode?: string;
+    countryCodes?: string[];
+    region?: string;
+    city?: string;
+    postalCode?: string;
+    industry?: string;
+    category?: string;
+    businessType?: string;
+    website?: string;
+    domain?: string;
+    radiusKm?: number;
+    coordinates?: { lat: number; lon: number };
+    regionSupportedByConnector: boolean;
+  };
+  coalesced?: boolean;
+  cancelled?: boolean;
+  durationMs: number;
+}
+
+export interface DiscoveryHistoryItem {
+  id: string;
+  connectorId: string;
+  connectorName: string;
+  operation: string;
+  queryParams?: Record<string, unknown>;
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  status: 'success' | 'error' | 'cancelled' | 'partial';
+  recordsDiscovered: number;
+  recordsNormalized: number;
+  errorCategory?: string;
+  diagnosticSummary?: string;
+  requestId?: string;
 }
 
 export interface AppSettings {

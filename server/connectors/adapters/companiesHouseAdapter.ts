@@ -325,11 +325,22 @@ export class CompaniesHouseConnector implements IConnector {
 
       const items = data.items || [];
       const cityFilter = request.city?.trim().toLowerCase();
-      const filtered = cityFilter
-        ? items.filter((item) =>
-            (item.address?.locality || item.address_snippet || '').toLowerCase().includes(cityFilter)
-          )
-        : items;
+      const postalFilter = request.postalCode?.trim().toLowerCase().replace(/\s+/g, '');
+      const industryFilter = (request.industry || request.category || request.businessType || '').trim().toLowerCase();
+      const filtered = items.filter((item) => {
+        if (cityFilter && !(item.address?.locality || item.address_snippet || '').toLowerCase().includes(cityFilter)) {
+          return false;
+        }
+        if (postalFilter) {
+          const itemPost = (item.address?.postal_code || item.address_snippet || '').toLowerCase().replace(/\s+/g, '');
+          if (!itemPost.includes(postalFilter)) return false;
+        }
+        if (industryFilter) {
+          const hay = `${item.description || ''} ${(item.sic_codes || []).join(' ')} ${item.company_type || ''}`.toLowerCase();
+          if (!hay.includes(industryFilter)) return false;
+        }
+        return true;
+      });
 
       const results = filtered
         .map((item) => this.normalizeItem(item, retrievedAt, true))
@@ -357,6 +368,8 @@ export class CompaniesHouseConnector implements IConnector {
     // Honest offline mirror fallback when no API key is configured
     const trimmed = query.toLowerCase();
     const cityFilter = request.city?.trim().toLowerCase();
+    const postalFilter = request.postalCode?.trim().toLowerCase().replace(/\s+/g, '');
+    const industryFilter = (request.industry || request.category || request.businessType || '').trim().toLowerCase();
     const matched = VERIFIED_OFFLINE_UK_REGISTRY.filter((item) => {
       const titleMatch = item.title.toLowerCase().includes(trimmed);
       const crnMatch = item.company_number.includes(trimmed);
@@ -364,7 +377,13 @@ export class CompaniesHouseConnector implements IConnector {
       const cityMatch = cityFilter
         ? (item.address?.locality || '').toLowerCase().includes(cityFilter)
         : true;
-      return (titleMatch || crnMatch || descMatch) && cityMatch;
+      const postMatch = postalFilter
+        ? (item.address?.postal_code || '').toLowerCase().replace(/\s+/g, '').includes(postalFilter)
+        : true;
+      const indMatch = industryFilter
+        ? `${item.description || ''} ${item.company_type || ''}`.toLowerCase().includes(industryFilter)
+        : true;
+      return (titleMatch || crnMatch || descMatch) && cityMatch && postMatch && indMatch;
     });
 
     const results = matched

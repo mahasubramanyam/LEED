@@ -548,10 +548,20 @@ export class PostgresStorage {
   public async batchUpsertLeads(
     newLeads: CanonicalLead[],
     options: { skipDuplicates?: boolean } = {}
-  ): Promise<{ added: number; updated: number; skipped: number }> {
+  ): Promise<{
+    added: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    errors: Array<{ row: number; companyName?: string; error: string }>;
+    savedLeadIds: string[];
+  }> {
     let added = 0;
     let updated = 0;
     let skipped = 0;
+    let failed = 0;
+    const errors: Array<{ row: number; companyName?: string; error: string }> = [];
+    const savedLeadIds: string[] = [];
 
     const existingLeads = await this.getLeads();
     const byId = new Map<string, CanonicalLead>();
@@ -559,6 +569,13 @@ export class PostgresStorage {
     const byReg = new Map<string, CanonicalLead>();
     const byIdent = new Map<string, CanonicalLead>();
     const byPhone = new Map<string, CanonicalLead>();
+
+    const identRank = (ident: LeadIdentifier): number => {
+      if (ident.verified || ident.status === 'officially_verified') return 4;
+      if (ident.status === 'syntax_validated') return 3;
+      if (ident.status === 'discovered') return 2;
+      return 1;
+    };
 
     const indexLead = (l: CanonicalLead) => {
       byId.set(l.id, l);
@@ -580,94 +597,159 @@ export class PostgresStorage {
 
     for (const ex of existingLeads) indexLead(ex);
 
-    for (const rawLead of newLeads) {
-      const lead: CanonicalLead = {
-        ...rawLead,
-        registrationType: rawLead.registrationType
-          ? canonicalizeIdentifierType(rawLead.registrationType, rawLead.address?.countryCode)
-          : undefined,
-        identifiers: (rawLead.identifiers || []).map((i) => ({
-          ...i,
-          type: canonicalizeIdentifierType(i.type, i.countryCode || rawLead.address?.countryCode),
-          normalizedValue: i.normalizedValue || normalizeIdentifierValue(i.value),
-        })),
-      };
-
-      let match: CanonicalLead | undefined = byId.get(lead.id);
-      if (!match && lead.domain) match = byDomain.get(lead.domain.toLowerCase().trim());
-      if (!match && lead.registrationNumber) {
-        const cleanReg = normalizeIdentifierValue(lead.registrationNumber);
-        if (cleanReg.length >= 4) match = byReg.get(cleanReg);
-      }
-      if (!match) {
-        for (const ident of lead.identifiers || []) {
-          const cleanVal = normalizeIdentifierValue(ident.normalizedValue || ident.value);
-          if (cleanVal.length >= 4) {
-            match = byIdent.get(`${ident.type}:${cleanVal}`);
-            if (match) break;
-          }
-        }
-      }
-      if (!match) {
-        const pDigits = (lead.phoneNormalized || lead.phone || '').replace(/[^0-9]/g, '');
-        if (pDigits.length >= 7) match = byPhone.get(pDigits);
-      }
-
-      if (match) {
-        if (options.skipDuplicates) {
-          skipped++;
+    for (let rowIdx = 0; rowIdx < newLeads.length; rowIdx++) {
+      const rawLead = newLeads[rowIdx];
+      try {
+        if (!rawLead || typeof rawLead.companyName !== 'string' || !rawLead.companyName.trim()) {
+          failed++;
+          errors.push({ row: rowIdx + 1, error: 'Missing required companyName' });
           continue;
         }
-        const identKey = (i: LeadIdentifier) =>
-          `${canonicalizeIdentifierType(i.type, i.countryCode || match!.address?.countryCode)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`;
-        const mergedIdentsMap = new Map<string, LeadIdentifier>();
-        for (const i of match.identifiers || []) mergedIdentsMap.set(identKey(i), i);
-        for (const i of lead.identifiers || []) {
-          const k = identKey(i);
-          if (!mergedIdentsMap.has(k)) mergedIdentsMap.set(k, i);
+
+        const lead: CanonicalLead = {
+          ...rawLead,
+          companyName: rawLead.companyName.trim(),
+          registrationType: rawLead.registrationType
+            ? canonicalizeIdentifierType(rawLead.registrationType, rawLead.address?.countryCode)
+            : undefined,
+          identifiers: (rawLead.identifiers || []).map((i) => ({
+            ...i,
+            type: canonicalizeIdentifierType(i.type, i.countryCode || rawLead.address?.countryCode),
+            normalizedValue: i.normalizedValue || normalizeIdentifierValue(i.value),
+          })),
+        };
+
+        let match: CanonicalLead | undefined = byId.get(lead.id);
+        if (!match && lead.domain) match = byDomain.get(lead.domain.toLowerCase().trim());
+        if (!match && lead.registrationNumber) {
+          const cleanReg = normalizeIdentifierValue(lead.registrationNumber);
+          if (cleanReg.length >= 4) match = byReg.get(cleanReg);
+        }
+        if (!match) {
+          for (const ident of lead.identifiers || []) {
+            const cleanVal = normalizeIdentifierValue(ident.normalizedValue || ident.value);
+            if (cleanVal.length >= 4 && ident.type !== 'DOMAIN' && ident.type !== 'PHONE' && ident.type !== 'EMAIL') {
+              match = byIdent.get(`${ident.type}:${cleanVal}`);
+              if (match) break;
+            }
+          }
+        }
+        if (!match) {
+          const pDigits = (lead.phoneNormalized || lead.phone || '').replace(/[^0-9]/g, '');
+          if (pDigits.length >= 7) match = byPhone.get(pDigits);
         }
 
-        const merged: CanonicalLead = {
-          ...match,
-          ...lead,
-          id: match.id,
-          createdAt: match.createdAt,
-          legalName: lead.legalName || match.legalName,
-          registrationNumber: lead.registrationNumber || match.registrationNumber,
-          registrationType: lead.registrationType || match.registrationType,
-          website: lead.website || match.website,
-          domain: lead.domain || match.domain,
-          email: lead.email || match.email,
-          phone: lead.phone || match.phone,
-          phoneNormalized: lead.phoneNormalized || match.phoneNormalized,
-          address: {
-            street: lead.address?.street || match.address?.street,
-            city: lead.address?.city || match.address?.city,
-            region: lead.address?.region || match.address?.region,
-            postalCode: lead.address?.postalCode || match.address?.postalCode,
-            country: lead.address?.country || match.address?.country || 'International',
-            countryCode: lead.address?.countryCode || match.address?.countryCode || 'US',
-            formattedAddress: lead.address?.formattedAddress || match.address?.formattedAddress,
-          },
-          opportunityValue: lead.opportunityValue && lead.opportunityValue > 0 ? lead.opportunityValue : match.opportunityValue,
-          confidenceScore: Math.max(match.confidenceScore || 0, lead.confidenceScore || 0),
-          confidenceSignals: Array.from(new Set([...(match.confidenceSignals || []), ...(lead.confidenceSignals || [])])),
-          tags: Array.from(new Set([...(match.tags || []), ...(lead.tags || [])])),
-          identifiers: Array.from(mergedIdentsMap.values()),
-          sources: match.sources?.length ? match.sources : lead.sources,
-          notes: match.notes || [],
-          activities: match.activities || lead.activities || [],
-        };
-        const saved = await this.upsertLead(merged);
-        indexLead(saved);
-        updated++;
-      } else {
-        const saved = await this.upsertLead(lead);
-        indexLead(saved);
-        added++;
+        if (match) {
+          if (options.skipDuplicates) {
+            skipped++;
+            continue;
+          }
+          const identKey = (i: LeadIdentifier) =>
+            `${canonicalizeIdentifierType(i.type, i.countryCode || match!.address?.countryCode)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`;
+          const mergedIdentsMap = new Map<string, LeadIdentifier>();
+          for (const i of match.identifiers || []) mergedIdentsMap.set(identKey(i), i);
+          for (const i of lead.identifiers || []) {
+            const k = identKey(i);
+            const prev = mergedIdentsMap.get(k);
+            if (!prev || identRank(i) > identRank(prev)) {
+              mergedIdentsMap.set(k, i);
+            }
+          }
+
+          const sourceKey = (s: { sourceName: string; providerId?: string; url?: string }) =>
+            `${s.sourceName}:${s.providerId || s.url || ''}`;
+          const existingSourceKeys = new Set((match.sources || []).map(sourceKey));
+          const combinedSources = [...(match.sources || [])];
+          for (const s of lead.sources || []) {
+            const sk = sourceKey(s);
+            if (!existingSourceKeys.has(sk)) {
+              existingSourceKeys.add(sk);
+              combinedSources.push(s);
+            }
+          }
+
+          const existingActIds = new Set((match.activities || []).map((a) => a.id));
+          const mergedActivities = [
+            ...(match.activities || []),
+            ...(lead.activities || []).filter((a) => !existingActIds.has(a.id)),
+          ];
+
+          const merged: CanonicalLead = {
+            ...match,
+            id: match.id,
+            createdAt: match.createdAt,
+            updatedAt: new Date().toISOString(),
+            companyName: match.companyName || lead.companyName,
+            legalName: match.legalName || lead.legalName,
+            registrationNumber: match.registrationNumber || lead.registrationNumber,
+            registrationType: match.registrationType || lead.registrationType,
+            companyStatus:
+              match.companyStatus && match.companyStatus !== 'unknown'
+                ? match.companyStatus
+                : lead.companyStatus || match.companyStatus,
+            website: match.website || lead.website,
+            domain: match.domain || lead.domain,
+            email: match.email || lead.email,
+            emailStatus: match.email ? match.emailStatus : lead.emailStatus || match.emailStatus,
+            phone: match.phone || lead.phone,
+            phoneNormalized: match.phoneNormalized || lead.phoneNormalized,
+            address: {
+              street: match.address?.street || lead.address?.street,
+              city: match.address?.city || lead.address?.city,
+              region: match.address?.region || lead.address?.region,
+              postalCode: match.address?.postalCode || lead.address?.postalCode,
+              country: match.address?.country || lead.address?.country || 'International',
+              countryCode: match.address?.countryCode || lead.address?.countryCode || 'US',
+              formattedAddress: match.address?.formattedAddress || lead.address?.formattedAddress,
+            },
+            coordinates: match.coordinates || lead.coordinates,
+            industry:
+              match.industry && match.industry !== 'General Commerce & Services'
+                ? match.industry
+                : lead.industry || match.industry,
+            category:
+              match.category && match.category !== 'General'
+                ? match.category
+                : lead.category || match.category,
+            employeeRange: match.employeeRange || lead.employeeRange,
+            foundedYear: match.foundedYear || lead.foundedYear,
+            status: match.status,
+            pipelineStageId: match.pipelineStageId,
+            opportunityValue: match.opportunityValue ?? lead.opportunityValue ?? 0,
+            currency: match.currency || lead.currency || 'USD',
+            winProbability: match.winProbability ?? lead.winProbability ?? 0,
+            lostReason: match.lostReason,
+            confidenceScore: Math.max(match.confidenceScore || 0, lead.confidenceScore || 0),
+            confidenceSignals: Array.from(new Set([...(match.confidenceSignals || []), ...(lead.confidenceSignals || [])])),
+            tags: Array.from(new Set([...(match.tags || []), ...(lead.tags || [])])),
+            identifiers: Array.from(mergedIdentsMap.values()),
+            sources: combinedSources,
+            socialLinks: { ...(lead.socialLinks || {}), ...(match.socialLinks || {}) },
+            webMetadata: match.webMetadata || lead.webMetadata,
+            notes: match.notes || [],
+            activities: mergedActivities,
+            customFields: { ...(lead.customFields || {}), ...(match.customFields || {}) },
+          };
+          const saved = await this.upsertLead(merged);
+          indexLead(saved);
+          savedLeadIds.push(saved.id);
+          updated++;
+        } else {
+          const saved = await this.upsertLead(lead);
+          indexLead(saved);
+          savedLeadIds.push(saved.id);
+          added++;
+        }
+      } catch (rowErr: unknown) {
+        failed++;
+        errors.push({
+          row: rowIdx + 1,
+          companyName: rawLead?.companyName,
+          error: rowErr instanceof Error ? rowErr.message : String(rowErr),
+        });
       }
     }
-    return { added, updated, skipped };
+    return { added, updated, skipped, failed, errors, savedLeadIds };
   }
 
   public async deleteLead(id: string): Promise<boolean> {

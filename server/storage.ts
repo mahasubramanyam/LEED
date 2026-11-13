@@ -581,15 +581,33 @@ class StorageManager {
   public batchUpsertLeads(
     newLeads: CanonicalLead[],
     options: { skipDuplicates?: boolean } = {}
-  ): { added: number; updated: number; skipped: number } {
+  ): {
+    added: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    errors: Array<{ row: number; companyName?: string; error: string }>;
+    savedLeadIds: string[];
+  } {
     let added = 0;
     let updated = 0;
     let skipped = 0;
+    let failed = 0;
+    const errors: Array<{ row: number; companyName?: string; error: string }> = [];
+    const savedLeadIds: string[] = [];
     const now = new Date().toISOString();
 
-    for (const rawLead of newLeads) {
+    for (let rowIdx = 0; rowIdx < newLeads.length; rowIdx++) {
+      const rawLead = newLeads[rowIdx];
+      if (!rawLead || typeof rawLead.companyName !== 'string' || !rawLead.companyName.trim()) {
+        failed++;
+        errors.push({ row: rowIdx + 1, error: 'Missing required companyName' });
+        continue;
+      }
+
       const lead: CanonicalLead = {
         ...rawLead,
+        companyName: rawLead.companyName.trim(),
         registrationType: rawLead.registrationType
           ? canonicalizeIdentifierType(rawLead.registrationType, rawLead.address?.countryCode)
           : undefined,
@@ -610,6 +628,7 @@ class StorageManager {
         if (cleanReg.length >= 4 && existing.registrationNumber && normalizeIdentifierValue(existing.registrationNumber) === cleanReg) return true;
         if (lead.identifiers && existing.identifiers) {
           for (const idA of lead.identifiers) {
+            if (idA.type === 'DOMAIN' || idA.type === 'PHONE' || idA.type === 'EMAIL') continue;
             const normA = normalizeIdentifierValue(idA.normalizedValue || idA.value);
             if (normA.length < 4) continue;
             for (const idB of existing.identifiers) {
@@ -638,24 +657,74 @@ class StorageManager {
           const k = `${canonicalizeIdentifierType(i.type)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`;
           if (!mergedIdentsMap.has(k)) mergedIdentsMap.set(k, i);
         }
-        this.db.leads[idx] = {
+
+        const sourceKey = (s: { sourceName: string; providerId?: string; url?: string }) =>
+          `${s.sourceName}:${s.providerId || s.url || ''}`;
+        const existingSourceKeys = new Set((existing.sources || []).map(sourceKey));
+        const combinedSources = [...(existing.sources || [])];
+        for (const s of lead.sources || []) {
+          const sk = sourceKey(s);
+          if (!existingSourceKeys.has(sk)) {
+            existingSourceKeys.add(sk);
+            combinedSources.push(s);
+          }
+        }
+
+        const existingActIds = new Set((existing.activities || []).map((a) => a.id));
+        const combinedActivities = [
+          ...(existing.activities || []),
+          ...(lead.activities || []).filter((a) => !existingActIds.has(a.id)),
+        ];
+
+        const mergedLead: CanonicalLead = {
           ...existing,
-          ...lead,
           id: existing.id,
           createdAt: existing.createdAt,
-          phoneNormalized: lead.phoneNormalized || existing.phoneNormalized,
-          identifiers: Array.from(mergedIdentsMap.values()),
-          tags: Array.from(new Set([...(existing.tags || []), ...(lead.tags || [])])),
           updatedAt: now,
+          companyName: existing.companyName || lead.companyName,
+          legalName: existing.legalName || lead.legalName,
+          registrationNumber: existing.registrationNumber || lead.registrationNumber,
+          registrationType: existing.registrationType || lead.registrationType,
+          website: existing.website || lead.website,
+          domain: existing.domain || lead.domain,
+          email: existing.email || lead.email,
+          phone: existing.phone || lead.phone,
+          phoneNormalized: existing.phoneNormalized || lead.phoneNormalized,
+          address: {
+            street: existing.address?.street || lead.address?.street,
+            city: existing.address?.city || lead.address?.city,
+            region: existing.address?.region || lead.address?.region,
+            postalCode: existing.address?.postalCode || lead.address?.postalCode,
+            country: existing.address?.country || lead.address?.country || 'International',
+            countryCode: existing.address?.countryCode || lead.address?.countryCode || 'US',
+            formattedAddress: existing.address?.formattedAddress || lead.address?.formattedAddress,
+          },
+          coordinates: existing.coordinates || lead.coordinates,
+          status: existing.status,
+          pipelineStageId: existing.pipelineStageId,
+          opportunityValue: existing.opportunityValue ?? lead.opportunityValue,
+          winProbability: existing.winProbability ?? lead.winProbability,
+          lostReason: existing.lostReason,
+          currency: existing.currency || lead.currency || 'USD',
+          confidenceScore: Math.max(existing.confidenceScore || 0, lead.confidenceScore || 0),
+          confidenceSignals: Array.from(new Set([...(existing.confidenceSignals || []), ...(lead.confidenceSignals || [])])),
+          identifiers: Array.from(mergedIdentsMap.values()),
+          sources: combinedSources,
+          notes: existing.notes || [],
+          activities: combinedActivities,
+          tags: Array.from(new Set([...(existing.tags || []), ...(lead.tags || [])])),
         };
+        this.db.leads[idx] = mergedLead;
+        savedLeadIds.push(mergedLead.id);
         updated++;
       } else {
         this.db.leads.unshift(lead);
+        savedLeadIds.push(lead.id);
         added++;
       }
     }
     this.saveDatabase(this.db);
-    return { added, updated, skipped };
+    return { added, updated, skipped, failed, errors, savedLeadIds };
   }
 
   public deleteLead(id: string): boolean {

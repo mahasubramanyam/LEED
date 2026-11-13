@@ -234,3 +234,147 @@ export interface AppSettings {
   suppressionDomains: string[];
   connectorConfigs?: Record<string, ConnectorConfigRecord>;
 }
+
+export interface DiscoverySearchRequest {
+  query?: string;
+  queries?: string[];
+  countryCode?: string;
+  countryCodes?: string[];
+  region?: string;
+  city?: string;
+  postalCode?: string;
+  industry?: string;
+  category?: string;
+  businessType?: string;
+  website?: string;
+  domain?: string;
+  radiusKm?: number;
+  coordinates?: {
+    lat: number;
+    lon: number;
+  };
+  connectorId?: string;
+  connectorIds?: string[];
+  selectionMode?: 'auto' | 'manual';
+  autoSave?: boolean;
+  duplicatePolicy?: 'skip' | 'merge_preserve_crm';
+  page?: number;
+  pageSize?: number;
+  fetchAllPages?: boolean;
+  maxPages?: number;
+  requestId?: string;
+}
+
+export interface DiscoveryDuplicateInfo {
+  status: 'unique' | 'existing_crm' | 'ambiguous_crm' | 'cross_source_match';
+  classification: 'none' | 'exact' | 'ambiguous';
+  requiresReview: boolean;
+  matchedLeadId?: string;
+  matchedLeadName?: string;
+  matchType?: 'domain' | 'registration_number' | 'phone' | 'address' | 'fuzzy_name';
+  matchedValue?: string;
+  similarityScore?: number;
+  crossSourceLeadIds?: string[];
+  note?: string;
+}
+
+export interface DiscoveryConnectorSummary {
+  connectorId: string;
+  connectorName: string;
+  shortName: string;
+  sourceCategory: SourceCategory;
+  accessMode: ConnectorAccessMode;
+  isLiveApi: boolean;
+  countryCode?: string;
+  query: string;
+  status: 'success' | 'error' | 'skipped' | 'cancelled';
+  recordsDiscovered: number;
+  recordsNormalized: number;
+  durationMs: number;
+  runId?: string;
+  attribution?: string;
+  errorCategory?: ConnectorErrorCategory;
+  message?: string;
+  notes?: string[];
+}
+
+export interface DiscoveryPagination {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
+export interface DiscoverySearchResponse {
+  searchId: string;
+  requestId: string;
+  leads: CanonicalLead[];
+  duplicateInfoByLeadId: Record<string, DiscoveryDuplicateInfo>;
+  totalDiscovered: number;
+  totalUnique: number;
+  existingCrmMatches: number;
+  ambiguousMatches: number;
+  crossSourceCorroborations: number;
+  pagination: DiscoveryPagination;
+  connectorSummaries: DiscoveryConnectorSummary[];
+  selectedConnectorIds: string[];
+  runId?: string;
+  errors?: string[];
+  errorDetails?: Array<{ connectorId: string; category: string; message: string }>;
+  attribution: string;
+  providerNote: string;
+  abnLookupInfo?: {
+    isLiveApi: boolean;
+    lookupMode: string;
+    isChecksumValid?: boolean;
+  };
+  appliedFilters: {
+    query: string;
+    queries?: string[];
+    countryCode?: string;
+    countryCodes?: string[];
+    region?: string;
+    city?: string;
+    postalCode?: string;
+    industry?: string;
+    category?: string;
+    businessType?: string;
+    website?: string;
+    domain?: string;
+    radiusKm?: number;
+    coordinates?: { lat: number; lon: number };
+    regionSupportedByConnector: boolean;
+  };
+  coalesced?: boolean;
+  cancelled?: boolean;
+  durationMs: number;
+}
+
+export interface DiscoveryHistoryItem {
+  id: string;
+  connectorId: string;
+  connectorName: string;
+  operation: string;
+  queryParams?: Record<string, unknown>;
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  status: 'success' | 'error' | 'cancelled' | 'partial';
+  recordsDiscovered: number;
+  recordsNormalized: number;
+  errorCategory?: string;
+  diagnosticSummary?: string;
+  requestId?: string;
+}
+
+export interface BatchUpsertResult {
+  added: number;
+  updated: number;
+  skipped: number;
+  failed?: number;
+  errors?: Array<{ row: number; companyName?: string; error: string }>;
+  warnings?: string[];
+  savedLeadIds?: string[];
+}
+

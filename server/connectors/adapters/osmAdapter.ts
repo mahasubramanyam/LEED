@@ -59,6 +59,9 @@ const OSM_METADATA: ConnectorMetadata = {
   supportsAllCountries: true,
   supportsRegionFilter: true,
   supportsCityFilter: true,
+  supportsPostalCodeFilter: true,
+  supportsRadiusFilter: true,
+  supportsIndustryFilter: true,
   supportedIdentifierTypes: ['DOMAIN', 'PHONE', 'EMAIL'],
   capabilities: ['company_search', 'poi_search', 'connection_test'],
   credentialRequirements: {
@@ -89,6 +92,27 @@ const OSM_METADATA: ConnectorMetadata = {
   license: 'Open Data Commons Open Database License (ODbL 1.0)',
   homepageUrl: 'https://nominatim.openstreetmap.org',
 };
+
+function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function normalizeHostDomain(raw?: string): string | undefined {
+  if (!raw || !raw.trim()) return undefined;
+  try {
+    const u = new URL(raw.startsWith('http') ? raw : `https://${raw.trim()}`);
+    return u.hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return raw.trim().toLowerCase().replace(/^www\./, '').split('/')[0] || undefined;
+  }
+}
 
 export class OsmConnector implements IConnector {
   public readonly id = 'conn-osm';
@@ -149,8 +173,10 @@ export class OsmConnector implements IConnector {
     request: ConnectorSearchRequest,
     context: ConnectorExecutionContext
   ): Promise<ConnectorSearchResponse> {
-    const query = request.query.trim();
-    if (!query) {
+    const domainFilter = normalizeHostDomain(request.domain || request.website);
+    const industryTerm = (request.industry || request.category || request.businessType || '').trim();
+    const baseQuery = request.query?.trim() || industryTerm || domainFilter || '';
+    if (!baseQuery) {
       throw new ConnectorError({
         category: 'invalid_request',
         providerId: this.id,
@@ -158,9 +184,13 @@ export class OsmConnector implements IConnector {
       });
     }
 
-    const parts: string[] = [query];
+    const parts: string[] = [baseQuery];
+    if (industryTerm && !baseQuery.toLowerCase().includes(industryTerm.toLowerCase())) {
+      parts.push(industryTerm);
+    }
     if (request.city?.trim()) parts.push(request.city.trim());
     if (request.region?.trim()) parts.push(request.region.trim());
+    if (request.postalCode?.trim()) parts.push(request.postalCode.trim());
 
     const limit = Math.min(
       OSM_METADATA.executionPolicy.maxPageSize,
@@ -176,6 +206,34 @@ export class OsmConnector implements IConnector {
 
     if (request.countryCode && request.countryCode.trim().length === 2 && request.countryCode.toUpperCase() !== 'GLOBAL') {
       url.searchParams.set('countrycodes', request.countryCode.trim().toLowerCase());
+    }
+
+    const notes: string[] = [];
+    const hasCoords =
+      request.coordinates &&
+      Number.isFinite(request.coordinates.lat) &&
+      Number.isFinite(request.coordinates.lon);
+    const radiusKm =
+      typeof request.radiusKm === 'number' && Number.isFinite(request.radiusKm) && request.radiusKm > 0
+        ? Math.min(250, request.radiusKm)
+        : undefined;
+
+    if (hasCoords && radiusKm) {
+      const { lat, lon } = request.coordinates!;
+      const latDelta = radiusKm / 111.32;
+      const cosLat = Math.max(0.1, Math.abs(Math.cos((lat * Math.PI) / 180)));
+      const lonDelta = radiusKm / (111.32 * cosLat);
+      const west = Math.max(-180, lon - lonDelta).toFixed(5);
+      const east = Math.min(180, lon + lonDelta).toFixed(5);
+      const north = Math.min(90, lat + latDelta).toFixed(5);
+      const south = Math.max(-90, lat - latDelta).toFixed(5);
+      url.searchParams.set('viewbox', `${west},${north},${east},${south}`);
+      url.searchParams.set('bounded', '1');
+      notes.push(`Applied geographic bounding viewbox (~${radiusKm}km around ${lat.toFixed(3)}, ${lon.toFixed(3)}).`);
+    } else if (radiusKm && !hasCoords) {
+      notes.push(
+        `Radius filter (${radiusKm}km) requires coordinates for strict Nominatim viewbox bounding; executed keyword/location search.`
+      );
     }
 
     const response = await fetch(url.toString(), {
@@ -211,6 +269,8 @@ export class OsmConnector implements IConnector {
     }
 
     const retrievedAt = new Date().toISOString();
+    const postalFilter = request.postalCode?.trim().toLowerCase().replace(/\s+/g, '');
+
     const filtered = items.filter((item) => {
       const hasSpecificName = Boolean(item.name && item.name.trim().length > 1);
       const isPlacePOI =
@@ -219,7 +279,33 @@ export class OsmConnector implements IConnector {
         item.class === 'office' ||
         item.class === 'commercial' ||
         item.class === 'tourism';
-      return hasSpecificName || isPlacePOI;
+      if (!hasSpecificName && !isPlacePOI) return false;
+
+      if (postalFilter && item.address?.postcode) {
+        const itemPost = item.address.postcode.toLowerCase().replace(/\s+/g, '');
+        if (!itemPost.startsWith(postalFilter) && !itemPost.includes(postalFilter)) {
+          return false;
+        }
+      }
+
+      if (domainFilter) {
+        const itemSite = item.extratags?.website || item.extratags?.['contact:website'];
+        const itemDom = normalizeHostDomain(itemSite);
+        if (!itemDom || (!itemDom.includes(domainFilter) && !domainFilter.includes(itemDom))) {
+          return false;
+        }
+      }
+
+      if (hasCoords && radiusKm) {
+        const lat = parseFloat(item.lat);
+        const lon = parseFloat(item.lon);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          const dist = haversineDistanceKm(request.coordinates!.lat, request.coordinates!.lon, lat, lon);
+          if (dist > radiusKm) return false;
+        }
+      }
+
+      return true;
     });
 
     const results = filtered
@@ -243,7 +329,7 @@ export class OsmConnector implements IConnector {
       },
       rawCount: items.length,
       attribution: OSM_METADATA.attribution,
-      notes: [],
+      notes,
       isLiveApi: true,
     };
   }

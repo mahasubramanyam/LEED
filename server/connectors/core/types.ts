@@ -118,6 +118,9 @@ export interface ConnectorMetadata {
   supportsAllCountries: boolean;
   supportsRegionFilter: boolean;
   supportsCityFilter: boolean;
+  supportsPostalCodeFilter?: boolean;
+  supportsRadiusFilter?: boolean;
+  supportsIndustryFilter?: boolean;
   supportedIdentifierTypes: string[];
   capabilities: ConnectorCapability[];
   credentialRequirements: CredentialRequirement;
@@ -132,6 +135,17 @@ export interface ConnectorSearchRequest {
   countryCode?: string;
   region?: string;
   city?: string;
+  postalCode?: string;
+  industry?: string;
+  category?: string;
+  businessType?: string;
+  website?: string;
+  domain?: string;
+  radiusKm?: number;
+  coordinates?: {
+    lat: number;
+    lon: number;
+  };
   page?: number;
   pageSize?: number;
   cursor?: string;
