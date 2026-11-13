@@ -58,6 +58,7 @@ import { PostgresStorage } from '../server/db/storagePg.js';
 import { BrregConnector } from '../server/connectors/adapters/brregAdapter.js';
 import { CompaniesHouseConnector } from '../server/connectors/adapters/companiesHouseAdapter.js';
 import { AbnConnector } from '../server/connectors/adapters/abnAdapter.js';
+import { validateSameOrigin } from '../server/auth/csrf.js';
 import { OsmConnector } from '../server/connectors/adapters/osmAdapter.js';
 
 function createMockConnector(
@@ -1304,6 +1305,45 @@ describe('LEED Phase 4 Unified Connector Architecture Verification Suite', () =>
       assert.match(serverSrc, /confirmMigration !== '004'/);
       assert.match(serverSrc, /runMigrations\(undefined,\s*\{\s*targetVersion:\s*'004'\s*\}\)/);
       assert.match(serverSrc, /MIGRATION_004_APPROVED_AND_APPLIED/);
+      assert.match(serverSrc, /code:\s*'NOT_FOUND'/);
+      assert.match(serverSrc, /code:\s*status === 400 \? 'BAD_REQUEST' : 'INTERNAL_ERROR'/);
+
+      const uiSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/OwnerControlCentre.tsx'), 'utf-8');
+      assert.match(uiSrc, /res\.headers\.get\('content-type'\)/);
+      assert.match(uiSrc, /includes\('application\/json'\)/);
+    });
+
+    it('allows same-origin requests behind reverse proxy X-Forwarded-Host while blocking cross-origin and untrusted forwarded host spoofing', () => {
+      const proxiedSameOriginReq = {
+        headers: {
+          host: 'localhost:3000',
+          'x-forwarded-host': 'ais-dev-example-123.asia-east1.run.app',
+          origin: 'https://ais-dev-example-123.asia-east1.run.app',
+          referer: 'https://ais-dev-example-123.asia-east1.run.app/',
+        },
+        app: { get: (k: string) => (k === 'trust proxy' ? 1 : undefined) },
+      } as any;
+      assert.strictEqual(validateSameOrigin(proxiedSameOriginReq), true);
+
+      const proxiedCrossOriginReq = {
+        headers: {
+          host: 'localhost:3000',
+          'x-forwarded-host': 'ais-dev-example-123.asia-east1.run.app',
+          origin: 'https://attacker.evil.com',
+        },
+        app: { get: (k: string) => (k === 'trust proxy' ? 1 : undefined) },
+      } as any;
+      assert.strictEqual(validateSameOrigin(proxiedCrossOriginReq), false);
+
+      const untrustedSpoofedForwardedHostReq = {
+        headers: {
+          host: 'app.example.com',
+          'x-forwarded-host': 'attacker.evil.com',
+          origin: 'https://attacker.evil.com',
+        },
+        socket: { remoteAddress: '198.51.100.10' },
+      } as any;
+      assert.strictEqual(validateSameOrigin(untrustedSpoofedForwardedHostReq), false);
     });
   });
 

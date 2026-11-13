@@ -511,18 +511,49 @@ export function OwnerControlCentre({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirmMigration: '004' }),
       });
-      const data = await res.json();
-      await Promise.all([fetchDiagnostics(), onRefreshConnectors(), fetchAuditLog()]);
 
-      if (!res.ok || !data.success) {
+      const contentType = res.headers.get('content-type') || '';
+      const isJson = contentType.toLowerCase().includes('application/json');
+
+      if (!isJson) {
+        const rawText = await res.text();
+        const titleMatch = rawText.match(/<title>([^<]+)<\/title>/i);
+        const detail = titleMatch?.[1]?.trim()
+          ? titleMatch[1].trim()
+          : `HTTP ${res.status} (${contentType || 'unknown Content-Type'})`;
         setMigration004Feedback({
           type: 'error',
-          message: data.error || 'Migration 004 execution failed and was rolled back.',
-          verification: data.verification,
+          message: `Migration 004 approval received a non-JSON server response (${detail}, HTTP ${res.status}). Check owner session authentication, proxy origin forwarding, and server health before retrying.`,
+        });
+        await fetchDiagnostics();
+        return;
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        setMigration004Feedback({
+          type: 'error',
+          message: `Migration 004 approval received malformed JSON from server (HTTP ${res.status}).`,
+        });
+        await fetchDiagnostics();
+        return;
+      }
+
+      if (!res.ok || !data?.success) {
+        await fetchDiagnostics();
+        setMigration004Feedback({
+          type: 'error',
+          message:
+            data?.error ||
+            `Migration 004 execution failed (HTTP ${res.status}) and was rolled back.`,
+          verification: data?.verification,
         });
         return;
       }
 
+      await Promise.all([fetchDiagnostics(), onRefreshConnectors(), fetchAuditLog()]);
       setShowMigration004Confirm(false);
       setMigration004ConfirmChecked(false);
       setMigration004Feedback({

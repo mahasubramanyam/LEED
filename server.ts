@@ -2538,6 +2538,30 @@ protectedApi.get('/export/json', async (req: Request, res: Response) => {
 // Mount protected API router
 app.use('/api', protectedApi);
 
+// Ensure unmatched /api/* routes return JSON 404 rather than falling through to SPA HTML
+app.use('/api', (_req: Request, res: Response) => {
+  res.status(404).json({
+    error: 'API endpoint not found.',
+    code: 'NOT_FOUND',
+  });
+});
+
+// Ensure unhandled /api/* errors (including malformed JSON bodies) return JSON instead of HTML
+app.use('/api', (err: any, _req: Request, res: Response, _next: NextFunction) => {
+  if (res.headersSent) return;
+  const status =
+    typeof err?.status === 'number' && err.status >= 400 && err.status < 600
+      ? err.status
+      : err?.type === 'entity.parse.failed'
+        ? 400
+        : 500;
+  const rawMsg = err instanceof Error ? err.message : String(err || 'Internal API error');
+  res.status(status).json({
+    error: redactSecrets(rawMsg),
+    code: status === 400 ? 'BAD_REQUEST' : 'INTERNAL_ERROR',
+  });
+});
+
 // --- VITE DEV / PRODUCTION STATIC SERVING & BOOTSTRAP ---
 async function startServer() {
   // 1. Explicitly verify Neon / PostgreSQL connection during startup

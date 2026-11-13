@@ -19,20 +19,43 @@ export function setCsrfCookie(res: Response, token: string): void {
   } as any);
 }
 
+function extractHostHeader(value: string | string[] | undefined): string | null {
+  if (!value) return null;
+  const raw = Array.isArray(value) ? value[0] : value;
+  const first = raw.split(',')[0]?.trim().toLowerCase();
+  return first || null;
+}
+
 /**
- * Validates Origin/Referer headers against Host header to block cross-origin requests.
+ * Validates Origin/Referer headers against Host (and trusted proxy X-Forwarded-Host)
+ * headers to block cross-origin requests even behind reverse proxies like Nginx/Cloud Run.
  */
 export function validateSameOrigin(req: Request): boolean {
   const origin = req.headers['origin'];
   const referer = req.headers['referer'];
-  const host = req.headers['host'];
+  const host = extractHostHeader(req.headers['host']);
 
   if (!host) return true;
 
+  const allowedHosts = new Set<string>([host]);
+
+  const trustProxyEnabled = Boolean((req as any).app?.get?.('trust proxy'));
+  const isLoopbackUpstreamHost = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
+  const remoteAddr = req.socket?.remoteAddress || '';
+  const isLoopbackRemote =
+    remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1';
+
+  if (trustProxyEnabled || isLoopbackUpstreamHost || isLoopbackRemote) {
+    const forwardedHost = extractHostHeader(req.headers['x-forwarded-host']);
+    if (forwardedHost) {
+      allowedHosts.add(forwardedHost);
+    }
+  }
+
   if (origin) {
     try {
-      const originHost = new URL(origin).host;
-      if (originHost !== host) return false;
+      const originHost = new URL(origin).host.toLowerCase();
+      if (!allowedHosts.has(originHost)) return false;
     } catch {
       return false;
     }
@@ -40,8 +63,8 @@ export function validateSameOrigin(req: Request): boolean {
 
   if (referer) {
     try {
-      const refererHost = new URL(referer).host;
-      if (refererHost !== host) return false;
+      const refererHost = new URL(referer).host.toLowerCase();
+      if (!allowedHosts.has(refererHost)) return false;
     } catch {
       return false;
     }
