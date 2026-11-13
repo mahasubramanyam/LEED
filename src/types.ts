@@ -234,19 +234,182 @@ export interface CampaignMessage {
   sentAt?: string;
 }
 
+export type SourceCategory =
+  | 'government_registry'
+  | 'business_directory'
+  | 'search_engine'
+  | 'maps_geo'
+  | 'social_platform'
+  | 'website_intelligence'
+  | 'enrichment_verification'
+  | 'ai_engine';
+
+export type ConnectorAccessMode =
+  | 'live_api'
+  | 'offline_reference'
+  | 'public_directory'
+  | 'manual_portal'
+  | 'internal_crawler'
+  | 'ai_inference';
+
+export type ConnectorCapability =
+  | 'company_search'
+  | 'registry_lookup'
+  | 'identifier_validation'
+  | 'poi_search'
+  | 'website_inspection'
+  | 'contact_enrichment'
+  | 'ai_analysis'
+  | 'pagination'
+  | 'connection_test';
+
+export type ConnectorHealthState =
+  | 'operational'
+  | 'degraded'
+  | 'authentication_required'
+  | 'configuration_required'
+  | 'rate_limited'
+  | 'temporarily_unavailable'
+  | 'disabled'
+  | 'not_tested';
+
+export type ConnectorErrorCategory =
+  | 'authentication_failure'
+  | 'authorization_failure'
+  | 'rate_limited'
+  | 'timeout'
+  | 'network_failure'
+  | 'provider_unavailable'
+  | 'invalid_response'
+  | 'invalid_request'
+  | 'unsupported_country'
+  | 'unsupported_capability'
+  | 'missing_credentials'
+  | 'configuration_error'
+  | 'unknown_provider_error';
+
+export interface CredentialFieldSpec {
+  key: string;
+  label: string;
+  required: boolean;
+  secret: boolean;
+  placeholder?: string;
+  helpText?: string;
+}
+
+export interface CredentialRequirement {
+  authType: 'none_open' | 'api_key' | 'environment' | 'basic_auth' | 'oauth2';
+  required: boolean;
+  fields: CredentialFieldSpec[];
+  envFallbackKeys: string[];
+  setupInstructions: string;
+  obtainKeyUrl?: string;
+}
+
+export interface ConnectorCredentialStatus {
+  connectorId: string;
+  authType: 'none_open' | 'api_key' | 'environment' | 'basic_auth' | 'oauth2';
+  required: boolean;
+  configured: boolean;
+  source: 'environment' | 'database_encrypted' | 'none_required' | 'missing';
+  maskedHint?: string;
+  encryptionKeyConfigured: boolean;
+  encryptionRequirement?: string;
+  rotatedAt?: string;
+  validatedAt?: string;
+  validationStatus?: string;
+}
+
+export interface ConnectorConfigRecord {
+  connectorId: string;
+  enabled: boolean;
+  timeoutMs?: number;
+  maxRetries?: number;
+  rateLimitMax?: number;
+  rateLimitWindowMs?: number;
+  customConfig?: Record<string, unknown>;
+  updatedAt?: string;
+}
+
+export interface ConnectorRunRecord {
+  id: string;
+  connectorId: string;
+  operation: 'search' | 'lookup' | 'health_check' | 'enrich' | 'ai_inference';
+  queryParams?: Record<string, unknown>;
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  status: 'success' | 'error' | 'cancelled' | 'partial';
+  recordsDiscovered: number;
+  recordsNormalized: number;
+  recordsRejected: number;
+  errorCategory?: ConnectorErrorCategory;
+  diagnosticSummary?: string;
+  rateLimitRemaining?: number;
+  rateLimitResetAt?: string;
+  requestId?: string;
+}
+
+export interface ConnectionValidationResult {
+  ok: boolean;
+  healthState: ConnectorHealthState;
+  latencyMs: number;
+  isLiveApi: boolean;
+  errorCategory?: ConnectorErrorCategory;
+  message: string;
+  checkedAt: string;
+  rateLimitRemaining?: number;
+  rateLimitResetAt?: string;
+}
+
+export interface ConnectorEncryptionStatus {
+  configured: boolean;
+  source: 'CONNECTOR_ENCRYPTION_KEY' | 'APP_ENCRYPTION_KEY' | 'missing' | 'invalid';
+  requirementMessage?: string;
+}
+
 export interface ConnectorStatus {
   id: string;
   name: string;
-  category: 'government_registry' | 'maps_geo' | 'web_search' | 'ai_engine';
+  shortName?: string;
+  version?: string;
+  description?: string;
+  category: 'government_registry' | 'maps_geo' | 'web_search' | 'ai_engine' | SourceCategory;
+  sourceCategory?: SourceCategory;
+  accessMode?: ConnectorAccessMode;
   countryCoverage: string[];
+  supportsAllCountries?: boolean;
+  supportsRegionFilter?: boolean;
+  supportsCityFilter?: boolean;
+  supportedIdentifierTypes?: string[];
+  capabilities?: ConnectorCapability[];
   status: 'healthy' | 'configured' | 'unconfigured' | 'degraded' | 'rate_limited';
-  authType: 'none_open' | 'api_key' | 'environment';
+  healthState?: ConnectorHealthState;
+  operational?: boolean;
+  healthSummary?: string;
+  authType: 'none_open' | 'api_key' | 'environment' | 'basic_auth' | 'oauth2';
   isConfigured: boolean;
+  credentialRequirements?: CredentialRequirement;
+  credentialStatus?: ConnectorCredentialStatus;
+  config?: ConnectorConfigRecord;
   rateLimitNote: string;
+  rateLimitState?: {
+    limit: number;
+    remaining: number;
+    windowMs: number;
+    resetAt?: string;
+  };
   attribution: string;
+  license?: string;
+  homepageUrl?: string;
   lastRunAt?: string;
+  lastSuccessAt?: string;
   totalCalls: number;
+  recentSuccessCount?: number;
+  recentFailureCount?: number;
+  consecutiveFailures?: number;
   lastError?: string;
+  lastErrorCategory?: ConnectorErrorCategory;
 }
 
 export interface DuplicateMatch {
@@ -269,6 +432,7 @@ export interface AppSettings {
   outreachApprovalRequired: boolean;
   autoDedupeThreshold: number;
   suppressionDomains: string[];
+  connectorConfigs?: Record<string, ConnectorConfigRecord>;
 }
 
 export interface AuditEvent {

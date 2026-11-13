@@ -18,9 +18,17 @@ import {
   UserCheck,
   Laptop,
   Check,
-  AlertCircle
+  AlertCircle,
+  Power,
+  Play,
+  Trash2,
 } from 'lucide-react';
-import { AppSettings, ConnectorStatus, AuditVerificationResult } from '../types.ts';
+import {
+  AppSettings,
+  ConnectorStatus,
+  AuditVerificationResult,
+  ConnectorEncryptionStatus,
+} from '../types.ts';
 
 interface OwnerProfile {
   id: string;
@@ -89,6 +97,9 @@ interface DiagnosticsData {
       missingLeadIdentifierColumns: string[];
       missingMigration003Indexes: string[];
       countryCapabilitiesTableExists: boolean;
+      migration004Recorded?: boolean;
+      migration004SchemaReady?: boolean;
+      missingMigration004Columns?: string[];
     } | null;
   };
   security: {
@@ -168,10 +179,16 @@ export function OwnerControlCentre({
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
-  // Connectors Key State
+  // Connectors Key & Encryption State
+  const [encryptionStatus, setEncryptionStatus] = useState<ConnectorEncryptionStatus | null>(null);
+  const [selectedCredConnector, setSelectedCredConnector] = useState('conn-companies-house');
   const [chKeyInput, setChKeyInput] = useState('');
   const [savingKey, setSavingKey] = useState(false);
-  const [keySuccess, setKeySuccess] = useState(false);
+  const [keySuccess, setKeySuccess] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [testingConnId, setTestingConnId] = useState<string | null>(null);
+  const [togglingConnId, setTogglingConnId] = useState<string | null>(null);
+  const [connFeedback, setConnFeedback] = useState<string | null>(null);
 
   // Settings Form State
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
@@ -179,14 +196,20 @@ export function OwnerControlCentre({
   const [settingsSuccess, setSettingsSuccess] = useState(false);
   const [newSuppressionDomain, setNewSuppressionDomain] = useState('');
 
-  // Fetch Diagnostics
+  // Fetch Diagnostics & Encryption Status
   const fetchDiagnostics = useCallback(async () => {
     setLoadingDiag(true);
     try {
-      const res = await apiFetch('/api/owner/diagnostics');
+      const [res, encRes] = await Promise.all([
+        apiFetch('/api/owner/diagnostics'),
+        apiFetch('/api/connectors/encryption-status'),
+      ]);
       if (res.ok) {
         const data = await res.json();
         setDiagData(data);
+      }
+      if (encRes.ok) {
+        setEncryptionStatus(await encRes.json());
       }
     } catch (err) {
       console.error('Failed to load diagnostics', err);
@@ -335,21 +358,87 @@ export function OwnerControlCentre({
     }
   };
 
-  // Handle Save Companies House API Key
+  // Handle Save/Rotate Encrypted Connector Credential
   const handleSaveChKey = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!chKeyInput.trim()) return;
     setSavingKey(true);
-    setKeySuccess(false);
+    setKeySuccess(null);
+    setKeyError(null);
     try {
-      await onUpdateSettings({ companiesHouseApiKey: chKeyInput });
-      setKeySuccess(true);
+      const target = connectors.find((c) => c.id === selectedCredConnector);
+      const isRotation = target?.credentialStatus?.source === 'database_encrypted';
+      const fieldKey = target?.credentialRequirements?.fields?.[0]?.key || 'apiKey';
+      const res = await apiFetch(`/api/connectors/${selectedCredConnector}/credentials`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          credentials: { [fieldKey]: chKeyInput.trim() },
+          rotate: isRotation,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setKeyError(data.error || 'Failed to encrypt and save credential');
+        return;
+      }
+      setKeySuccess(
+        `Credential ${isRotation ? 'rotated' : 'stored'} securely (${data.credentialStatus?.maskedHint || 'masked'}).`
+      );
       setChKeyInput('');
-      onRefreshConnectors();
-      setTimeout(() => setKeySuccess(false), 3000);
-    } catch (err) {
-      console.error(err);
+      await Promise.all([onRefreshConnectors(), fetchAuditLog()]);
+      setTimeout(() => setKeySuccess(null), 4000);
+    } catch (err: any) {
+      setKeyError(err?.message || 'Credential save failed');
     } finally {
       setSavingKey(false);
+    }
+  };
+
+  const handleRemoveConnectorCred = async (connectorId: string) => {
+    setSavingKey(true);
+    setKeyError(null);
+    setKeySuccess(null);
+    try {
+      const res = await apiFetch(`/api/connectors/${connectorId}/credentials`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) {
+        setKeyError(data.error || 'Failed to remove stored credential');
+        return;
+      }
+      setKeySuccess(`Stored database credential removed for ${connectorId}.`);
+      await Promise.all([onRefreshConnectors(), fetchAuditLog()]);
+      setTimeout(() => setKeySuccess(null), 4000);
+    } catch (err: any) {
+      setKeyError(err?.message || 'Credential removal failed');
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const handleTestConnector = async (connectorId: string) => {
+    setTestingConnId(connectorId);
+    setConnFeedback(null);
+    try {
+      const res = await apiFetch(`/api/connectors/${connectorId}/test`, { method: 'POST' });
+      const data = await res.json();
+      setConnFeedback(data.validation?.message || data.error || 'Test finished');
+      await Promise.all([onRefreshConnectors(), fetchAuditLog()]);
+    } catch (err: any) {
+      setConnFeedback(err?.message || 'Test failed');
+    } finally {
+      setTestingConnId(null);
+    }
+  };
+
+  const handleToggleConnector = async (c: ConnectorStatus) => {
+    const isEnabled = c.config?.enabled ?? c.healthState !== 'disabled';
+    setTogglingConnId(c.id);
+    try {
+      await apiFetch(`/api/connectors/${c.id}/${isEnabled ? 'disable' : 'enable'}`, { method: 'POST' });
+      await Promise.all([onRefreshConnectors(), fetchAuditLog()]);
+    } finally {
+      setTogglingConnId(null);
     }
   };
 
@@ -404,7 +493,7 @@ export function OwnerControlCentre({
                   Single-Owner Enforced
                 </span>
                 <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                   PostgreSQL Active
                 </span>
               </div>
@@ -572,6 +661,30 @@ export function OwnerControlCentre({
                     {diagData.migrations.inspection.countryCapabilitiesTableExists ? 'Table Exists' : 'Missing'}
                   </span>
                 </div>
+              </div>
+
+              {/* Migration 004 Live Schema Status */}
+              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="text-xs text-slate-600 dark:text-slate-300">
+                  <span className="font-semibold">Migration 004 (Unified Connector Architecture): </span>
+                  <span className="font-mono text-[11px]">
+                    recorded={String(Boolean(diagData.migrations.inspection.migration004Recorded))}, pendingColumns=
+                    {diagData.migrations.inspection.missingMigration004Columns?.length ?? 0}
+                  </span>
+                </div>
+                <span
+                  className={`px-2.5 py-0.5 text-xs font-semibold rounded-md self-start sm:self-auto ${
+                    diagData.migrations.inspection.migration004SchemaReady &&
+                    diagData.migrations.inspection.migration004Recorded
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
+                      : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
+                  }`}
+                >
+                  {diagData.migrations.inspection.migration004SchemaReady &&
+                  diagData.migrations.inspection.migration004Recorded
+                    ? '004 Applied & Verified'
+                    : '004 Pending Approval'}
+                </span>
               </div>
             </div>
           )}
@@ -845,75 +958,196 @@ export function OwnerControlCentre({
       {/* TAB 4: CONNECTORS & CREDENTIALS */}
       {activeTab === 'connectors' && (
         <div className="space-y-6">
-          {/* Companies House API Key Card */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
+          {/* Encryption Key Status Banner */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Key className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">UK Companies House API Key</h2>
+                <Lock className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  AES-256-GCM Credential Encryption Status
+                </h2>
               </div>
-              <span className={`px-2 py-0.5 text-xs font-semibold rounded-md ${
-                (settings as any).companiesHouseConfigured || connectors.find((c) => c.id === 'conn-companies-house')?.isConfigured
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
-                  : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
-              }`}>
-                {(settings as any).companiesHouseConfigured || connectors.find((c) => c.id === 'conn-companies-house')?.isConfigured
-                  ? 'Configured (Server / Neon)'
-                  : 'API Key Not Configured'}
+              <span
+                className={`px-2.5 py-0.5 text-xs font-semibold rounded-md ${
+                  encryptionStatus?.configured
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
+                    : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
+                }`}
+              >
+                {encryptionStatus?.configured
+                  ? `Active (${encryptionStatus.source})`
+                  : 'CONNECTOR_ENCRYPTION_KEY Missing'}
               </span>
             </div>
-
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              Allows real-time verification against the official UK registry. Key is never rendered back to browser JavaScript.
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+              {encryptionStatus?.configured
+                ? 'Credentials are encrypted at rest with AES-256-GCM. Existing secrets are never sent back to browser code.'
+                : encryptionStatus?.requirementMessage ||
+                  'Configure CONNECTOR_ENCRYPTION_KEY in the server environment to store or rotate credentials.'}
             </p>
+          </div>
 
-            <form onSubmit={handleSaveChKey} className="flex gap-3">
+          {/* Encrypted Credential Rotation Card */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <Key className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  Owner Connector Credential Vault
+                </h2>
+              </div>
+
+              <select
+                value={selectedCredConnector}
+                onChange={(e) => {
+                  setSelectedCredConnector(e.target.value);
+                  setKeyError(null);
+                  setKeySuccess(null);
+                }}
+                className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              >
+                {connectors
+                  .filter((c) => c.credentialRequirements && c.credentialRequirements.fields.length > 0)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.credentialStatus?.configured ? 'Configured' : 'Unconfigured'})
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {(() => {
+              const target = connectors.find((c) => c.id === selectedCredConnector);
+              const credStatus = target?.credentialStatus;
+              return (
+                <div className="mb-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 text-xs flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="text-slate-500 dark:text-slate-400">Current Source: </span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                      {credStatus?.source || 'missing'}
+                      {credStatus?.maskedHint ? ` (${credStatus.maskedHint})` : ''}
+                    </span>
+                    {credStatus?.rotatedAt && (
+                      <span className="text-slate-400 ml-2">
+                        · Rotated {new Date(credStatus.rotatedAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                  {credStatus?.source === 'database_encrypted' && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveConnectorCred(selectedCredConnector)}
+                      disabled={savingKey}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-md border border-rose-200 dark:border-rose-900"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Remove DB Secret</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+
+            <form onSubmit={handleSaveChKey} className="flex flex-col sm:flex-row gap-3">
               <input
                 type="password"
-                placeholder="Enter new Companies House API key..."
+                placeholder="Enter new credential value (never pre-filled or displayed)..."
                 value={chKeyInput}
                 onChange={(e) => setChKeyInput(e.target.value)}
                 className="flex-1 px-3.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                autoComplete="new-password"
               />
               <button
                 type="submit"
                 disabled={savingKey || !chKeyInput.trim()}
                 className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
               >
-                {savingKey ? 'Saving...' : 'Update Key'}
+                {savingKey ? 'Encrypting...' : 'Save / Rotate Credential'}
               </button>
             </form>
+            {keyError && (
+              <div className="text-xs text-rose-600 dark:text-rose-400 font-medium mt-2">
+                {keyError}
+              </div>
+            )}
             {keySuccess && (
-              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium mt-2 block">
-                Key updated and stored securely in connector_credentials.
-              </span>
+              <div className="text-xs text-emerald-600 dark:text-emerald-400 font-medium mt-2">
+                {keySuccess}
+              </div>
             )}
           </div>
 
-          {/* All 6 Connectors Status */}
+          {connFeedback && (
+            <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200">
+              {connFeedback}
+            </div>
+          )}
+
+          {/* All Registered Connectors Status & Quick Actions */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {connectors.map((c) => (
-              <div
-                key={c.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs"
-              >
-                <div className="flex items-start justify-between">
-                  <span className="text-xs font-bold text-slate-900 dark:text-white">{c.name}</span>
-                  <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-md ${
-                    c.status === 'healthy'
-                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
-                      : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
-                  }`}>
-                    {c.status}
-                  </span>
+            {connectors.map((c) => {
+              const isEnabled = c.config?.enabled ?? c.healthState !== 'disabled';
+              return (
+                <div
+                  key={c.id}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs flex flex-col justify-between gap-3"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">{c.name}</span>
+                      <span
+                        className={`px-2 py-0.5 text-[10px] font-semibold rounded-md shrink-0 ${
+                          c.healthState === 'operational'
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
+                            : c.healthState === 'disabled'
+                            ? 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
+                            : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
+                        }`}
+                      >
+                        {c.healthState || c.status}
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 mt-1">
+                      {c.accessMode || 'provider'} · {c.countryCoverage.slice(0, 4).join(', ')}
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                      {c.healthSummary || c.rateLimitNote}
+                    </p>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono tabular-nums">
+                      <span>Calls: {c.totalCalls}</span>
+                      {c.rateLimitState && (
+                        <span>
+                          Quota: {c.rateLimitState.remaining}/{c.rateLimitState.limit}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleTestConnector(c.id)}
+                        disabled={testingConnId === c.id}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50"
+                      >
+                        <Play className="w-3 h-3" />
+                        <span>{testingConnId === c.id ? 'Testing...' : 'Test'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleConnector(c)}
+                        disabled={togglingConnId === c.id}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-md"
+                      >
+                        <Power className="w-3 h-3" />
+                        <span>{isEnabled ? 'Disable' : 'Enable'}</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{c.rateLimitNote}</p>
-                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
-                  <span>Calls: {c.totalCalls}</span>
-                  <span>{c.countryCoverage.join(', ')}</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

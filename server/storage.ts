@@ -15,6 +15,13 @@ import { migrator } from './db/migrator.js';
 import { jsonMigrator, MigrationSummary } from './db/migrateJsonToSql.js';
 import { canonicalizeIdentifierType } from '../shared/identifierRegistry.js';
 import { normalizeIdentifierValue } from './identifiers/identifierEngine.js';
+import { ConnectorConfigRecord, ConnectorRunRecord } from './connectors/core/types.js';
+import {
+  aggregateRunsByConnector,
+  buildUnifiedConnectorStatus,
+  connectorRegistry,
+  ensureConnectorsRegistered,
+} from './connectors/index.js';
 
 interface DatabaseSchema {
   leads: CanonicalLead[];
@@ -23,6 +30,8 @@ interface DatabaseSchema {
   campaigns: OutreachCampaign[];
   mergeHistory: MergeHistoryRecord[];
   connectors: ConnectorStatus[];
+  connectorConfigs?: Record<string, ConnectorConfigRecord>;
+  connectorRuns?: ConnectorRunRecord[];
   settings: AppSettings;
 }
 
@@ -751,15 +760,115 @@ class StorageManager {
     return true;
   }
 
+  public getConnectorConfigs(): Record<string, ConnectorConfigRecord> {
+    return this.db.connectorConfigs || this.db.settings?.connectorConfigs || {};
+  }
+
+  public updateConnectorConfig(
+    connectorId: string,
+    partial: Partial<ConnectorConfigRecord>
+  ): ConnectorConfigRecord {
+    ensureConnectorsRegistered();
+    const meta = connectorRegistry.getById(connectorId)?.getMetadata();
+    const currentConfigs = this.getConnectorConfigs();
+    const existing = currentConfigs[connectorId];
+    const nextConfig: ConnectorConfigRecord = {
+      connectorId,
+      enabled: partial.enabled ?? existing?.enabled ?? true,
+      timeoutMs: partial.timeoutMs ?? existing?.timeoutMs ?? meta?.executionPolicy.timeoutMs,
+      maxRetries: partial.maxRetries ?? existing?.maxRetries ?? meta?.executionPolicy.maxRetries,
+      rateLimitMax: partial.rateLimitMax ?? existing?.rateLimitMax ?? meta?.executionPolicy.rateLimit.maxRequests,
+      rateLimitWindowMs:
+        partial.rateLimitWindowMs ?? existing?.rateLimitWindowMs ?? meta?.executionPolicy.rateLimit.windowMs,
+      customConfig: partial.customConfig ?? existing?.customConfig,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.db.connectorConfigs = {
+      ...currentConfigs,
+      [connectorId]: nextConfig,
+    };
+    if (this.db.settings) {
+      this.db.settings.connectorConfigs = this.db.connectorConfigs;
+    }
+    connectorRegistry.setEnabledOverride(connectorId, nextConfig.enabled);
+    this.saveDatabase(this.db);
+    return nextConfig;
+  }
+
+  public recordConnectorRun(run: ConnectorRunRecord): void {
+    if (!Array.isArray(this.db.connectorRuns)) {
+      this.db.connectorRuns = [];
+    }
+    this.db.connectorRuns.unshift(run);
+    if (this.db.connectorRuns.length > 250) {
+      this.db.connectorRuns = this.db.connectorRuns.slice(0, 250);
+    }
+
+    const conn = this.db.connectors.find((c) => c.id === run.connectorId);
+    if (conn) {
+      conn.totalCalls += 1;
+      conn.lastRunAt = run.completedAt || run.startedAt;
+      if (run.status === 'error') {
+        conn.lastError = run.diagnosticSummary;
+        conn.status = run.errorCategory === 'rate_limited' ? 'rate_limited' : 'degraded';
+      } else {
+        conn.lastError = undefined;
+        conn.status = 'healthy';
+      }
+    }
+    this.saveDatabase(this.db);
+  }
+
+  public getConnectorRuns(connectorId?: string, limit = 50): ConnectorRunRecord[] {
+    const runs = Array.isArray(this.db.connectorRuns) ? this.db.connectorRuns : [];
+    const filtered = connectorId ? runs.filter((r) => r.connectorId === connectorId) : runs;
+    return filtered.slice(0, limit);
+  }
+
+  public async getConnectorsUnified(): Promise<ConnectorStatus[]> {
+    ensureConnectorsRegistered();
+    const configs = this.getConnectorConfigs();
+    for (const [id, cfg] of Object.entries(configs)) {
+      if (typeof cfg?.enabled === 'boolean') {
+        connectorRegistry.setEnabledOverride(id, cfg.enabled);
+      }
+    }
+    const runs = this.getConnectorRuns(undefined, 250);
+    const statsMap = aggregateRunsByConnector(runs);
+
+    return Promise.all(
+      connectorRegistry.listAll().map((connector) =>
+        buildUnifiedConnectorStatus(connector, {
+          stats: statsMap.get(connector.id),
+          config: configs[connector.id],
+        })
+      )
+    );
+  }
+
   public getConnectors(): ConnectorStatus[] {
     const hasChKey = Boolean(process.env.COMPANIES_HOUSE_API_KEY || this.db.settings?.companiesHouseApiKey);
     const hasAbrGuid = Boolean(process.env.ABR_GUID);
+    const configs = this.getConnectorConfigs();
     return this.db.connectors.map((c) => {
+      const cfg = configs[c.id];
+      const enabled = cfg?.enabled ?? true;
+      if (!enabled) {
+        return {
+          ...c,
+          status: 'degraded',
+          healthState: 'disabled',
+          operational: false,
+          config: cfg,
+        };
+      }
       if (c.id === 'conn-companies-house') {
         return {
           ...c,
           isConfigured: hasChKey,
           status: hasChKey ? (c.status === 'degraded' ? 'degraded' : 'healthy') : 'unconfigured',
+          config: cfg,
         };
       }
       if (c.id === 'conn-abn') {
@@ -769,26 +878,28 @@ class StorageManager {
           isConfigured: hasAbrGuid,
           status: hasAbrGuid ? 'healthy' : 'unconfigured',
           rateLimitNote: 'ATO Modulo-89 checksum & 5-record sample offline; live ABR API requires registered ABR GUID',
+          config: cfg,
         };
       }
-      return c;
+      return { ...c, config: cfg };
     });
   }
 
   public recordConnectorActivity(connectorId: string, success: boolean, errorMessage?: string) {
-    const conn = this.db.connectors.find((c) => c.id === connectorId);
-    if (conn) {
-      conn.totalCalls += 1;
-      conn.lastRunAt = new Date().toISOString();
-      if (!success) {
-        conn.lastError = errorMessage;
-        conn.status = errorMessage?.includes('rate limit') ? 'rate_limited' : 'degraded';
-      } else {
-        conn.lastError = undefined;
-        conn.status = 'healthy';
-      }
-      this.saveDatabase(this.db);
-    }
+    const now = new Date().toISOString();
+    this.recordConnectorRun({
+      id: `run-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      connectorId,
+      operation: 'search',
+      startedAt: now,
+      completedAt: now,
+      durationMs: 0,
+      status: success ? 'success' : 'error',
+      recordsDiscovered: 0,
+      recordsNormalized: 0,
+      recordsRejected: 0,
+      diagnosticSummary: errorMessage,
+    });
   }
 
   public getSettings(): AppSettings {
@@ -796,7 +907,21 @@ class StorageManager {
   }
 
   public updateSettings(updates: Partial<AppSettings>): AppSettings {
-    Object.assign(this.db.settings, updates);
+    const nextSettings: AppSettings = {
+      ...this.db.settings,
+      ...updates,
+      companiesHouseApiKey:
+        typeof updates.companiesHouseApiKey === 'string' && updates.companiesHouseApiKey.trim().length > 0
+          ? updates.companiesHouseApiKey.trim()
+          : this.db.settings.companiesHouseApiKey,
+      connectorConfigs: updates.connectorConfigs
+        ? { ...(this.db.settings.connectorConfigs || {}), ...updates.connectorConfigs }
+        : this.db.settings.connectorConfigs,
+    };
+    this.db.settings = nextSettings;
+    if (updates.connectorConfigs) {
+      this.db.connectorConfigs = nextSettings.connectorConfigs;
+    }
     this.saveDatabase(this.db);
     return this.db.settings;
   }

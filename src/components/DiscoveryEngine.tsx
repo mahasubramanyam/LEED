@@ -14,8 +14,16 @@ import {
   Check,
   ChevronRight,
   Filter,
+  ChevronLeft,
+  Layers,
 } from 'lucide-react';
-import { CanonicalLead, CountryReference, AdministrativeDivision, CityReference } from '../types.js';
+import {
+  CanonicalLead,
+  CountryReference,
+  AdministrativeDivision,
+  CityReference,
+  ConnectorStatus,
+} from '../types.js';
 import { apiFetch } from '../utils/apiFetch.ts';
 
 interface DiscoveryEngineProps {
@@ -78,6 +86,17 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
   } | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const [availableConnectors, setAvailableConnectors] = useState<ConnectorStatus[]>([]);
+  const [page, setPage] = useState<number>(1);
+  const [fetchAllPages, setFetchAllPages] = useState<boolean>(false);
+  const [pagination, setPagination] = useState<{
+    page: number;
+    pageSize: number;
+    totalItems?: number;
+    totalPages?: number;
+    hasMore: boolean;
+  } | null>(null);
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
 
   // Sync initialCountry when changed from Capability Matrix navigation
   useEffect(() => {
@@ -86,7 +105,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     }
   }, [initialCountry]);
 
-  // Load countries on mount
+  // Load countries and searchable connectors on mount
   useEffect(() => {
     apiFetch('/api/geo/countries')
       .then((res) => res.json())
@@ -96,6 +115,15 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
         }
       })
       .catch((err) => console.error('Failed to load countries:', err));
+
+    apiFetch('/api/connectors?capability=company_search')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.connectors)) {
+          setAvailableConnectors(data.connectors);
+        }
+      })
+      .catch((err) => console.error('Failed to load discovery connectors:', err));
   }, []);
 
   // When selected country changes, load divisions and adjust default connector
@@ -174,10 +202,12 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     }
   };
 
-  const handleSearch = async (e?: React.FormEvent) => {
+  const handleSearch = async (e?: React.FormEvent, targetPage?: number) => {
     if (e) e.preventDefault();
     if (!query.trim()) return;
 
+    const effectivePage = typeof targetPage === 'number' ? Math.max(1, targetPage) : 1;
+    setPage(effectivePage);
     setIsLoading(true);
     setErrors([]);
     setResults([]);
@@ -185,6 +215,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     setProviderNote('');
     setAbnLookupInfo(null);
     setAppliedFilters(null);
+    setPagination(null);
+    setLastRunId(null);
 
     const selectedDivisionObj = divisions.find((d) => d.code === selectedDivision);
     const regionValue = selectedDivisionObj?.name || selectedDivision || undefined;
@@ -199,6 +231,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
           region: regionValue,
           city: city.trim() || undefined,
           connectorId,
+          page: effectivePage,
+          fetchAllPages,
         }),
       });
 
@@ -212,6 +246,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
       setProviderNote(data.providerNote || '');
       setAbnLookupInfo(data.abnLookupInfo || null);
       setAppliedFilters(data.appliedFilters || null);
+      setPagination(data.pagination || null);
+      setLastRunId(data.runId || null);
       if (data.errors) {
         setErrors(data.errors);
       }
@@ -220,6 +256,22 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
       setErrors([msg]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const selectedConnectorMeta = availableConnectors.find((c) => c.id === connectorId);
+  const accessModeBadgeLabel = (mode?: ConnectorStatus['accessMode']): string => {
+    switch (mode) {
+      case 'live_api':
+        return 'Live API';
+      case 'offline_reference':
+        return 'Offline Reference';
+      case 'public_directory':
+        return 'Public Directory';
+      case 'manual_portal':
+        return 'Manual Portal';
+      default:
+        return 'Standard';
     }
   };
 
@@ -386,16 +438,40 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
               onChange={(e) => setConnectorId(e.target.value)}
               className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-3 py-2 focus:outline-none focus:border-indigo-500"
             >
-              <option value="conn-brreg">🇳🇴 Brreg (Norway Official Open Registry)</option>
-              <option value="conn-companies-house">🇬🇧 UK Companies House (API Key Req.)</option>
-              <option value="conn-abn">🇦🇺 AU ABN (Checksum Validator + 5-Record Ref)</option>
-              <option value="conn-osm">🌐 OpenStreetMap POI (Supports Region Filter)</option>
+              {availableConnectors.length > 0 ? (
+                availableConnectors.map((conn) => {
+                  const modeTag = accessModeBadgeLabel(conn.accessMode);
+                  const disabledTag = conn.healthState === 'disabled' ? ' [Disabled]' : '';
+                  const credTag =
+                    conn.healthState === 'authentication_required' ? ' (Key Req.)' : '';
+                  return (
+                    <option key={conn.id} value={conn.id}>
+                      {conn.shortName || conn.name} — {modeTag}
+                      {credTag}
+                      {disabledTag}
+                    </option>
+                  );
+                })
+              ) : (
+                <>
+                  <option value="conn-brreg">🇳🇴 Brreg (Norway Official Open Registry)</option>
+                  <option value="conn-companies-house">🇬🇧 UK Companies House (API Key Req.)</option>
+                  <option value="conn-abn">🇦🇺 AU ABN (Checksum Validator + 5-Record Ref)</option>
+                  <option value="conn-osm">🌐 OpenStreetMap POI (Supports Region Filter)</option>
+                </>
+              )}
             </select>
-            {selectedDivision && connectorId !== 'conn-osm' && (
-              <p className="text-[10px] text-amber-400 mt-1">
-                Region filter is not supported by this connector upstream; applied in OpenStreetMap POI only.
+            {selectedConnectorMeta?.healthState === 'disabled' && (
+              <p className="text-[10px] text-rose-400 mt-1">
+                Connector is disabled. Enable it in Connectors Hub before querying.
               </p>
             )}
+            {selectedDivision &&
+              !(selectedConnectorMeta ? selectedConnectorMeta.supportsRegionFilter : connectorId === 'conn-osm') && (
+                <p className="text-[10px] text-amber-400 mt-1">
+                  Region filter is not supported by this connector upstream; applied in OpenStreetMap POI only.
+                </p>
+              )}
           </div>
 
           {/* City Quick Suggestions */}
@@ -420,7 +496,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
           )}
 
           {/* Action Row */}
-          <div className="md:col-span-12 flex items-center justify-between pt-2">
+          <div className="md:col-span-12 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[11px] text-slate-400">Presets:</span>
               {PRESET_CATEGORIES.map((cat) => (
@@ -435,23 +511,36 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
               ))}
             </div>
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded shadow-sm transition disabled:opacity-50"
-            >
-              {isLoading ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Querying Registry...</span>
-                </>
-              ) : (
-                <>
-                  <Search className="w-3.5 h-3.5" />
-                  <span>Discover Leads</span>
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={fetchAllPages}
+                  onChange={(e) => setFetchAllPages(e.target.checked)}
+                  className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500"
+                />
+                <Layers className="w-3.5 h-3.5 text-slate-400" />
+                <span>Multi-page fetch</span>
+              </label>
+
+              <button
+                type="submit"
+                disabled={isLoading || selectedConnectorMeta?.healthState === 'disabled'}
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded shadow-sm transition disabled:opacity-50"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Querying Registry...</span>
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-3.5 h-3.5" />
+                    <span>Discover Leads</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -503,23 +592,58 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
         </div>
       )}
 
-      {/* Results Header */}
+      {/* Results Header & Pagination */}
       {results.length > 0 && (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-white">Discovered Candidates</span>
-            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300">
+            <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-800 text-slate-300 tabular-nums">
               {results.length} Organizations Found
             </span>
+            {pagination && (
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-slate-900 border border-slate-800 text-slate-400 tabular-nums">
+                Page {pagination.page}
+                {pagination.totalPages ? ` / ${pagination.totalPages}` : ''}
+                {pagination.totalItems !== undefined ? ` (${pagination.totalItems} total)` : ''}
+              </span>
+            )}
+            {lastRunId && (
+              <span className="text-[10px] font-mono text-slate-500">Run {lastRunId}</span>
+            )}
           </div>
 
-          <button
-            onClick={handleSaveAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded transition"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add All to CRM Pipeline</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {pagination && (pagination.page > 1 || pagination.hasMore) && !fetchAllPages && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={isLoading || pagination.page <= 1}
+                  onClick={() => handleSearch(undefined, pagination.page - 1)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs rounded transition"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Prev</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isLoading || !pagination.hasMore}
+                  onClick={() => handleSearch(undefined, pagination.page + 1)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs rounded transition"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={handleSaveAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded transition"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add All to CRM Pipeline</span>
+            </button>
+          </div>
         </div>
       )}
 

@@ -166,19 +166,59 @@ export interface CampaignMessage {
   sentAt?: string;
 }
 
+import type {
+  ConnectorAccessMode,
+  ConnectorCapability,
+  ConnectorConfigRecord,
+  ConnectorCredentialStatus,
+  ConnectorErrorCategory,
+  ConnectorHealthState,
+  CredentialRequirement,
+  SourceCategory,
+} from './connectors/core/types.js';
+
 export interface ConnectorStatus {
   id: string;
   name: string;
-  category: 'government_registry' | 'maps_geo' | 'web_search' | 'ai_engine';
+  shortName?: string;
+  version?: string;
+  description?: string;
+  category: 'government_registry' | 'maps_geo' | 'web_search' | 'ai_engine' | SourceCategory;
+  sourceCategory?: SourceCategory;
+  accessMode?: ConnectorAccessMode;
   countryCoverage: string[];
+  supportsAllCountries?: boolean;
+  supportsRegionFilter?: boolean;
+  supportsCityFilter?: boolean;
+  supportedIdentifierTypes?: string[];
+  capabilities?: ConnectorCapability[];
   status: 'healthy' | 'configured' | 'unconfigured' | 'degraded' | 'rate_limited';
-  authType: 'none_open' | 'api_key' | 'environment';
+  healthState?: ConnectorHealthState;
+  operational?: boolean;
+  healthSummary?: string;
+  authType: 'none_open' | 'api_key' | 'environment' | 'basic_auth' | 'oauth2';
   isConfigured: boolean;
+  credentialRequirements?: CredentialRequirement;
+  credentialStatus?: ConnectorCredentialStatus;
+  config?: ConnectorConfigRecord;
   rateLimitNote: string;
+  rateLimitState?: {
+    limit: number;
+    remaining: number;
+    windowMs: number;
+    resetAt?: string;
+  };
   attribution: string;
+  license?: string;
+  homepageUrl?: string;
   lastRunAt?: string;
+  lastSuccessAt?: string;
   totalCalls: number;
+  recentSuccessCount?: number;
+  recentFailureCount?: number;
+  consecutiveFailures?: number;
   lastError?: string;
+  lastErrorCategory?: ConnectorErrorCategory;
 }
 
 export interface AppSettings {
@@ -192,4 +232,5 @@ export interface AppSettings {
   outreachApprovalRequired: boolean;
   autoDedupeThreshold: number; // 0.85
   suppressionDomains: string[];
+  connectorConfigs?: Record<string, ConnectorConfigRecord>;
 }

@@ -461,18 +461,20 @@ export default function App() {
   };
 
   const handleUpdateSettings = async (newSettings: Partial<AppSettings>) => {
-    try {
-      const res = await apiFetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSettings),
-      });
-      if (res.ok) {
-        const updated = await res.json();
-        setSettings(updated);
-      }
-    } catch (err) {
-      console.error(err);
+    const res = await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSettings),
+    });
+    const payload = await res.json();
+    if (!res.ok) {
+      throw new Error(payload?.error || 'Failed to update settings');
+    }
+    setSettings(payload);
+    const connsRes = await apiFetch('/api/connectors');
+    if (connsRes.ok) {
+      const connsData = await connsRes.json();
+      setConnectors(connsData || []);
     }
   };
 

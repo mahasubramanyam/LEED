@@ -45,6 +45,20 @@ import { validateIdentifier, normalizeIdentifierValue } from './server/identifie
 import { buildCountryCapabilityMatrix } from './server/geo/capabilityMatrix.js';
 import { buildCsvDocument } from './shared/csvUtils.js';
 import { canonicalizeIdentifierType, getIdentifierAliases } from './shared/identifierRegistry.js';
+import {
+  aggregateRunsByConnector,
+  buildUnifiedConnectorStatus,
+  connectorExecutionEngine,
+  connectorRegistry,
+  credentialManager,
+  ensureConnectorsRegistered,
+} from './server/connectors/index.js';
+import { ConnectorError, redactSecrets } from './server/connectors/core/errors.js';
+import {
+  ConnectorCapability,
+  ConnectorRunRecord,
+  SourceCategory,
+} from './server/connectors/core/types.js';
 
 let lastStartupMigrationResult: {
   attempted: boolean;
@@ -59,9 +73,16 @@ let lastStartupMigrationResult: {
   alreadyApplied: [],
 };
 
-
-
 dotenv.config();
+
+ensureConnectorsRegistered();
+connectorExecutionEngine.setDefaultRunRecorder(async (run) => {
+  if (dbManager.isDbConnected()) {
+    await postgresStorage.recordConnectorRun(run);
+  } else if (process.env.NODE_ENV !== 'production') {
+    storage.recordConnectorRun(run);
+  }
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -121,19 +142,25 @@ app.get('/api/status', async (req: Request, res: Response) => {
       ]);
       totalLeads = leads.length;
       totalConnectorsCount = connectors.length;
-      activeConnectorsCount = connectors.filter((c) => c.status === 'healthy' || c.status === 'configured').length;
+      activeConnectorsCount = connectors.filter(
+        (c) => c.healthState === 'operational' || c.status === 'healthy' || c.status === 'configured'
+      ).length;
       migrationStatus = {
         ...lastStartupMigrationResult,
         latestVersion: inspection.latestVersion,
         migration003Recorded: inspection.migration003Recorded,
         migration003SchemaReady: inspection.migration003SchemaReady,
+        migration004Recorded: inspection.migration004Recorded,
+        migration004SchemaReady: inspection.migration004SchemaReady,
       };
     } else {
       const leads = storage.getLeads();
       totalLeads = leads.length;
-      const connectors = storage.getConnectors();
+      const connectors = await storage.getConnectorsUnified();
       totalConnectorsCount = connectors.length;
-      activeConnectorsCount = connectors.filter((c) => c.status === 'healthy' || c.status === 'configured').length;
+      activeConnectorsCount = connectors.filter(
+        (c) => c.healthState === 'operational' || c.status === 'healthy' || c.status === 'configured'
+      ).length;
     }
   } catch (err) {
     console.warn('[Status] Warning querying metrics:', err);
@@ -659,7 +686,7 @@ protectedApi.get('/geo/capability-matrix', async (req: Request, res: Response) =
   try {
     const { isPg } = checkStorageEngine();
     const [connectors, settings, overrides] = await Promise.all([
-      isPg ? postgresStorage.getConnectors() : Promise.resolve(storage.getConnectors()),
+      isPg ? postgresStorage.getConnectors() : storage.getConnectorsUnified(),
       isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
       isPg ? postgresStorage.getCapabilityOverrides() : Promise.resolve(undefined),
     ]);
@@ -1109,110 +1136,137 @@ protectedApi.post('/leads/:id/activities', async (req: Request, res: Response) =
   }
 });
 
-// Multi-Source Discovery Engine
+// Multi-Source Discovery Engine (Unified Connector Execution Engine)
 protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
-  const { query, countryCode, region, city, connectorId, autoSave } = req.body;
+  const { query, countryCode, region, city, connectorId, autoSave, page, pageSize, fetchAllPages, maxPages, requestId } =
+    req.body;
 
   if (!query || typeof query !== 'string' || query.trim().length === 0) {
     res.status(400).json({ error: 'Search query is required' });
     return;
   }
 
+  ensureConnectorsRegistered();
+
   const trimmedQuery = query.trim();
   const cCode = (countryCode || '').toUpperCase().trim();
-  const cleanCity = typeof city === 'string' ? city.trim() : undefined;
-  const cleanRegion = typeof region === 'string' ? region.trim() : undefined;
+  const cleanCity = typeof city === 'string' && city.trim() ? city.trim() : undefined;
+  const cleanRegion = typeof region === 'string' && region.trim() ? region.trim() : undefined;
   const results: CanonicalLead[] = [];
   const errors: string[] = [];
+  const errorDetails: Array<{ connectorId: string; category: string; message: string }> = [];
   const notes: string[] = [];
   let attribution = '';
   let abnLookupInfo: { isLiveApi: boolean; lookupMode: string; isChecksumValid?: boolean } | undefined;
+  let pagination: any;
+  let lastRunId: string | undefined;
 
   const { isPg } = checkStorageEngine();
-  const settings = isPg ? await postgresStorage.getSettings() : storage.getSettings();
+  const [settings, configs] = await Promise.all([
+    isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+    isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+  ]);
 
-  // Securely wire Companies House API Key from environment or settings
-  const chKey = process.env.COMPANIES_HOUSE_API_KEY || settings.companiesHouseApiKey;
+  for (const [id, cfg] of Object.entries(configs)) {
+    if (typeof cfg?.enabled === 'boolean') {
+      connectorRegistry.setEnabledOverride(id, cfg.enabled);
+    }
+  }
 
   try {
-    // 1. Norway Brreg (does not filter natively by county/region)
-    if (connectorId === 'conn-brreg' || (!connectorId && cCode === 'NO')) {
-      try {
-        const brregRes = await searchBrreg(trimmedQuery, cleanCity);
-        results.push(...brregRes.leads);
-        attribution = 'Official open public data from the Brønnøysund Register Centre (NLOD license)';
-        if (cleanRegion) {
-          notes.push(`Brreg search endpoint filters by company name (and city poststed) only; region "${cleanRegion}" was not applied by the upstream registry.`);
-        }
-        if (isPg) await postgresStorage.recordConnectorActivity('conn-brreg', true);
-        else storage.recordConnectorActivity('conn-brreg', true);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`Brreg registry: ${msg}`);
-        if (isPg) await postgresStorage.recordConnectorActivity('conn-brreg', false, msg);
-        else storage.recordConnectorActivity('conn-brreg', false, msg);
+    const targetIds: string[] = [];
+    if (connectorId) {
+      const explicit = connectorRegistry.getById(connectorId);
+      if (!explicit) {
+        res.status(404).json({ error: `Unknown connector "${connectorId}"` });
+        return;
       }
+      const cfg = configs[connectorId];
+      if (!(cfg?.enabled ?? connectorRegistry.isEnabled(connectorId))) {
+        res.status(400).json({
+          error: `${explicit.getMetadata().name} is currently disabled. Enable it in Connectors Hub before running searches.`,
+          errorCategory: 'configuration_error',
+        });
+        return;
+      }
+      targetIds.push(connectorId);
+    } else {
+      if (cCode === 'NO') targetIds.push('conn-brreg');
+      else if (cCode === 'GB') targetIds.push('conn-companies-house');
+      else if (cCode === 'AU') targetIds.push('conn-abn');
+      else targetIds.push('conn-osm');
     }
 
-    // 2. UK Companies House (does not support region parameter)
-    if (connectorId === 'conn-companies-house' || (!connectorId && cCode === 'GB')) {
-      try {
-        const ukRes = await searchCompaniesHouse(trimmedQuery, chKey, cleanCity);
-        results.push(...ukRes.leads);
-        attribution = 'UK Companies House (Open Government Licence v3.0)';
-        if (ukRes.message) notes.push(ukRes.message);
-        if (cleanRegion) {
-          notes.push(`Companies House search does not support region-level filtering ("${cleanRegion}"); matched on name/CRN/locality only.`);
-        }
-        if (isPg) await postgresStorage.recordConnectorActivity('conn-companies-house', true);
-        else storage.recordConnectorActivity('conn-companies-house', true);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`UK Companies House: ${msg}`);
-        if (isPg) await postgresStorage.recordConnectorActivity('conn-companies-house', false, msg);
-        else storage.recordConnectorActivity('conn-companies-house', false, msg);
+    const runConnectorSearch = async (targetId: string) => {
+      const connector = connectorRegistry.getById(targetId);
+      if (!connector) return;
+      const meta = connector.getMetadata();
+      const cfg = configs[targetId] || {
+        connectorId: targetId,
+        enabled: connectorRegistry.isEnabled(targetId),
+      };
+      if (!cfg.enabled) {
+        notes.push(`${meta.shortName} is disabled; skipped.`);
+        return;
       }
+
+      try {
+        const outcome = await connectorExecutionEngine.executeSearch(
+          connector,
+          {
+            query: trimmedQuery,
+            countryCode: cCode || undefined,
+            region: cleanRegion,
+            city: cleanCity,
+            page: typeof page === 'number' ? page : undefined,
+            pageSize: typeof pageSize === 'number' ? pageSize : undefined,
+            fetchAllPages: Boolean(fetchAllPages),
+            maxPages: typeof maxPages === 'number' ? maxPages : undefined,
+          },
+          {
+            config: cfg,
+            userAgent: settings.userAgent,
+            requestId: typeof requestId === 'string' ? requestId : undefined,
+          }
+        );
+
+        results.push(...outcome.normalization.leads);
+        if (!attribution) attribution = outcome.response.attribution;
+        pagination = outcome.response.pagination;
+        lastRunId = outcome.runRecord.id;
+        for (const n of outcome.response.notes || []) {
+          if (n && !notes.includes(n)) notes.push(n);
+        }
+
+        if (targetId === 'conn-abn' && outcome.response.providerMetadata) {
+          const pm = outcome.response.providerMetadata;
+          abnLookupInfo = {
+            isLiveApi: Boolean(pm.isLiveApi),
+            lookupMode: String(pm.lookupMode || 'offline_reference'),
+            isChecksumValid:
+              typeof pm.isChecksumValid === 'boolean' ? pm.isChecksumValid : undefined,
+          };
+        }
+      } catch (err: unknown) {
+        const classified =
+          err instanceof ConnectorError ? err.toClassified() : connector.classifyError(err);
+        const safeMsg = redactSecrets(classified.safeMessage);
+        errors.push(`${meta.shortName}: ${safeMsg}`);
+        errorDetails.push({
+          connectorId: targetId,
+          category: classified.category,
+          message: safeMsg,
+        });
+      }
+    };
+
+    for (const id of targetIds) {
+      await runConnectorSearch(id);
     }
 
-    // 3. Australia ABN (offline 5-record reference + Modulo-89 checksum validator; live ABR requires GUID)
-    if (connectorId === 'conn-abn' || (!connectorId && cCode === 'AU')) {
-      try {
-        const auRes = await searchAbn(trimmedQuery);
-        results.push(...auRes.leads);
-        attribution = 'Australian Business Register (Offline Reference + ATO Modulo-89 Validator; Live API Requires ABR GUID)';
-        abnLookupInfo = {
-          isLiveApi: auRes.isLiveApi,
-          lookupMode: auRes.lookupMode,
-          isChecksumValid: auRes.isChecksumValid,
-        };
-        notes.push(auRes.message);
-        if (cleanRegion) {
-          notes.push(`Offline ABN reference search does not enforce state/territory filter "${cleanRegion}".`);
-        }
-        if (isPg) await postgresStorage.recordConnectorActivity('conn-abn', true);
-        else storage.recordConnectorActivity('conn-abn', true);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`ABN Lookup: ${msg}`);
-        if (isPg) await postgresStorage.recordConnectorActivity('conn-abn', false, msg);
-        else storage.recordConnectorActivity('conn-abn', false, msg);
-      }
-    }
-
-    // 4. OpenStreetMap / Nominatim POI (supports city + region + countryCode)
-    if (connectorId === 'conn-osm' || (!connectorId && results.length === 0)) {
-      try {
-        const osmRes = await searchOpenStreetMap(trimmedQuery, cCode, cleanCity, cleanRegion);
-        results.push(...osmRes.leads);
-        if (!attribution) attribution = '© OpenStreetMap contributors (ODbL License)';
-        if (isPg) await postgresStorage.recordConnectorActivity('conn-osm', true);
-        else storage.recordConnectorActivity('conn-osm', true);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`OpenStreetMap: ${msg}`);
-        if (isPg) await postgresStorage.recordConnectorActivity('conn-osm', false, msg);
-        else storage.recordConnectorActivity('conn-osm', false, msg);
-      }
+    // Fallback to OpenStreetMap if auto-selected primary registry yielded 0 leads
+    if (!connectorId && results.length === 0 && !targetIds.includes('conn-osm')) {
+      await runConnectorSearch('conn-osm');
     }
 
     if (autoSave && results.length > 0) {
@@ -1223,7 +1277,10 @@ protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
     res.json({
       leads: results,
       totalDiscovered: results.length,
+      pagination,
+      runId: lastRunId,
       errors: errors.length > 0 ? errors : undefined,
+      errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
       attribution,
       providerNote: notes.join(' '),
       abnLookupInfo,
@@ -1249,14 +1306,51 @@ protectedApi.post('/inspection/inspect-url', async (req: Request, res: Response)
     return;
   }
 
+  ensureConnectorsRegistered();
+  const { isPg } = checkStorageEngine();
+  const configs = isPg ? await postgresStorage.getConnectorConfigs() : storage.getConnectorConfigs();
+  const inspectorCfg = configs['conn-web-inspector'];
+  if (inspectorCfg && !inspectorCfg.enabled) {
+    res.status(400).json({
+      error: 'Safe Website Inspector connector is disabled. Enable it in Connectors Hub first.',
+      errorCategory: 'configuration_error',
+    });
+    return;
+  }
+
+  const startedAt = new Date().toISOString();
+  const startMs = Date.now();
+
   try {
     const inspection = await inspectWebsite(url);
-    const { isPg } = checkStorageEngine();
+    const runRecord: ConnectorRunRecord = {
+      id: `run-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      connectorId: 'conn-web-inspector',
+      operation: 'enrich',
+      queryParams: { url: String(url).slice(0, 200), leadId },
+      startedAt,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - startMs,
+      status: inspection.securityCheck.passed && inspection.isOnline ? 'success' : 'error',
+      recordsDiscovered: inspection.isOnline ? 1 : 0,
+      recordsNormalized: inspection.isOnline ? 1 : 0,
+      recordsRejected: inspection.isOnline ? 0 : 1,
+      errorCategory: !inspection.securityCheck.passed
+        ? 'invalid_request'
+        : !inspection.isOnline
+        ? 'network_failure'
+        : undefined,
+      diagnosticSummary:
+        inspection.securityCheck.reason ||
+        (inspection.isOnline
+          ? `HTTP ${inspection.httpStatus} (${inspection.serverLatencyMs}ms)`
+          : 'Target host unreachable'),
+    };
 
     if (isPg) {
-      await postgresStorage.recordConnectorActivity('conn-web-inspector', inspection.securityCheck.passed, inspection.securityCheck.reason);
+      await postgresStorage.recordConnectorRun(runRecord);
     } else {
-      storage.recordConnectorActivity('conn-web-inspector', inspection.securityCheck.passed, inspection.securityCheck.reason);
+      storage.recordConnectorRun(runRecord);
     }
 
     if (leadId && inspection.isOnline) {
@@ -1299,6 +1393,23 @@ protectedApi.post('/inspection/inspect-url', async (req: Request, res: Response)
     res.json(inspection);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    const runRecord: ConnectorRunRecord = {
+      id: `run-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      connectorId: 'conn-web-inspector',
+      operation: 'enrich',
+      queryParams: { url: String(url).slice(0, 200), leadId },
+      startedAt,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - startMs,
+      status: 'error',
+      recordsDiscovered: 0,
+      recordsNormalized: 0,
+      recordsRejected: 0,
+      errorCategory: 'unknown_provider_error',
+      diagnosticSummary: redactSecrets(msg),
+    };
+    if (isPg) await postgresStorage.recordConnectorRun(runRecord);
+    else storage.recordConnectorRun(runRecord);
     res.status(500).json({ error: `Inspection failed: ${msg}` });
   }
 });
@@ -1720,15 +1831,437 @@ protectedApi.post('/ai/market-report', async (req: Request, res: Response) => {
   }
 });
 
-// Connectors Health & Credentials
+// Connectors Unified Registry, Health, Execution History, & Encrypted Credentials (Owner-Only)
 protectedApi.get('/connectors', async (req: Request, res: Response) => {
   try {
+    ensureConnectorsRegistered();
     const { isPg } = checkStorageEngine();
-    const connectors = isPg ? await postgresStorage.getConnectors() : storage.getConnectors();
-    res.json(connectors);
+    const allConnectors = isPg
+      ? await postgresStorage.getConnectors()
+      : await storage.getConnectorsUnified();
+
+    const country = typeof req.query.country === 'string' ? req.query.country.trim().toUpperCase() : undefined;
+    const capability = typeof req.query.capability === 'string' ? (req.query.capability.trim() as ConnectorCapability) : undefined;
+    const category = typeof req.query.category === 'string' ? (req.query.category.trim() as SourceCategory) : undefined;
+
+    if (!country && !capability && !category) {
+      res.json(allConnectors);
+      return;
+    }
+
+    const matchedIds = new Set(
+      connectorRegistry
+        .filter({
+          country: country && country !== 'ALL' ? country : undefined,
+          capability,
+          category,
+        })
+        .map((c) => c.id)
+    );
+
+    res.json(allConnectors.filter((c) => matchedIds.has(c.id)));
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
+  }
+});
+
+protectedApi.get('/connectors/encryption-status', (req: Request, res: Response) => {
+  res.json(credentialManager.getEncryptionStatus());
+});
+
+protectedApi.get('/connectors/runs', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const connectorId = typeof req.query.connectorId === 'string' && req.query.connectorId.trim()
+      ? req.query.connectorId.trim()
+      : undefined;
+    const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+    const runs = isPg
+      ? await postgresStorage.getConnectorRuns(connectorId, limit)
+      : storage.getConnectorRuns(connectorId, limit);
+    res.json({ runs, total: runs.length });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+protectedApi.post('/connectors/executions/:requestId/cancel', (req: Request, res: Response) => {
+  const cancelled = connectorExecutionEngine.cancelExecution(req.params.requestId);
+  if (!cancelled) {
+    res.status(404).json({ error: 'Active execution request not found or already completed' });
+    return;
+  }
+  res.json({ success: true, requestId: req.params.requestId });
+});
+
+protectedApi.get('/connectors/:id', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    const connector = connectorRegistry.getById(req.params.id);
+    if (!connector) {
+      res.status(404).json({ error: 'Connector not found' });
+      return;
+    }
+    const { isPg } = checkStorageEngine();
+    const [allConnectors, recentRuns] = await Promise.all([
+      isPg ? postgresStorage.getConnectors() : storage.getConnectorsUnified(),
+      isPg
+        ? postgresStorage.getConnectorRuns(req.params.id, 25)
+        : Promise.resolve(storage.getConnectorRuns(req.params.id, 25)),
+    ]);
+    const item = allConnectors.find((c) => c.id === req.params.id);
+    res.json({
+      connector: item,
+      metadata: connector.getMetadata(),
+      recentRuns,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+protectedApi.get('/connectors/:id/health', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    const connector = connectorRegistry.getById(req.params.id);
+    if (!connector) {
+      res.status(404).json({ error: 'Connector not found' });
+      return;
+    }
+    const { isPg } = checkStorageEngine();
+    const [runs, configs] = await Promise.all([
+      isPg
+        ? postgresStorage.getConnectorRuns(req.params.id, 50)
+        : Promise.resolve(storage.getConnectorRuns(req.params.id, 50)),
+      isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+    ]);
+    const statsMap = aggregateRunsByConnector(runs);
+    const statusObj = await buildUnifiedConnectorStatus(connector, {
+      stats: statsMap.get(req.params.id),
+      config: configs[req.params.id],
+    });
+    res.json({
+      connectorId: req.params.id,
+      healthState: statusObj.healthState,
+      operational: statusObj.operational,
+      summary: statusObj.healthSummary,
+      lastRunAt: statusObj.lastRunAt,
+      lastSuccessAt: statusObj.lastSuccessAt,
+      lastError: statusObj.lastError,
+      lastErrorCategory: statusObj.lastErrorCategory,
+      rateLimit: statusObj.rateLimitState,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+protectedApi.post('/connectors/:id/test', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    const connector = connectorRegistry.getById(req.params.id);
+    if (!connector) {
+      res.status(404).json({ error: 'Connector not found' });
+      return;
+    }
+    const { isPg } = checkStorageEngine();
+    const [settings, configs] = await Promise.all([
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+      isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+    ]);
+
+    const { validation, runRecord } = await connectorExecutionEngine.executeConnectionTest(connector, {
+      config: configs[req.params.id] || {
+        connectorId: req.params.id,
+        enabled: connectorRegistry.isEnabled(req.params.id),
+      },
+      userAgent: settings.userAgent,
+    });
+
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CONNECTOR_TESTED',
+        req.owner.email,
+        'connector',
+        req.params.id,
+        {
+          ok: validation.ok,
+          healthState: validation.healthState,
+          errorCategory: validation.errorCategory,
+          latencyMs: validation.latencyMs,
+        },
+        normalizeClientIp(req)
+      );
+    }
+
+    const updatedList = isPg ? await postgresStorage.getConnectors() : await storage.getConnectorsUnified();
+    const updatedConnector = updatedList.find((c) => c.id === req.params.id);
+
+    res.json({
+      validation,
+      run: runRecord,
+      connector: updatedConnector,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
+  }
+});
+
+protectedApi.get('/connectors/:id/runs', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    if (!connectorRegistry.getById(req.params.id)) {
+      res.status(404).json({ error: 'Connector not found' });
+      return;
+    }
+    const { isPg } = checkStorageEngine();
+    const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+    const runs = isPg
+      ? await postgresStorage.getConnectorRuns(req.params.id, limit)
+      : storage.getConnectorRuns(req.params.id, limit);
+    res.json({ connectorId: req.params.id, runs, total: runs.length });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+protectedApi.put('/connectors/:id/config', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    const connector = connectorRegistry.getById(req.params.id);
+    if (!connector) {
+      res.status(404).json({ error: 'Connector not found' });
+      return;
+    }
+
+    const { enabled, timeoutMs, maxRetries, rateLimitMax, rateLimitWindowMs, customConfig } = req.body || {};
+    const partial: Record<string, unknown> = {};
+
+    if (typeof enabled === 'boolean') partial.enabled = enabled;
+    if (timeoutMs !== undefined) {
+      const n = Number(timeoutMs);
+      if (!Number.isFinite(n) || n < 500 || n > 120000) {
+        res.status(400).json({ error: 'timeoutMs must be between 500 and 120000 ms' });
+        return;
+      }
+      partial.timeoutMs = Math.round(n);
+    }
+    if (maxRetries !== undefined) {
+      const n = Number(maxRetries);
+      if (!Number.isFinite(n) || n < 0 || n > 5) {
+        res.status(400).json({ error: 'maxRetries must be between 0 and 5' });
+        return;
+      }
+      partial.maxRetries = Math.round(n);
+    }
+    if (rateLimitMax !== undefined) {
+      const n = Number(rateLimitMax);
+      if (!Number.isFinite(n) || n < 1 || n > 10000) {
+        res.status(400).json({ error: 'rateLimitMax must be between 1 and 10000' });
+        return;
+      }
+      partial.rateLimitMax = Math.round(n);
+    }
+    if (rateLimitWindowMs !== undefined) {
+      const n = Number(rateLimitWindowMs);
+      if (!Number.isFinite(n) || n < 500 || n > 3600000) {
+        res.status(400).json({ error: 'rateLimitWindowMs must be between 500 and 3600000 ms' });
+        return;
+      }
+      partial.rateLimitWindowMs = Math.round(n);
+    }
+    if (customConfig && typeof customConfig === 'object') {
+      partial.customConfig = customConfig;
+    }
+
+    const { isPg } = checkStorageEngine();
+    const savedConfig = isPg
+      ? await postgresStorage.updateConnectorConfig(req.params.id, partial)
+      : storage.updateConnectorConfig(req.params.id, partial);
+
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CONNECTOR_CONFIG_UPDATED',
+        req.owner.email,
+        'connector',
+        req.params.id,
+        partial,
+        normalizeClientIp(req)
+      );
+    }
+
+    const updatedList = isPg ? await postgresStorage.getConnectors() : await storage.getConnectorsUnified();
+    res.json({
+      config: savedConfig,
+      connector: updatedList.find((c) => c.id === req.params.id),
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+protectedApi.post('/connectors/:id/enable', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    if (!connectorRegistry.getById(req.params.id)) {
+      res.status(404).json({ error: 'Connector not found' });
+      return;
+    }
+    const { isPg } = checkStorageEngine();
+    await (isPg
+      ? postgresStorage.updateConnectorConfig(req.params.id, { enabled: true })
+      : Promise.resolve(storage.updateConnectorConfig(req.params.id, { enabled: true })));
+
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CONNECTOR_ENABLED',
+        req.owner.email,
+        'connector',
+        req.params.id,
+        { enabled: true },
+        normalizeClientIp(req)
+      );
+    }
+
+    const updatedList = isPg ? await postgresStorage.getConnectors() : await storage.getConnectorsUnified();
+    res.json({ success: true, connector: updatedList.find((c) => c.id === req.params.id) });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+protectedApi.post('/connectors/:id/disable', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    if (!connectorRegistry.getById(req.params.id)) {
+      res.status(404).json({ error: 'Connector not found' });
+      return;
+    }
+    const { isPg } = checkStorageEngine();
+    await (isPg
+      ? postgresStorage.updateConnectorConfig(req.params.id, { enabled: false })
+      : Promise.resolve(storage.updateConnectorConfig(req.params.id, { enabled: false })));
+
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CONNECTOR_DISABLED',
+        req.owner.email,
+        'connector',
+        req.params.id,
+        { enabled: false },
+        normalizeClientIp(req)
+      );
+    }
+
+    const updatedList = isPg ? await postgresStorage.getConnectors() : await storage.getConnectorsUnified();
+    res.json({ success: true, connector: updatedList.find((c) => c.id === req.params.id) });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+protectedApi.put('/connectors/:id/credentials', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    const connector = connectorRegistry.getById(req.params.id);
+    if (!connector) {
+      res.status(404).json({ error: 'Connector not found' });
+      return;
+    }
+
+    const meta = connector.getMetadata();
+    const payload = (req.body?.credentials && typeof req.body.credentials === 'object'
+      ? req.body.credentials
+      : req.body) as Record<string, string>;
+
+    const isRotation = Boolean(req.body?.rotate);
+    const { isPg } = checkStorageEngine();
+    const status = await credentialManager.setCredential(
+      req.params.id,
+      payload,
+      meta.credentialRequirements,
+      { isRotation }
+    );
+
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        isRotation ? 'CONNECTOR_CREDENTIAL_ROTATED' : 'CONNECTOR_CREDENTIAL_UPDATED',
+        req.owner.email,
+        'connector_credentials',
+        req.params.id,
+        {
+          authType: status.authType,
+          source: status.source,
+          maskedHint: status.maskedHint,
+        },
+        normalizeClientIp(req)
+      );
+    }
+
+    const updatedList = isPg ? await postgresStorage.getConnectors() : await storage.getConnectorsUnified();
+    res.json({
+      success: true,
+      credentialStatus: status,
+      connector: updatedList.find((c) => c.id === req.params.id),
+    });
+  } catch (err: unknown) {
+    if (err instanceof ConnectorError) {
+      res.status(400).json({
+        error: err.safeMessage,
+        errorCategory: err.category,
+        remediationHint: err.remediationHint,
+      });
+      return;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
+  }
+});
+
+protectedApi.delete('/connectors/:id/credentials', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    const connector = connectorRegistry.getById(req.params.id);
+    if (!connector) {
+      res.status(404).json({ error: 'Connector not found' });
+      return;
+    }
+
+    const { isPg } = checkStorageEngine();
+    const status = await credentialManager.removeCredential(
+      req.params.id,
+      connector.getMetadata().credentialRequirements
+    );
+
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CONNECTOR_CREDENTIAL_REMOVED',
+        req.owner.email,
+        'connector_credentials',
+        req.params.id,
+        { sourceAfterRemoval: status.source },
+        normalizeClientIp(req)
+      );
+    }
+
+    const updatedList = isPg ? await postgresStorage.getConnectors() : await storage.getConnectorsUnified();
+    res.json({
+      success: true,
+      credentialStatus: status,
+      connector: updatedList.find((c) => c.id === req.params.id),
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
   }
 });
 
@@ -1763,8 +2296,16 @@ protectedApi.put('/settings', async (req: Request, res: Response) => {
       companiesHouseApiKey: undefined,
     });
   } catch (err: unknown) {
+    if (err instanceof ConnectorError) {
+      res.status(400).json({
+        error: err.safeMessage,
+        errorCategory: err.category,
+        remediationHint: err.remediationHint,
+      });
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: redactSecrets(msg) });
   }
 });
 
@@ -1890,17 +2431,18 @@ async function startServer() {
         console.log(`[Startup] PostgreSQL connected successfully (${check.latencyMs}ms). Read-only schema inspection (pending migrations require explicit approval).`);
         lastStartupMigrationResult = {
           attempted: false,
-          success: preInspection.migration003SchemaReady,
+          success: preInspection.migration003SchemaReady && preInspection.migration004SchemaReady,
           applied: [],
           alreadyApplied: preInspection.appliedVersions.map((v) => v.name),
-          error: preInspection.migration003SchemaReady
-            ? undefined
-            : 'Pending schema migrations require explicit approval before execution.',
+          error:
+            preInspection.migration003SchemaReady && preInspection.migration004SchemaReady
+              ? undefined
+              : 'Pending schema migrations require explicit approval before execution.',
         };
       }
       const inspection = await migrator.inspectMigrationStatus();
       console.log(
-        `[Startup] Migration 003 verification — recorded=${inspection.migration003Recorded}, missingColumns=${inspection.missingLeadIdentifierColumns.length}, missingIndexes=${inspection.missingMigration003Indexes.length}, capabilitiesTable=${inspection.countryCapabilitiesTableExists}`
+        `[Startup] Schema verification — m003=${inspection.migration003SchemaReady}, m004=${inspection.migration004SchemaReady}, pendingM004Cols=${inspection.missingMigration004Columns.length}`
       );
     } else {
       console.warn(`[Startup] PostgreSQL connection check failed: ${check.error}`);

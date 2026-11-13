@@ -204,6 +204,9 @@ export class Migrator {
     missingMigration003Indexes: string[];
     countryCapabilitiesTableExists: boolean;
     migration003SchemaReady: boolean;
+    migration004Recorded: boolean;
+    migration004SchemaReady: boolean;
+    missingMigration004Columns: string[];
     error?: string;
   }> {
     const expectedCols = ['country_code', 'normalized_value', 'issuing_authority', 'source', 'status'];
@@ -216,6 +219,20 @@ export class Migrator {
       'idx_leads_country',
       'idx_country_caps_code',
       'idx_country_caps_status',
+    ];
+    const expected004RunCols = [
+      'operation',
+      'started_at',
+      'completed_at',
+      'duration_ms',
+      'records_discovered',
+      'records_normalized',
+      'records_rejected',
+      'error_category',
+      'diagnostic_summary',
+      'rate_limit_remaining',
+      'rate_limit_reset_at',
+      'request_id',
     ];
 
     const pool = clientOrPool || dbManager.getPool();
@@ -234,6 +251,9 @@ export class Migrator {
         missingMigration003Indexes: expectedIndexes,
         countryCapabilitiesTableExists: false,
         migration003SchemaReady: false,
+        migration004Recorded: false,
+        migration004SchemaReady: false,
+        missingMigration004Columns: expected004RunCols,
         error: 'Database connection pool not available',
       };
     }
@@ -265,6 +285,12 @@ export class Migrator {
       const colSet = new Set(leadIdentifiersColumns);
       const missingLeadIdentifierColumns = expectedCols.filter((c) => !colSet.has(c));
 
+      const runsColRes = await client.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'connector_runs' ORDER BY ordinal_position ASC`
+      );
+      const runsColSet = new Set(runsColRes.rows.map((r: { column_name: string }) => r.column_name));
+      const missingMigration004Columns = expected004RunCols.filter((c) => !runsColSet.has(c));
+
       const idxRes = await client.query(
         `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' ORDER BY indexname ASC`
       );
@@ -273,6 +299,7 @@ export class Migrator {
       const missingMigration003Indexes = expectedIndexes.filter((idx) => !idxSet.has(idx));
 
       const migration003Recorded = appliedVersions.some((v) => v.version === '003');
+      const migration004Recorded = appliedVersions.some((v) => v.version === '004');
       const latestVersion = appliedVersions.length > 0 ? appliedVersions[appliedVersions.length - 1].version : null;
 
       return {
@@ -293,6 +320,9 @@ export class Migrator {
           missingLeadIdentifierColumns.length === 0 &&
           missingMigration003Indexes.length === 0 &&
           countryCapabilitiesTableExists,
+        migration004Recorded,
+        migration004SchemaReady: migration004Recorded && missingMigration004Columns.length === 0,
+        missingMigration004Columns,
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -310,6 +340,9 @@ export class Migrator {
         missingMigration003Indexes: expectedIndexes,
         countryCapabilitiesTableExists: false,
         migration003SchemaReady: false,
+        migration004Recorded: false,
+        migration004SchemaReady: false,
+        missingMigration004Columns: expected004RunCols,
         error: msg.replace(/:[^:@]+@/, ':***@'),
       };
     } finally {

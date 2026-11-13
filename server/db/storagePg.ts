@@ -1,8 +1,19 @@
 import pg from 'pg';
-import crypto from 'crypto';
 import { dbManager } from './pool.js';
 import { canonicalizeIdentifierType, getIdentifierAliases } from '../../shared/identifierRegistry.js';
 import { normalizeIdentifierValue } from '../identifiers/identifierEngine.js';
+import {
+  ConnectorConfigRecord,
+  ConnectorErrorCategory,
+  ConnectorRunRecord,
+} from '../connectors/core/types.js';
+import {
+  aggregateRunsByConnector,
+  buildUnifiedConnectorStatus,
+  connectorRegistry,
+  credentialManager,
+  ensureConnectorsRegistered,
+} from '../connectors/index.js';
 import {
   CanonicalLead,
   PipelineStage,
@@ -20,49 +31,6 @@ import {
 
 export const AUDIT_GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
-function deriveCredentialKey(): Buffer {
-  const seed =
-    process.env.SESSION_SECRET ||
-    process.env.COOKIE_SECRET ||
-    process.env.OWNER_SETUP_SECRET ||
-    process.env.DATABASE_URL ||
-    'leed-local-credential-encryption-seed';
-  return crypto.createHash('sha256').update(seed).digest();
-}
-
-function encryptCredentialPayload(payload: Record<string, unknown>): string {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', deriveCredentialKey(), iv);
-  const json = JSON.stringify(payload);
-  const encrypted = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return JSON.stringify({
-    v: 1,
-    iv: iv.toString('base64'),
-    tag: tag.toString('base64'),
-    data: encrypted.toString('base64'),
-  });
-}
-
-function decryptCredentialPayload(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.iv || !parsed.tag || !parsed.data) return null;
-    const decipher = crypto.createDecipheriv(
-      'aes-256-gcm',
-      deriveCredentialKey(),
-      Buffer.from(parsed.iv, 'base64')
-    );
-    decipher.setAuthTag(Buffer.from(parsed.tag, 'base64'));
-    const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(parsed.data, 'base64')),
-      decipher.final(),
-    ]);
-    return JSON.parse(decrypted.toString('utf8'));
-  } catch {
-    return null;
-  }
-}
 
 export interface AuditEventRecord {
   id: string;
@@ -1204,27 +1172,36 @@ export class PostgresStorage {
   // ==========================================
 
   public async getSettings(): Promise<AppSettings> {
+    ensureConnectorsRegistered();
     const pool = this.getClient();
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      const [settingsRes, credRes] = await Promise.all([
-        client.query('SELECT * FROM app_settings WHERE id = $1', ['primary_settings']),
-        client.query('SELECT encrypted_payload FROM connector_credentials WHERE connector_id = $1 LIMIT 1', [
-          'conn-companies-house',
-        ]),
-      ]);
+      const settingsRes = await client.query('SELECT * FROM app_settings WHERE id = $1', ['primary_settings']);
 
       let companiesHouseApiKey: string | undefined;
-      if (credRes.rows.length > 0 && credRes.rows[0]?.encrypted_payload) {
-        const decrypted = decryptCredentialPayload(credRes.rows[0].encrypted_payload);
-        if (decrypted && typeof decrypted.apiKey === 'string' && decrypted.apiKey.trim()) {
-          companiesHouseApiKey = decrypted.apiKey.trim();
+      try {
+        const chConn = connectorRegistry.getById('conn-companies-house');
+        if (chConn) {
+          const resolved = await credentialManager.resolveCredentialForExecution(
+            'conn-companies-house',
+            chConn.getMetadata().credentialRequirements,
+            pool
+          );
+          if (resolved.credentials.apiKey) {
+            companiesHouseApiKey = resolved.credentials.apiKey;
+          }
         }
+      } catch {
+        // Encryption key missing or unreadable: leave companiesHouseApiKey undefined so settings endpoint remains resilient
       }
 
       if (settingsRes.rows.length > 0) {
         const r = settingsRes.rows[0];
+        const rawConfigs =
+          typeof r.connector_configs === 'string'
+            ? JSON.parse(r.connector_configs)
+            : r.connector_configs || {};
         return {
           ownerName: r.owner_name,
           ownerEmail: r.owner_email,
@@ -1236,6 +1213,7 @@ export class PostgresStorage {
           outreachApprovalRequired: r.outreach_approval_required,
           autoDedupeThreshold: parseFloat(r.auto_dedupe_threshold),
           suppressionDomains: typeof r.suppression_domains === 'string' ? JSON.parse(r.suppression_domains) : r.suppression_domains || [],
+          connectorConfigs: rawConfigs,
         };
       }
 
@@ -1251,6 +1229,7 @@ export class PostgresStorage {
         outreachApprovalRequired: true,
         autoDedupeThreshold: 0.85,
         suppressionDomains: ['example.com', 'test.com', 'spamdomain.org'],
+        connectorConfigs: {},
       };
     } finally {
       if (client) client.release();
@@ -1258,59 +1237,96 @@ export class PostgresStorage {
   }
 
   public async updateSettings(updates: Partial<AppSettings>): Promise<AppSettings> {
+    ensureConnectorsRegistered();
     const pool = this.getClient();
     let client: pg.PoolClient | null = null;
     const current = await this.getSettings();
-    const updated = { ...current, ...updates };
+    const updated: AppSettings = {
+      ...current,
+      ...updates,
+      connectorConfigs: updates.connectorConfigs
+        ? { ...(current.connectorConfigs || {}), ...updates.connectorConfigs }
+        : current.connectorConfigs || {},
+    };
 
     try {
       client = await pool.connect();
-      await client.query(
-        `INSERT INTO app_settings (
-          id, owner_name, owner_email, default_country, default_currency, user_agent,
-          enable_safe_website_crawl, outreach_approval_required, auto_dedupe_threshold, suppression_domains, updated_at
-        ) VALUES ('primary_settings', $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          owner_name = EXCLUDED.owner_name,
-          owner_email = EXCLUDED.owner_email,
-          default_country = EXCLUDED.default_country,
-          default_currency = EXCLUDED.default_currency,
-          user_agent = EXCLUDED.user_agent,
-          enable_safe_website_crawl = EXCLUDED.enable_safe_website_crawl,
-          outreach_approval_required = EXCLUDED.outreach_approval_required,
-          auto_dedupe_threshold = EXCLUDED.auto_dedupe_threshold,
-          suppression_domains = EXCLUDED.suppression_domains,
-          updated_at = NOW()`,
-        [
-          updated.ownerName,
-          updated.ownerEmail,
-          updated.defaultCountry,
-          updated.defaultCurrency,
-          updated.userAgent,
-          updated.enableSafeWebsiteCrawl,
-          updated.outreachApprovalRequired,
-          updated.autoDedupeThreshold,
-          JSON.stringify(updated.suppressionDomains),
-        ]
-      );
+      try {
+        await client.query(
+          `INSERT INTO app_settings (
+            id, owner_name, owner_email, default_country, default_currency, user_agent,
+            enable_safe_website_crawl, outreach_approval_required, auto_dedupe_threshold, suppression_domains, connector_configs, updated_at
+          ) VALUES ('primary_settings', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            owner_name = EXCLUDED.owner_name,
+            owner_email = EXCLUDED.owner_email,
+            default_country = EXCLUDED.default_country,
+            default_currency = EXCLUDED.default_currency,
+            user_agent = EXCLUDED.user_agent,
+            enable_safe_website_crawl = EXCLUDED.enable_safe_website_crawl,
+            outreach_approval_required = EXCLUDED.outreach_approval_required,
+            auto_dedupe_threshold = EXCLUDED.auto_dedupe_threshold,
+            suppression_domains = EXCLUDED.suppression_domains,
+            connector_configs = EXCLUDED.connector_configs,
+            updated_at = NOW()`,
+          [
+            updated.ownerName,
+            updated.ownerEmail,
+            updated.defaultCountry,
+            updated.defaultCurrency,
+            updated.userAgent,
+            updated.enableSafeWebsiteCrawl,
+            updated.outreachApprovalRequired,
+            updated.autoDedupeThreshold,
+            JSON.stringify(updated.suppressionDomains),
+            JSON.stringify(updated.connectorConfigs || {}),
+          ]
+        );
+      } catch {
+        // Fallback when Migration 004 connector_configs column has not yet been applied
+        await client.query(
+          `INSERT INTO app_settings (
+            id, owner_name, owner_email, default_country, default_currency, user_agent,
+            enable_safe_website_crawl, outreach_approval_required, auto_dedupe_threshold, suppression_domains, updated_at
+          ) VALUES ('primary_settings', $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            owner_name = EXCLUDED.owner_name,
+            owner_email = EXCLUDED.owner_email,
+            default_country = EXCLUDED.default_country,
+            default_currency = EXCLUDED.default_currency,
+            user_agent = EXCLUDED.user_agent,
+            enable_safe_website_crawl = EXCLUDED.enable_safe_website_crawl,
+            outreach_approval_required = EXCLUDED.outreach_approval_required,
+            auto_dedupe_threshold = EXCLUDED.auto_dedupe_threshold,
+            suppression_domains = EXCLUDED.suppression_domains,
+            updated_at = NOW()`,
+          [
+            updated.ownerName,
+            updated.ownerEmail,
+            updated.defaultCountry,
+            updated.defaultCurrency,
+            updated.userAgent,
+            updated.enableSafeWebsiteCrawl,
+            updated.outreachApprovalRequired,
+            updated.autoDedupeThreshold,
+            JSON.stringify(updated.suppressionDomains),
+          ]
+        );
+      }
 
-      if (Object.prototype.hasOwnProperty.call(updates, 'companiesHouseApiKey')) {
-        const keyVal = (updates.companiesHouseApiKey || '').trim();
-        if (keyVal) {
-          const encrypted = encryptCredentialPayload({ apiKey: keyVal });
-          await client.query(
-            `INSERT INTO connector_credentials (id, connector_id, auth_type, encrypted_payload, status, created_at, updated_at)
-             VALUES ('cred-companies-house', 'conn-companies-house', 'api_key', $1, 'configured', NOW(), NOW())
-             ON CONFLICT (id) DO UPDATE SET
-               encrypted_payload = EXCLUDED.encrypted_payload,
-               status = 'configured',
-               updated_at = NOW()`,
-            [encrypted]
+      // Store/rotate Companies House key ONLY when a non-empty string is explicitly provided.
+      // Never wipe existing working credentials when omitted or blank.
+      if (typeof updates.companiesHouseApiKey === 'string' && updates.companiesHouseApiKey.trim().length > 0) {
+        const keyVal = updates.companiesHouseApiKey.trim();
+        const chConn = connectorRegistry.getById('conn-companies-house');
+        if (chConn) {
+          await credentialManager.setCredential(
+            'conn-companies-house',
+            { apiKey: keyVal },
+            chConn.getMetadata().credentialRequirements,
+            { isRotation: Boolean(current.companiesHouseApiKey), customPool: pool }
           );
           updated.companiesHouseApiKey = keyVal;
-        } else {
-          await client.query(`DELETE FROM connector_credentials WHERE connector_id = 'conn-companies-house'`);
-          updated.companiesHouseApiKey = undefined;
         }
       }
 
@@ -1351,148 +1367,247 @@ export class PostgresStorage {
     }
   }
 
-  public async getConnectors(): Promise<ConnectorStatus[]> {
+  public async getConnectorConfigs(): Promise<Record<string, ConnectorConfigRecord>> {
     const pool = this.getClient();
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      const [runsRes, credsRes] = await Promise.all([
-        client.query(`
-          SELECT 
-            connector_id,
-            COUNT(*) as total_calls,
-            MAX(executed_at) as last_run_at,
-            (ARRAY_AGG(error_message ORDER BY executed_at DESC))[1] as last_error,
-            (ARRAY_AGG(status ORDER BY executed_at DESC))[1] as last_status
-          FROM connector_runs
-          GROUP BY connector_id
-        `),
-        client.query(`SELECT connector_id, status FROM connector_credentials`),
-      ]);
-
-      const statsMap = new Map<string, any>();
-      for (const r of runsRes.rows) {
-        statsMap.set(r.connector_id, r);
-      }
-
-      const credMap = new Set<string>();
-      for (const c of credsRes.rows) {
-        if (c.status === 'configured') credMap.add(c.connector_id);
-      }
-
-      const hasChKey = Boolean(process.env.COMPANIES_HOUSE_API_KEY || credMap.has('conn-companies-house'));
-      const hasAbrGuid = Boolean(process.env.ABR_GUID);
-
-      const defaultConnectors: ConnectorStatus[] = [
-        {
-          id: 'conn-brreg',
-          name: 'Brønnøysund Register Centre (Brreg)',
-          category: 'government_registry',
-          countryCoverage: ['NO'],
-          status: 'healthy',
-          authType: 'none_open',
-          isConfigured: true,
-          rateLimitNote: '100% Free Open API (data.brreg.no), no key required',
-          attribution: 'Norwegian Licence for Open Government Data (NLOD)',
-          totalCalls: 0,
-        },
-        {
-          id: 'conn-companies-house',
-          name: 'UK Companies House Registry',
-          category: 'government_registry',
-          countryCoverage: ['GB'],
-          status: hasChKey ? 'configured' : 'unconfigured',
-          authType: 'api_key',
-          isConfigured: hasChKey,
-          rateLimitNote: '600 reqs / 5 mins. Free key at developer.company-information.service.gov.uk',
-          attribution: 'Crown Copyright (Open Government Licence v3.0)',
-          totalCalls: 0,
-        },
-        {
-          id: 'conn-osm',
-          name: 'OpenStreetMap & Nominatim POI',
-          category: 'maps_geo',
-          countryCoverage: ['GLOBAL', 'GB', 'NO', 'US', 'AU', 'DE', 'FR', 'IN'],
-          status: 'healthy',
-          authType: 'none_open',
-          isConfigured: true,
-          rateLimitNote: 'Max 1 req/sec compliance with Nominatim Usage Policy',
-          attribution: '© OpenStreetMap contributors (ODbL License)',
-          totalCalls: 0,
-        },
-        {
-          id: 'conn-abn',
-          name: 'Australian Business Register (ABN Lookup)',
-          category: 'government_registry',
-          countryCoverage: ['AU'],
-          status: hasAbrGuid ? 'configured' : 'unconfigured',
-          authType: 'api_key',
-          isConfigured: hasAbrGuid,
-          rateLimitNote: 'ATO Modulo-89 checksum & 5-record sample offline; live ABR API requires registered ABR GUID',
-          attribution: 'Commonwealth of Australia Open Data (ABR)',
-          totalCalls: 0,
-        },
-        {
-          id: 'conn-web-inspector',
-          name: 'Safe Website Inspector & SSRF Shield',
-          category: 'web_search',
-          countryCoverage: ['GLOBAL'],
-          status: 'healthy',
-          authType: 'none_open',
-          isConfigured: true,
-          rateLimitNote: 'DNS pinning, private IP range blocking, 300KB response cap',
-          attribution: 'Direct HTTP Inspection via internal safe crawler',
-          totalCalls: 0,
-        },
-        {
-          id: 'conn-gemini',
-          name: 'Gemini AI Sales & Intelligence Engine',
-          category: 'ai_engine',
-          countryCoverage: ['GLOBAL'],
-          status: process.env.GEMINI_API_KEY ? 'healthy' : 'unconfigured',
-          authType: 'environment',
-          isConfigured: !!process.env.GEMINI_API_KEY,
-          rateLimitNote: 'gemini-3.8-flash server-side inference',
-          attribution: 'Google GenAI SDK',
-          totalCalls: 0,
-        },
-      ];
-
-      return defaultConnectors.map((conn) => {
-        const stats = statsMap.get(conn.id);
-        if (stats) {
-          return {
-            ...conn,
-            totalCalls: parseInt(stats.total_calls, 10),
-            lastRunAt: stats.last_run_at,
-            lastError: stats.last_error || undefined,
-            status: stats.last_status === 'error' ? 'degraded' : conn.isConfigured ? 'healthy' : 'unconfigured',
-          };
+      const { rows } = await client.query('SELECT connector_configs FROM app_settings WHERE id = $1', ['primary_settings']);
+      if (rows.length > 0 && rows[0].connector_configs) {
+        const parsed =
+          typeof rows[0].connector_configs === 'string'
+            ? JSON.parse(rows[0].connector_configs)
+            : rows[0].connector_configs;
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
         }
-        return conn;
-      });
+      }
+      return {};
+    } catch {
+      return {};
     } finally {
       if (client) client.release();
     }
   }
 
-  public async recordConnectorActivity(connectorId: string, success: boolean, errorMessage?: string): Promise<void> {
+  public async updateConnectorConfig(
+    connectorId: string,
+    partial: Partial<ConnectorConfigRecord>
+  ): Promise<ConnectorConfigRecord> {
+    ensureConnectorsRegistered();
+    const connector = connectorRegistry.getById(connectorId);
+    const meta = connector?.getMetadata();
+    const currentConfigs = await this.getConnectorConfigs();
+    const existing = currentConfigs[connectorId];
+    const nextConfig: ConnectorConfigRecord = {
+      connectorId,
+      enabled: partial.enabled ?? existing?.enabled ?? true,
+      timeoutMs: partial.timeoutMs ?? existing?.timeoutMs ?? meta?.executionPolicy.timeoutMs,
+      maxRetries: partial.maxRetries ?? existing?.maxRetries ?? meta?.executionPolicy.maxRetries,
+      rateLimitMax: partial.rateLimitMax ?? existing?.rateLimitMax ?? meta?.executionPolicy.rateLimit.maxRequests,
+      rateLimitWindowMs:
+        partial.rateLimitWindowMs ?? existing?.rateLimitWindowMs ?? meta?.executionPolicy.rateLimit.windowMs,
+      customConfig: partial.customConfig ?? existing?.customConfig,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const mergedConfigs = {
+      ...currentConfigs,
+      [connectorId]: nextConfig,
+    };
+
+    connectorRegistry.setEnabledOverride(connectorId, nextConfig.enabled);
+    await this.updateSettings({ connectorConfigs: mergedConfigs });
+    return nextConfig;
+  }
+
+  public async recordConnectorRun(run: ConnectorRunRecord): Promise<void> {
     const pool = this.getClient();
     let client: pg.PoolClient | null = null;
-    const id = `run-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-
     try {
       client = await pool.connect();
-      await client.query(
-        `INSERT INTO connector_runs (id, connector_id, total_found, total_saved, status, error_message, executed_at)
-         VALUES ($1, $2, 0, 0, $3, $4, NOW())`,
-        [id, connectorId, success ? 'success' : 'error', errorMessage || null]
-      );
+      try {
+        await client.query(
+          `INSERT INTO connector_runs (
+            id, connector_id, query_params, total_found, total_saved, status, error_message, executed_at,
+            operation, started_at, completed_at, duration_ms, records_discovered, records_normalized,
+            records_rejected, error_category, diagnostic_summary, rate_limit_remaining, rate_limit_reset_at, request_id
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9, $10, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19, $20
+          )`,
+          [
+            run.id,
+            run.connectorId,
+            run.queryParams ? JSON.stringify(run.queryParams) : null,
+            run.recordsDiscovered ?? 0,
+            run.recordsNormalized ?? 0,
+            run.status,
+            run.diagnosticSummary || null,
+            run.completedAt || run.startedAt || new Date().toISOString(),
+            run.operation,
+            run.startedAt,
+            run.completedAt || null,
+            run.durationMs ?? null,
+            run.recordsDiscovered ?? 0,
+            run.recordsNormalized ?? 0,
+            run.recordsRejected ?? 0,
+            run.errorCategory || null,
+            run.diagnosticSummary || null,
+            run.rateLimitRemaining ?? null,
+            run.rateLimitResetAt || null,
+            run.requestId || null,
+          ]
+        );
+      } catch {
+        // Fallback when Migration 004 columns have not yet been applied
+        await client.query(
+          `INSERT INTO connector_runs (id, connector_id, query_params, total_found, total_saved, status, error_message, executed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            run.id,
+            run.connectorId,
+            run.queryParams ? JSON.stringify(run.queryParams) : null,
+            run.recordsDiscovered ?? 0,
+            run.recordsNormalized ?? 0,
+            run.status === 'cancelled' ? 'error' : run.status,
+            run.diagnosticSummary || null,
+            run.completedAt || run.startedAt || new Date().toISOString(),
+          ]
+        );
+      }
     } catch (err) {
       console.warn('[PostgresStorage] Could not record connector run:', err);
     } finally {
       if (client) client.release();
     }
+  }
+
+  public async getConnectorRuns(connectorId?: string, limit = 50): Promise<ConnectorRunRecord[]> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const whereClause = connectorId ? 'WHERE connector_id = $1' : '';
+      const params = connectorId ? [connectorId, limit] : [limit];
+      const limitParam = connectorId ? '$2' : '$1';
+
+      try {
+        const { rows } = await client.query(
+          `SELECT id, connector_id, operation, query_params, started_at, completed_at, executed_at,
+                  duration_ms, status, records_discovered, records_normalized, records_rejected,
+                  total_found, total_saved, error_category, diagnostic_summary, error_message,
+                  rate_limit_remaining, rate_limit_reset_at, request_id
+           FROM connector_runs
+           ${whereClause}
+           ORDER BY COALESCE(started_at, executed_at) DESC
+           LIMIT ${limitParam}`,
+          params
+        );
+        return rows.map((r: any) => ({
+          id: r.id,
+          connectorId: r.connector_id,
+          operation: (r.operation || 'search') as ConnectorRunRecord['operation'],
+          queryParams:
+            r.query_params && typeof r.query_params === 'string'
+              ? JSON.parse(r.query_params)
+              : r.query_params || undefined,
+          startedAt: new Date(r.started_at || r.executed_at).toISOString(),
+          completedAt: r.completed_at
+            ? new Date(r.completed_at).toISOString()
+            : r.executed_at
+            ? new Date(r.executed_at).toISOString()
+            : undefined,
+          durationMs: r.duration_ms !== null && r.duration_ms !== undefined ? Number(r.duration_ms) : undefined,
+          status: (r.status || 'success') as ConnectorRunRecord['status'],
+          recordsDiscovered: Number(r.records_discovered ?? r.total_found ?? 0),
+          recordsNormalized: Number(r.records_normalized ?? r.total_saved ?? 0),
+          recordsRejected: Number(r.records_rejected ?? 0),
+          errorCategory: (r.error_category || undefined) as ConnectorErrorCategory | undefined,
+          diagnosticSummary: r.diagnostic_summary || r.error_message || undefined,
+          rateLimitRemaining:
+            r.rate_limit_remaining !== null && r.rate_limit_remaining !== undefined
+              ? Number(r.rate_limit_remaining)
+              : undefined,
+          rateLimitResetAt: r.rate_limit_reset_at
+            ? new Date(r.rate_limit_reset_at).toISOString()
+            : undefined,
+          requestId: r.request_id || undefined,
+        }));
+      } catch {
+        // Fallback when Migration 004 columns have not yet been applied
+        const { rows } = await client.query(
+          `SELECT id, connector_id, query_params, total_found, total_saved, status, error_message, executed_at
+           FROM connector_runs
+           ${whereClause}
+           ORDER BY executed_at DESC
+           LIMIT ${limitParam}`,
+          params
+        );
+        return rows.map((r: any) => ({
+          id: r.id,
+          connectorId: r.connector_id,
+          operation: 'search',
+          queryParams:
+            r.query_params && typeof r.query_params === 'string'
+              ? JSON.parse(r.query_params)
+              : r.query_params || undefined,
+          startedAt: new Date(r.executed_at).toISOString(),
+          completedAt: new Date(r.executed_at).toISOString(),
+          status: (r.status || 'success') as ConnectorRunRecord['status'],
+          recordsDiscovered: Number(r.total_found ?? 0),
+          recordsNormalized: Number(r.total_saved ?? 0),
+          recordsRejected: 0,
+          diagnosticSummary: r.error_message || undefined,
+        }));
+      }
+    } catch {
+      return [];
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async getConnectors(): Promise<ConnectorStatus[]> {
+    ensureConnectorsRegistered();
+    const [runs, configs] = await Promise.all([
+      this.getConnectorRuns(undefined, 250),
+      this.getConnectorConfigs(),
+    ]);
+
+    for (const [id, cfg] of Object.entries(configs)) {
+      if (typeof cfg?.enabled === 'boolean') {
+        connectorRegistry.setEnabledOverride(id, cfg.enabled);
+      }
+    }
+
+    const statsMap = aggregateRunsByConnector(runs);
+    return Promise.all(
+      connectorRegistry.listAll().map((connector) =>
+        buildUnifiedConnectorStatus(connector, {
+          stats: statsMap.get(connector.id),
+          config: configs[connector.id],
+        })
+      )
+    );
+  }
+
+  public async recordConnectorActivity(connectorId: string, success: boolean, errorMessage?: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.recordConnectorRun({
+      id: `run-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      connectorId,
+      operation: 'search',
+      startedAt: now,
+      completedAt: now,
+      durationMs: 0,
+      status: success ? 'success' : 'error',
+      recordsDiscovered: 0,
+      recordsNormalized: 0,
+      recordsRejected: 0,
+      diagnosticSummary: errorMessage,
+    });
   }
 
   public async recordAuditEvent(

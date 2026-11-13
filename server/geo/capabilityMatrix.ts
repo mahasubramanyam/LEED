@@ -29,7 +29,7 @@ export function buildCountryCapabilityMatrix(
     flag: '🇳🇴',
     providerName: 'Brønnøysund Register Centre (Brreg)',
     sourceType: 'official_open_registry',
-    integrationStatus: 'live_open_api',
+    integrationStatus: brregConn?.healthState === 'disabled' ? 'unavailable' : 'live_open_api',
     authRequirement: 'none_open',
     sourceUrl: 'https://data.brreg.no/enhetsregisteret/api',
     lastCheckedAt: overrides?.get('NO')?.lastCheckedAt || brregConn?.lastRunAt || undefined,
@@ -47,7 +47,8 @@ export function buildCountryCapabilityMatrix(
       process.env.COMPANIES_HOUSE_API_KEY ||
       chConn?.isConfigured ||
       chConn?.status === 'configured' ||
-      chConn?.status === 'healthy'
+      chConn?.status === 'healthy' ||
+      chConn?.healthState === 'operational'
   );
   matrix.push({
     id: 'cap-gb-ch',
@@ -56,7 +57,12 @@ export function buildCountryCapabilityMatrix(
     flag: '🇬🇧',
     providerName: 'UK Companies House Registry API',
     sourceType: 'official_api_credentials',
-    integrationStatus: hasChKey ? 'configured_api_key' : 'requires_api_key',
+    integrationStatus:
+      chConn?.healthState === 'disabled'
+        ? 'unavailable'
+        : hasChKey
+        ? 'configured_api_key'
+        : 'requires_api_key',
     authRequirement: 'api_key',
     sourceUrl: 'https://developer.company-information.service.gov.uk',
     lastCheckedAt: overrides?.get('GB')?.lastCheckedAt || chConn?.lastRunAt || undefined,
@@ -79,7 +85,12 @@ export function buildCountryCapabilityMatrix(
     flag: '🇦🇺',
     providerName: 'Australian Business Register (ABR / ABN Lookup)',
     sourceType: 'official_api_credentials',
-    integrationStatus: hasAbrGuid ? 'configured_api_key' : 'requires_api_key',
+    integrationStatus:
+      abnConn?.healthState === 'disabled'
+        ? 'unavailable'
+        : hasAbrGuid
+        ? 'configured_api_key'
+        : 'requires_api_key',
     authRequirement: 'api_key',
     sourceUrl: 'https://abr.business.gov.au/Documentation/WebServiceMethods',
     lastCheckedAt: overrides?.get('AU')?.lastCheckedAt || abnConn?.lastRunAt || undefined,
@@ -99,7 +110,7 @@ export function buildCountryCapabilityMatrix(
     flag: '🌐',
     providerName: 'OpenStreetMap Nominatim & Overpass Commercial POI',
     sourceType: 'public_geo_directory',
-    integrationStatus: 'live_open_api',
+    integrationStatus: osmConn?.healthState === 'disabled' ? 'unavailable' : 'live_open_api',
     authRequirement: 'none_open',
     sourceUrl: 'https://nominatim.openstreetmap.org',
     lastCheckedAt: overrides?.get('GLOBAL')?.lastCheckedAt || osmConn?.lastRunAt || undefined,
@@ -119,7 +130,7 @@ export function buildCountryCapabilityMatrix(
     flag: '🛡️',
     providerName: 'SSRF-Protected Autonomous Web Inspector',
     sourceType: 'web_inspector',
-    integrationStatus: 'live_open_api',
+    integrationStatus: webConn?.healthState === 'disabled' ? 'unavailable' : 'live_open_api',
     authRequirement: 'none',
     sourceUrl: 'https://internal.leed/inspection',
     lastCheckedAt: webConn?.lastRunAt || undefined,
