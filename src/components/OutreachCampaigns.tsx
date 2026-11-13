@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { OutreachCampaign, CampaignMessage, CanonicalLead } from '../types.js';
+import { apiFetch } from '../utils/apiFetch.ts';
 
 interface OutreachCampaignsProps {
   campaigns: OutreachCampaign[];
@@ -47,7 +48,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
     if (!newCampName.trim()) return;
 
     try {
-      const res = await fetch('/api/campaigns', {
+      const res = await apiFetch('/api/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -74,7 +75,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
     if (!currentCampaign) return;
     setIsProcessing(true);
     try {
-      const res = await fetch(`/api/campaigns/${currentCampaign.id}/generate-messages`, {
+      const res = await apiFetch(`/api/campaigns/${currentCampaign.id}/generate-messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -90,7 +91,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
   const handleMessageAction = async (messageId: string, action: 'approve' | 'reject' | 'send') => {
     if (!currentCampaign) return;
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/campaigns/${currentCampaign.id}/messages/${messageId}/action`,
         {
           method: 'POST',

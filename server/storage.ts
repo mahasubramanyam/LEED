@@ -13,6 +13,8 @@ import { dbManager } from './db/pool.js';
 import { PostgresStorage } from './db/storagePg.js';
 import { migrator } from './db/migrator.js';
 import { jsonMigrator, MigrationSummary } from './db/migrateJsonToSql.js';
+import { canonicalizeIdentifierType } from '../shared/identifierRegistry.js';
+import { normalizeIdentifierValue } from './identifiers/identifierEngine.js';
 
 interface DatabaseSchema {
   leads: CanonicalLead[];
@@ -83,11 +85,11 @@ const DEFAULT_CONNECTORS: ConnectorStatus[] = [
     name: 'Australian Business Register (ABN Lookup)',
     category: 'government_registry',
     countryCoverage: ['AU'],
-    status: 'healthy',
-    authType: 'none_open',
-    isConfigured: true,
-    rateLimitNote: 'ABN modulo-89 algorithmic checksum verification',
-    attribution: 'Commonwealth of Australia Open Data',
+    status: process.env.ABR_GUID ? 'configured' : 'unconfigured',
+    authType: 'api_key',
+    isConfigured: Boolean(process.env.ABR_GUID),
+    rateLimitNote: 'ATO Modulo-89 checksum & 5-record sample offline; live ABR API requires registered ABR GUID',
+    attribution: 'Commonwealth of Australia Open Data (ABR)',
     totalCalls: 8,
     lastRunAt: new Date(Date.now() - 86400000).toISOString(),
   },
@@ -179,8 +181,8 @@ const INITIAL_LEADS: CanonicalLead[] = [
       },
     ],
     identifiers: [
-      { type: 'BRREG_ORG', value: '923609016', verified: true },
-      { type: 'DOMAIN', value: 'nordicsemi.com', verified: true },
+      { type: 'NO_ORG', value: '923609016', normalizedValue: '923609016', countryCode: 'NO', verified: true },
+      { type: 'DOMAIN', value: 'nordicsemi.com', normalizedValue: 'NORDICSEMICOM', countryCode: 'NO', verified: true },
     ],
     webMetadata: {
       title: 'Nordic Semiconductor | Low Power Short-Range Wireless IoT Solutions',
@@ -273,8 +275,8 @@ const INITIAL_LEADS: CanonicalLead[] = [
       },
     ],
     identifiers: [
-      { type: 'CRN', value: '07386161', verified: true },
-      { type: 'DOMAIN', value: 'deepmind.google', verified: true },
+      { type: 'UK_CRN', value: '07386161', normalizedValue: '07386161', countryCode: 'GB', verified: true },
+      { type: 'DOMAIN', value: 'deepmind.google', normalizedValue: 'DEEPMINDGOOGLE', countryCode: 'GB', verified: true },
     ],
     webMetadata: {
       title: 'Google DeepMind | Research and Artificial Intelligence',
@@ -352,8 +354,8 @@ const INITIAL_LEADS: CanonicalLead[] = [
       },
     ],
     identifiers: [
-      { type: 'ABN', value: '88098143410', verified: true },
-      { type: 'DOMAIN', value: 'atlassian.com', verified: true },
+      { type: 'AU_ABN', value: '88 098 143 410', normalizedValue: '88098143410', countryCode: 'AU', verified: false },
+      { type: 'DOMAIN', value: 'atlassian.com', normalizedValue: 'ATLASSIANCOM', countryCode: 'AU', verified: false },
     ],
     status: 'contacted',
     pipelineStageId: 'stage-contacted',
@@ -542,27 +544,101 @@ class StorageManager {
   }
 
   public upsertLead(lead: CanonicalLead): CanonicalLead {
-    const idx = this.db.leads.findIndex((l) => l.id === lead.id);
-    lead.updatedAt = new Date().toISOString();
+    const normalizedLead: CanonicalLead = {
+      ...lead,
+      registrationType: lead.registrationType
+        ? canonicalizeIdentifierType(lead.registrationType, lead.address?.countryCode)
+        : undefined,
+      identifiers: (lead.identifiers || [])
+        .filter((i) => i && i.value && i.value.trim().length > 0)
+        .map((i) => ({
+          ...i,
+          type: canonicalizeIdentifierType(i.type, i.countryCode || lead.address?.countryCode),
+          value: i.value.trim(),
+          normalizedValue: i.normalizedValue || normalizeIdentifierValue(i.value),
+        })),
+      updatedAt: new Date().toISOString(),
+    };
+    const idx = this.db.leads.findIndex((l) => l.id === normalizedLead.id);
     if (idx >= 0) {
-      this.db.leads[idx] = lead;
+      this.db.leads[idx] = normalizedLead;
     } else {
-      this.db.leads.unshift(lead);
+      this.db.leads.unshift(normalizedLead);
     }
     this.saveDatabase(this.db);
-    return lead;
+    return normalizedLead;
   }
 
-  public batchUpsertLeads(newLeads: CanonicalLead[]): { added: number; updated: number } {
+  public batchUpsertLeads(
+    newLeads: CanonicalLead[],
+    options: { skipDuplicates?: boolean } = {}
+  ): { added: number; updated: number; skipped: number } {
     let added = 0;
     let updated = 0;
+    let skipped = 0;
     const now = new Date().toISOString();
 
-    for (const lead of newLeads) {
-      const idx = this.db.leads.findIndex((l) => l.id === lead.id);
-      lead.updatedAt = now;
+    for (const rawLead of newLeads) {
+      const lead: CanonicalLead = {
+        ...rawLead,
+        registrationType: rawLead.registrationType
+          ? canonicalizeIdentifierType(rawLead.registrationType, rawLead.address?.countryCode)
+          : undefined,
+        identifiers: (rawLead.identifiers || []).map((i) => ({
+          ...i,
+          type: canonicalizeIdentifierType(i.type, i.countryCode || rawLead.address?.countryCode),
+          normalizedValue: i.normalizedValue || normalizeIdentifierValue(i.value),
+        })),
+        updatedAt: now,
+      };
+
+      const cleanReg = lead.registrationNumber ? normalizeIdentifierValue(lead.registrationNumber) : '';
+      const pDigits = (lead.phoneNormalized || lead.phone || '').replace(/[^0-9]/g, '');
+
+      const idx = this.db.leads.findIndex((existing) => {
+        if (existing.id === lead.id) return true;
+        if (lead.domain && existing.domain && existing.domain.toLowerCase() === lead.domain.toLowerCase()) return true;
+        if (cleanReg.length >= 4 && existing.registrationNumber && normalizeIdentifierValue(existing.registrationNumber) === cleanReg) return true;
+        if (lead.identifiers && existing.identifiers) {
+          for (const idA of lead.identifiers) {
+            const normA = normalizeIdentifierValue(idA.normalizedValue || idA.value);
+            if (normA.length < 4) continue;
+            for (const idB of existing.identifiers) {
+              const normB = normalizeIdentifierValue(idB.normalizedValue || idB.value);
+              const tB = canonicalizeIdentifierType(idB.type, idB.countryCode || existing.address?.countryCode);
+              if (normA === normB && idA.type === tB) return true;
+            }
+          }
+        }
+        const exPhone = (existing.phoneNormalized || existing.phone || '').replace(/[^0-9]/g, '');
+        if (pDigits.length >= 7 && exPhone === pDigits) return true;
+        return false;
+      });
+
       if (idx >= 0) {
-        this.db.leads[idx] = { ...this.db.leads[idx], ...lead };
+        if (options.skipDuplicates) {
+          skipped++;
+          continue;
+        }
+        const existing = this.db.leads[idx];
+        const mergedIdentsMap = new Map<string, any>();
+        for (const i of existing.identifiers || []) {
+          mergedIdentsMap.set(`${canonicalizeIdentifierType(i.type)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`, i);
+        }
+        for (const i of lead.identifiers || []) {
+          const k = `${canonicalizeIdentifierType(i.type)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`;
+          if (!mergedIdentsMap.has(k)) mergedIdentsMap.set(k, i);
+        }
+        this.db.leads[idx] = {
+          ...existing,
+          ...lead,
+          id: existing.id,
+          createdAt: existing.createdAt,
+          phoneNormalized: lead.phoneNormalized || existing.phoneNormalized,
+          identifiers: Array.from(mergedIdentsMap.values()),
+          tags: Array.from(new Set([...(existing.tags || []), ...(lead.tags || [])])),
+          updatedAt: now,
+        };
         updated++;
       } else {
         this.db.leads.unshift(lead);
@@ -570,7 +646,7 @@ class StorageManager {
       }
     }
     this.saveDatabase(this.db);
-    return { added, updated };
+    return { added, updated, skipped };
   }
 
   public deleteLead(id: string): boolean {
@@ -676,7 +752,27 @@ class StorageManager {
   }
 
   public getConnectors(): ConnectorStatus[] {
-    return this.db.connectors;
+    const hasChKey = Boolean(process.env.COMPANIES_HOUSE_API_KEY || this.db.settings?.companiesHouseApiKey);
+    const hasAbrGuid = Boolean(process.env.ABR_GUID);
+    return this.db.connectors.map((c) => {
+      if (c.id === 'conn-companies-house') {
+        return {
+          ...c,
+          isConfigured: hasChKey,
+          status: hasChKey ? (c.status === 'degraded' ? 'degraded' : 'healthy') : 'unconfigured',
+        };
+      }
+      if (c.id === 'conn-abn') {
+        return {
+          ...c,
+          authType: 'api_key',
+          isConfigured: hasAbrGuid,
+          status: hasAbrGuid ? 'healthy' : 'unconfigured',
+          rateLimitNote: 'ATO Modulo-89 checksum & 5-record sample offline; live ABR API requires registered ABR GUID',
+        };
+      }
+      return c;
+    });
   }
 
   public recordConnectorActivity(connectorId: string, success: boolean, errorMessage?: string) {

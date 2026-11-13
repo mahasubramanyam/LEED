@@ -67,6 +67,15 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
   const [results, setResults] = useState<CanonicalLead[]>([]);
   const [attribution, setAttribution] = useState('');
   const [providerNote, setProviderNote] = useState('');
+  const [abnLookupInfo, setAbnLookupInfo] = useState<{
+    isLiveApi: boolean;
+    lookupMode: string;
+    isChecksumValid?: boolean;
+  } | null>(null);
+  const [appliedFilters, setAppliedFilters] = useState<{
+    region?: string;
+    regionSupportedByConnector?: boolean;
+  } | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
 
@@ -174,6 +183,11 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     setResults([]);
     setAttribution('');
     setProviderNote('');
+    setAbnLookupInfo(null);
+    setAppliedFilters(null);
+
+    const selectedDivisionObj = divisions.find((d) => d.code === selectedDivision);
+    const regionValue = selectedDivisionObj?.name || selectedDivision || undefined;
 
     try {
       const res = await apiFetch('/api/discovery/search', {
@@ -182,7 +196,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
         body: JSON.stringify({
           query,
           countryCode: selectedCountry === 'GLOBAL' ? undefined : selectedCountry,
-          region: selectedDivision || undefined,
+          region: regionValue,
           city: city.trim() || undefined,
           connectorId,
         }),
@@ -196,6 +210,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
       setResults(data.leads || []);
       setAttribution(data.attribution || '');
       setProviderNote(data.providerNote || '');
+      setAbnLookupInfo(data.abnLookupInfo || null);
+      setAppliedFilters(data.appliedFilters || null);
       if (data.errors) {
         setErrors(data.errors);
       }
@@ -370,11 +386,16 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
               onChange={(e) => setConnectorId(e.target.value)}
               className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-3 py-2 focus:outline-none focus:border-indigo-500"
             >
-              <option value="conn-brreg">🇳🇴 Brreg (Norway Official Registry)</option>
-              <option value="conn-companies-house">🇬🇧 UK Companies House (Official)</option>
-              <option value="conn-abn">🇦🇺 ABN Lookup (Australia Business Register)</option>
-              <option value="conn-osm">🌐 OpenStreetMap POI Directory (195 States)</option>
+              <option value="conn-brreg">🇳🇴 Brreg (Norway Official Open Registry)</option>
+              <option value="conn-companies-house">🇬🇧 UK Companies House (API Key Req.)</option>
+              <option value="conn-abn">🇦🇺 AU ABN (Checksum Validator + 5-Record Ref)</option>
+              <option value="conn-osm">🌐 OpenStreetMap POI (Supports Region Filter)</option>
             </select>
+            {selectedDivision && connectorId !== 'conn-osm' && (
+              <p className="text-[10px] text-amber-400 mt-1">
+                Region filter is not supported by this connector upstream; applied in OpenStreetMap POI only.
+              </p>
+            )}
           </div>
 
           {/* City Quick Suggestions */}
@@ -435,16 +456,35 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
         </form>
       </div>
 
-      {/* Attribution & Legal Notice Banner */}
-      {attribution && (
-        <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg text-slate-400 text-xs flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-            <span>
-              <strong>Legal Provenance:</strong> {attribution}
-            </span>
-          </div>
-          {providerNote && <span className="text-amber-400 text-[11px]">{providerNote}</span>}
+      {/* Attribution, Provider Notice & Capability Banner */}
+      {(attribution || providerNote || abnLookupInfo) && (
+        <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg text-slate-400 text-xs space-y-1.5">
+          {attribution && (
+            <div className="flex items-center gap-2">
+              <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+              <span>
+                <strong>Legal Provenance:</strong> {attribution}
+              </span>
+            </div>
+          )}
+          {abnLookupInfo && !abnLookupInfo.isLiveApi && (
+            <div className="flex items-center gap-2 text-amber-300">
+              <ShieldAlert className="w-4 h-4 text-amber-400 flex-shrink-0" />
+              <span>
+                <strong>Offline Reference / Checksum Mode:</strong> Live Australian Business Register XML/JSON lookups require an official ABR GUID. Results reflect local ATO Modulo-89 validation and 5 sample reference entities only.
+              </span>
+            </div>
+          )}
+          {providerNote && (
+            <div className="text-amber-400 text-[11px] pl-6">
+              {providerNote}
+            </div>
+          )}
+          {appliedFilters?.region && appliedFilters.regionSupportedByConnector === false && (
+            <div className="text-slate-400 text-[11px] pl-6">
+              Region filter &ldquo;{appliedFilters.region}&rdquo; was preserved for CRM tracking; upstream registry endpoint does not filter by state/county.
+            </div>
+          )}
         </div>
       )}
 

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { CountrySourceCapability } from '../types.js';
 import { apiFetch } from '../utils/apiFetch.ts';
+import { formatDateLocale, formatNumberLocale } from '../../shared/localization.ts';
 
 interface CountryMatrixViewProps {
   onNavigateToDiscovery?: (countryCode: string) => void;
@@ -68,10 +69,21 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
     return true;
   });
 
-  const liveOpenCount = capabilities.filter((c) => c.integrationStatus === 'live_open_api').length;
-  const credentialedCount = capabilities.filter((c) => c.integrationStatus === 'configured_api_key' || c.integrationStatus === 'requires_api_key').length;
-  const restrictedCount = capabilities.filter((c) => c.integrationStatus === 'restricted_manual_only' || c.integrationStatus === 'public_directory_permit').length;
-  const geoOnlyCount = capabilities.filter((c) => c.integrationStatus === 'unavailable').length;
+  const officialLiveCount = capabilities.filter(
+    (c) => c.sourceType === 'official_open_registry' && c.integrationStatus === 'live_open_api'
+  ).length;
+  const credentialedCount = capabilities.filter(
+    (c) => c.integrationStatus === 'configured_api_key' || c.integrationStatus === 'requires_api_key'
+  ).length;
+  const publicGeoCount = capabilities.filter(
+    (c) => c.sourceType === 'public_geo_directory' || c.sourceType === 'web_inspector'
+  ).length;
+  const restrictedCount = capabilities.filter(
+    (c) => c.integrationStatus === 'restricted_manual_only' || c.integrationStatus === 'public_directory_permit'
+  ).length;
+  const geoOnlyCount = capabilities.filter(
+    (c) => c.sourceType === 'geographic_reference_only' || c.integrationStatus === 'unavailable'
+  ).length;
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -132,6 +144,8 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
         return 'Public Website Inspector (SSRF Safe)';
       case 'manual_registry_portal':
         return 'Restricted Government Commercial Portal';
+      case 'geographic_reference_only':
+        return 'Geographic Reference Only (No Registry)';
       default:
         return 'Geographic & Address Standards';
     }
@@ -173,21 +187,25 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
         </div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Live Open Registries</div>
-          <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{liveOpenCount}</div>
-          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Brreg (NO), ABR (AU), OSM (195)</div>
+          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Official Live Open APIs</div>
+          <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{formatNumberLocale(officialLiveCount)}</div>
+          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+            Brreg (NO) · +{publicGeoCount} POI / Web tools
+          </div>
         </div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Credentialed / Paid APIs</div>
-          <div className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">{credentialedCount}</div>
-          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">UK Companies House, SEC EDGAR</div>
+          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Credentialed / Key-Req APIs</div>
+          <div className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">{formatNumberLocale(credentialedCount)}</div>
+          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">UK CH, AU ABR (GUID req.), US SEC</div>
         </div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Restricted / Manual Portals</div>
-          <div className="text-xl font-bold text-rose-600 dark:text-rose-400 mt-1">{restrictedCount}</div>
-          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Germany, France, Switzerland, etc.</div>
+          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Restricted / Geo-Only</div>
+          <div className="text-xl font-bold text-rose-600 dark:text-rose-400 mt-1">{formatNumberLocale(restrictedCount)}</div>
+          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+            Manual portals · {formatNumberLocale(geoOnlyCount)} Geo-Only
+          </div>
         </div>
       </div>
 
@@ -233,6 +251,7 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
               <option value="public_geo_directory">Commercial POI Directory</option>
               <option value="web_inspector">Web Inspector (SSRF Safe)</option>
               <option value="manual_registry_portal">Manual Portal Only</option>
+              <option value="geographic_reference_only">Geographic Reference Only</option>
             </select>
           </div>
         </div>
@@ -299,6 +318,10 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
                   <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Licensing</div>
                   <div className="text-xs font-medium text-slate-800 dark:text-slate-200 max-w-[200px] truncate" title={cap.licensingInfo}>
                     {cap.licensingInfo}
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-end gap-1">
+                    <Clock className="w-3 h-3" />
+                    <span>{cap.lastCheckedAt ? `Checked ${formatDateLocale(cap.lastCheckedAt)}` : 'Reference tier'}</span>
                   </div>
                 </div>
 

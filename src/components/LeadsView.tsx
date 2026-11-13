@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search,
   Building2,
@@ -7,15 +7,21 @@ import {
   Phone,
   Trash2,
   Layers,
-  ChevronDown,
-  Download,
-  Filter,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpDown,
   Plus,
   X,
 } from 'lucide-react';
 import { CanonicalLead, PipelineStage } from '../types.ts';
 import { GeoSelector } from './GeoSelector.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
+import {
+  getUiIdentifierOptions,
+  canonicalizeIdentifierType,
+  getDefaultIdentifierTypeForCountry,
+} from '../../shared/identifierRegistry.ts';
+import { formatCurrencyLocale, getLocaleForCountry } from '../../shared/localization.ts';
 
 function getCountryFlag(code?: string): string {
   if (!code || code.length !== 2) return '🌐';
@@ -58,7 +64,89 @@ export function LeadsView({
   const [onlyWithWebsite, setOnlyWithWebsite] = useState(false);
   const [onlyWithEmail, setOnlyWithEmail] = useState(false);
   const [onlyWithPhone, setOnlyWithPhone] = useState(false);
+  const [sortBy, setSortBy] = useState<'createdAt' | 'companyName' | 'confidenceScore' | 'opportunityValue' | 'country' | 'updatedAt'>('createdAt');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [serverLeads, setServerLeads] = useState<CanonicalLead[]>(leads);
+  const [totalMatching, setTotalMatching] = useState<number>(leads.length);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [isQuerying, setIsQuerying] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const uiIdentifierOptions = getUiIdentifierOptions();
+
+  const fetchServerLeads = useCallback(async () => {
+    setIsQuerying(true);
+    try {
+      const params = new URLSearchParams();
+      if (search.trim()) params.set('search', search.trim());
+      if (selectedCountry !== 'ALL') params.set('country', selectedCountry);
+      if (selectedRegion.trim()) params.set('region', selectedRegion.trim());
+      if (selectedCity.trim()) params.set('city', selectedCity.trim());
+      if (selectedStage !== 'ALL') params.set('stage', selectedStage);
+      if (selectedIdentifierType !== 'ALL') params.set('identifierType', selectedIdentifierType);
+      if (onlyWithWebsite) params.set('hasWebsite', 'true');
+      if (onlyWithEmail) params.set('hasEmail', 'true');
+      if (onlyWithPhone) params.set('hasPhone', 'true');
+      params.set('sortBy', sortBy);
+      params.set('sortDir', sortDir);
+      params.set('page', String(page));
+      params.set('pageSize', String(pageSize));
+
+      const res = await apiFetch(`/api/leads?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setServerLeads(Array.isArray(data.leads) ? data.leads : []);
+        setTotalMatching(typeof data.total === 'number' ? data.total : (data.leads?.length || 0));
+        setTotalPages(typeof data.totalPages === 'number' ? Math.max(1, data.totalPages) : 1);
+      }
+    } catch (err) {
+      console.error('Failed to query leads from server:', err);
+    } finally {
+      setIsQuerying(false);
+    }
+  }, [
+    search,
+    selectedCountry,
+    selectedRegion,
+    selectedCity,
+    selectedStage,
+    selectedIdentifierType,
+    onlyWithWebsite,
+    onlyWithEmail,
+    onlyWithPhone,
+    sortBy,
+    sortDir,
+    page,
+    pageSize,
+  ]);
+
+  // Reset to page 1 when filter criteria change
+  useEffect(() => {
+    setPage(1);
+  }, [
+    search,
+    selectedCountry,
+    selectedRegion,
+    selectedCity,
+    selectedStage,
+    selectedIdentifierType,
+    onlyWithWebsite,
+    onlyWithEmail,
+    onlyWithPhone,
+    sortBy,
+    sortDir,
+    pageSize,
+  ]);
+
+  // Query server with debounce for text filters and refresh when parent leads mutate
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchServerLeads();
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [fetchServerLeads, leads]);
 
   // New Lead Modal State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -67,7 +155,7 @@ export function LeadsView({
   const [newWebsite, setNewWebsite] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('');
-  const [newIdentType, setNewIdentType] = useState('CRN');
+  const [newIdentType, setNewIdentType] = useState<string>('UK_CRN');
   const [newIdentValue, setNewIdentValue] = useState('');
   const [newGeo, setNewGeo] = useState({
     countryCode: 'GB',
@@ -105,24 +193,25 @@ export function LeadsView({
       });
       if (addrRes.ok) {
         const addrData = await addrRes.json();
-        if (addrData.postalValidation && !addrData.postalValidation.valid && newGeo.postalCode.trim()) {
-          setCreateError(addrData.postalValidation.message || 'Invalid postal code format');
+        if (addrData.postalValidation && !addrData.postalValidation.valid) {
+          setCreateError(addrData.postalValidation.message || 'Postal code is required or invalid for this country');
           setIsCreating(false);
           return;
         }
         if (addrData.formattedAddress) formattedAddress = addrData.formattedAddress;
       }
 
-      let finalPhone = newPhone.trim() || undefined;
-      if (finalPhone) {
+      const rawPhone = newPhone.trim() || undefined;
+      let normalizedPhone: string | undefined = undefined;
+      if (rawPhone) {
         const pRes = await apiFetch('/api/geo/normalize-phone', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone: finalPhone, countryCode: newGeo.countryCode }),
+          body: JSON.stringify({ phone: rawPhone, countryCode: newGeo.countryCode }),
         });
         if (pRes.ok) {
           const pData = await pRes.json();
-          if (pData.e164) finalPhone = pData.e164;
+          if (pData.valid && pData.e164) normalizedPhone = pData.e164;
         }
       }
 
@@ -136,6 +225,7 @@ export function LeadsView({
         }
       }
 
+      const canonicalIdentType = canonicalizeIdentifierType(newIdentType, newGeo.countryCode);
       const identifiers: any[] = [];
       if (domain) {
         identifiers.push({ type: 'DOMAIN', value: domain, normalizedValue: domain, source: 'owner_manual_entry', status: 'user_provided', verified: false });
@@ -144,7 +234,7 @@ export function LeadsView({
         const valRes = await apiFetch('/api/identifiers/validate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: newIdentType, value: newIdentValue.trim(), countryCode: newGeo.countryCode }),
+          body: JSON.stringify({ type: canonicalIdentType, value: newIdentValue.trim(), countryCode: newGeo.countryCode }),
         });
         let status = 'user_provided';
         let normalizedValue = newIdentValue.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -156,7 +246,7 @@ export function LeadsView({
           issuingAuthority = valData.issuingAuthority;
         }
         identifiers.push({
-          type: newIdentType,
+          type: canonicalIdentType,
           value: newIdentValue.trim(),
           normalizedValue,
           countryCode: newGeo.countryCode,
@@ -172,11 +262,12 @@ export function LeadsView({
         id: `manual-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         companyName: newName.trim(),
         registrationNumber: newIdentValue.trim() || undefined,
-        registrationType: newIdentValue.trim() ? newIdentType : undefined,
+        registrationType: newIdentValue.trim() ? canonicalIdentType : undefined,
         website: newWebsite.trim() || undefined,
         domain,
         email: newEmail.trim() || undefined,
-        phone: finalPhone,
+        phone: rawPhone,
+        phoneNormalized: normalizedPhone,
         address: {
           street: newGeo.street.trim() || undefined,
           city: newGeo.city.trim() || undefined,
@@ -231,55 +322,7 @@ export function LeadsView({
     }
   };
 
-  // Filter leads
-  const filtered = leads.filter((lead) => {
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      const matchName = lead.companyName.toLowerCase().includes(q);
-      const matchCity = (lead.address?.city || '').toLowerCase().includes(q);
-      const matchRegion = (lead.address?.region || '').toLowerCase().includes(q);
-      const matchReg = (lead.registrationNumber || '').toLowerCase().includes(q);
-      const matchDomain = (lead.domain || '').toLowerCase().includes(q);
-      const matchTag = lead.tags.some((t) => t.toLowerCase().includes(q));
-      const matchIdVal = lead.identifiers?.some((id) => (id.value || '').toLowerCase().includes(q) || (id.normalizedValue || '').toLowerCase().includes(q));
-      if (!matchName && !matchCity && !matchRegion && !matchReg && !matchDomain && !matchTag && !matchIdVal) {
-        return false;
-      }
-    }
-
-    if (selectedCountry !== 'ALL' && lead.address?.countryCode !== selectedCountry) {
-      return false;
-    }
-
-    if (selectedRegion.trim()) {
-      const r = selectedRegion.toLowerCase();
-      if (!(lead.address?.region || '').toLowerCase().includes(r)) return false;
-    }
-
-    if (selectedCity.trim()) {
-      const c = selectedCity.toLowerCase();
-      if (!(lead.address?.city || '').toLowerCase().includes(c)) return false;
-    }
-
-    if (selectedStage !== 'ALL' && lead.pipelineStageId !== selectedStage) {
-      return false;
-    }
-
-    if (selectedIdentifierType !== 'ALL') {
-      const hasType =
-        lead.identifiers?.some((id) => id.type.toUpperCase() === selectedIdentifierType.toUpperCase()) ||
-        (selectedIdentifierType === 'CRN' && lead.registrationType === 'CRN') ||
-        (selectedIdentifierType === 'ORGNR' && lead.registrationType === 'ORGNR') ||
-        (selectedIdentifierType === 'ABN' && lead.registrationType === 'ABN');
-      if (!hasType) return false;
-    }
-
-    if (onlyWithWebsite && !lead.website) return false;
-    if (onlyWithEmail && !lead.email) return false;
-    if (onlyWithPhone && !lead.phone) return false;
-
-    return true;
-  });
+  const filtered = serverLeads;
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -358,19 +401,18 @@ export function LeadsView({
               className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-2 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             >
               <option value="ALL">All ID Types</option>
-              <option value="CRN">CRN (UK)</option>
-              <option value="ORGNR">ORGNR (NO)</option>
-              <option value="ABN">ABN (AU)</option>
-              <option value="EIN">EIN (US)</option>
-              <option value="VAT">VAT / Tax</option>
-              <option value="LEI">LEI (20-char)</option>
+              {uiIdentifierOptions.map((opt) => (
+                <option key={opt.code} value={opt.code}>
+                  {opt.shortLabel}
+                </option>
+              ))}
             </select>
           </div>
         </div>
 
-        {/* Attribute filter toggles + New Lead Action */}
+        {/* Attribute filter toggles, sorting & New Lead Action */}
         <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-          <div className="flex items-center gap-4 flex-wrap text-slate-600 dark:text-slate-300">
+          <div className="flex items-center gap-3 flex-wrap text-slate-600 dark:text-slate-300">
             <select
               value={selectedStage}
               onChange={(e) => setSelectedStage(e.target.value)}
@@ -383,6 +425,25 @@ export function LeadsView({
                 </option>
               ))}
             </select>
+            <div className="flex items-center gap-1.5">
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={`${sortBy}:${sortDir}`}
+                onChange={(e) => {
+                  const [sb, sd] = e.target.value.split(':');
+                  setSortBy(sb as any);
+                  setSortDir((sd as 'asc' | 'desc') || 'desc');
+                }}
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2 py-1 focus:outline-hidden"
+              >
+                <option value="createdAt:desc">Newest First</option>
+                <option value="updatedAt:desc">Recently Updated</option>
+                <option value="companyName:asc">Company A-Z</option>
+                <option value="confidenceScore:desc">Confidence High-Low</option>
+                <option value="opportunityValue:desc">Value High-Low</option>
+                <option value="country:asc">Country A-Z</option>
+              </select>
+            </div>
             <span className="text-slate-400 font-medium">Require:</span>
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
@@ -415,7 +476,14 @@ export function LeadsView({
 
           <div className="flex items-center gap-3">
             <div className="text-slate-500 dark:text-slate-400 text-xs">
-              Showing <strong className="text-slate-900 dark:text-white font-mono">{filtered.length}</strong> of {leads.length}
+              {isQuerying ? (
+                <span className="font-mono text-blue-500">Querying server...</span>
+              ) : (
+                <>
+                  Showing <strong className="text-slate-900 dark:text-white font-mono">{filtered.length}</strong> of{' '}
+                  <strong className="font-mono">{totalMatching}</strong> matching ({leads.length} total)
+                </>
+              )}
             </div>
             {onCreateLead && (
               <button
@@ -475,7 +543,10 @@ export function LeadsView({
                   city={newGeo.city}
                   postalCode={newGeo.postalCode}
                   street={newGeo.street}
-                  onChange={(geo) =>
+                  onChange={(geo) => {
+                    if (geo.countryCode !== newGeo.countryCode) {
+                      setNewIdentType(getDefaultIdentifierTypeForCountry(geo.countryCode));
+                    }
                     setNewGeo({
                       countryCode: geo.countryCode,
                       countryName: geo.countryName,
@@ -484,14 +555,14 @@ export function LeadsView({
                       postalCode: geo.postalCode || '',
                       street: geo.street || '',
                       currency: geo.currency || 'USD',
-                    })
-                  }
+                    });
+                  }}
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Phone (Auto-normalizes E.164)</label>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Phone (Raw preserved; E.164 normalized separately)</label>
                   <input
                     type="text"
                     value={newPhone}
@@ -530,13 +601,11 @@ export function LeadsView({
                     onChange={(e) => setNewIdentType(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5"
                   >
-                    <option value="CRN">CRN (UK)</option>
-                    <option value="ORGNR">ORGNR (NO)</option>
-                    <option value="ABN">ABN (AU)</option>
-                    <option value="EIN">EIN (US)</option>
-                    <option value="SIREN">SIREN (FR)</option>
-                    <option value="VAT">VAT / Tax ID</option>
-                    <option value="LEI">LEI (20-char)</option>
+                    {uiIdentifierOptions.map((opt) => (
+                      <option key={opt.code} value={opt.code}>
+                        {opt.shortLabel}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="sm:col-span-2">
@@ -683,7 +752,7 @@ export function LeadsView({
                           <span>{lead.companyName}</span>
                           {lead.registrationNumber && (
                             <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 px-1.5 py-0.2 rounded font-mono border border-blue-200 dark:border-blue-900">
-                              {lead.registrationType || 'REG'}
+                              {canonicalizeIdentifierType(lead.registrationType, lead.address?.countryCode) || 'REG'}
                             </span>
                           )}
                         </div>
@@ -755,11 +824,11 @@ export function LeadsView({
                             </a>
                           ) : null}
 
-                          {lead.phone ? (
+                          {(lead.phone || lead.phoneNormalized) ? (
                             <a
-                              href={`tel:${lead.phone}`}
+                              href={`tel:${lead.phoneNormalized || lead.phone}`}
                               className="text-emerald-600 dark:text-emerald-400 p-1"
-                              title={lead.phone}
+                              title={lead.phoneNormalized ? `${lead.phone || ''} (E.164: ${lead.phoneNormalized})` : lead.phone}
                             >
                               <Phone className="w-3.5 h-3.5" />
                             </a>
@@ -789,7 +858,11 @@ export function LeadsView({
                       {/* Opportunity Value */}
                       <td className="p-3.5 text-right font-medium font-mono text-slate-900 dark:text-white">
                         {lead.opportunityValue
-                          ? `$${lead.opportunityValue.toLocaleString()}`
+                          ? formatCurrencyLocale(
+                              lead.opportunityValue,
+                              lead.currency || 'USD',
+                              getLocaleForCountry(lead.address?.countryCode, lead.currency)
+                            )
                           : '—'}
                       </td>
 
@@ -822,6 +895,47 @@ export function LeadsView({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Server Pagination Footer */}
+        <div className="px-4 py-3 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+          <div className="flex items-center gap-2">
+            <span>Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-800 dark:text-slate-200"
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="font-mono">
+              Page {page} of {totalPages} ({totalMatching} matching)
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="p-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800"
+              title="Previous Page"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="p-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800"
+              title="Next Page"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

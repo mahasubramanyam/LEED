@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Building2,
@@ -27,6 +27,17 @@ import {
 import { CanonicalLead, PipelineStage, LeadIdentifier } from '../types.js';
 import { GeoSelector } from './GeoSelector.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
+import {
+  getUiIdentifierOptions,
+  canonicalizeIdentifierType,
+  getDefaultIdentifierTypeForCountry,
+} from '../../shared/identifierRegistry.ts';
+import {
+  formatCurrencyLocale,
+  formatDateLocale,
+  getLocaleForCountry,
+  getTimezoneForCountry,
+} from '../../shared/localization.ts';
 
 function getCountryFlag(code?: string): string {
   if (!code || code.length !== 2) return '🌐';
@@ -90,24 +101,25 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   onAddActivity,
   onInspectUrl,
 }) => {
-  if (!lead) return null;
-
   const [activeTab, setActiveTab] = useState<'overview' | 'web' | 'ai' | 'timeline' | 'notes'>('overview');
   const [newNote, setNewNote] = useState('');
   const [newTag, setNewTag] = useState('');
-  const [oppValue, setOppValue] = useState(lead.opportunityValue?.toString() || '');
+  const [oppValue, setOppValue] = useState(lead?.opportunityValue?.toString() || '');
   const [isInspecting, setIsInspecting] = useState(false);
   const [inspectionResult, setInspectionResult] = useState<any>(null);
 
   // International Identifier state
-  const [newIdentType, setNewIdentType] = useState('CRN');
+  const [newIdentType, setNewIdentType] = useState<string>(
+    getDefaultIdentifierTypeForCountry(lead?.address?.countryCode)
+  );
   const [newIdentValue, setNewIdentValue] = useState('');
-  const [newIdentCountry, setNewIdentCountry] = useState(lead.address?.countryCode || 'GB');
+  const [newIdentCountry, setNewIdentCountry] = useState(lead?.address?.countryCode || 'GB');
   const [newIdentAuthority, setNewIdentAuthority] = useState('');
   const [isAddingIdent, setIsAddingIdent] = useState(false);
   const [identValidationFeedback, setIdentValidationFeedback] = useState<{
     valid: boolean;
     normalizedValue?: string;
+    issuingAuthority?: string;
     status?: string;
     message?: string;
   } | null>(null);
@@ -115,24 +127,62 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   // Location & Contact Edit state
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editGeo, setEditGeo] = useState({
-    countryCode: lead.address?.countryCode || 'US',
-    countryName: lead.address?.country || 'United States',
-    region: lead.address?.region || '',
-    city: lead.address?.city || '',
-    postalCode: lead.address?.postalCode || '',
-    street: lead.address?.street || '',
-    currency: lead.currency || 'USD',
+    countryCode: lead?.address?.countryCode || 'US',
+    countryName: lead?.address?.country || 'United States',
+    region: lead?.address?.region || '',
+    city: lead?.address?.city || '',
+    postalCode: lead?.address?.postalCode || '',
+    street: lead?.address?.street || '',
+    currency: lead?.currency || 'USD',
   });
-  const [editPhone, setEditPhone] = useState(lead.phone || '');
-  const [editEmail, setEditEmail] = useState(lead.email || '');
-  const [editWebsite, setEditWebsite] = useState(lead.website || '');
+  const [editPhone, setEditPhone] = useState(lead?.phone || '');
+  const [editEmail, setEditEmail] = useState(lead?.email || '');
+  const [editWebsite, setEditWebsite] = useState(lead?.website || '');
   const [editProfileError, setEditProfileError] = useState<string | null>(null);
+
+  // AI Quick Actions state
+  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
+  const [aiPitch, setAiPitch] = useState<any>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  // Keep modal local state synced when active lead changes
+  useEffect(() => {
+    if (!lead) return;
+    setOppValue(lead.opportunityValue?.toString() || '');
+    setNewIdentCountry(lead.address?.countryCode || 'GB');
+    setNewIdentType(getDefaultIdentifierTypeForCountry(lead.address?.countryCode));
+    setEditGeo({
+      countryCode: lead.address?.countryCode || 'US',
+      countryName: lead.address?.country || 'United States',
+      region: lead.address?.region || '',
+      city: lead.address?.city || '',
+      postalCode: lead.address?.postalCode || '',
+      street: lead.address?.street || '',
+      currency: lead.currency || 'USD',
+    });
+    setEditPhone(lead.phone || '');
+    setEditEmail(lead.email || '');
+    setEditWebsite(lead.website || '');
+    setEditProfileError(null);
+    setIsEditingProfile(false);
+    setAiAnalysis(null);
+    setAiPitch(null);
+    setAiError(null);
+    setInspectionResult(null);
+  }, [lead?.id]);
+
+  if (!lead) return null;
+
+  const uiIdentifierOptions = getUiIdentifierOptions();
+  const leadLocale = getLocaleForCountry(lead.address?.countryCode, lead.currency);
+  const leadTimezone = getTimezoneForCountry(lead.address?.countryCode);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setEditProfileError(null);
     try {
-      // 1. Format address according to destination country conventions
+      // 1. Format address according to destination country conventions & validate postal requirement
       let formattedAddress = [editGeo.street, editGeo.city, editGeo.region, editGeo.postalCode, editGeo.countryName]
         .filter(Boolean)
         .join(', ');
@@ -150,24 +200,27 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
       });
       if (addrRes.ok) {
         const addrData = await addrRes.json();
-        if (addrData.postalValidation && !addrData.postalValidation.valid && editGeo.postalCode.trim()) {
-          setEditProfileError(addrData.postalValidation.message || 'Invalid postal code format for country');
+        if (addrData.postalValidation && !addrData.postalValidation.valid) {
+          setEditProfileError(addrData.postalValidation.message || 'Postal code is required or invalid for this country');
           return;
         }
         if (addrData.formattedAddress) formattedAddress = addrData.formattedAddress;
       }
 
-      // 2. Normalize phone to E.164 if provided
-      let finalPhone = editPhone.trim() || undefined;
-      if (finalPhone) {
+      // 2. Preserve raw phone and normalize phoneNormalized to E.164 separately
+      const rawPhone = editPhone.trim() || undefined;
+      let normalizedPhone: string | undefined = undefined;
+      if (rawPhone) {
         const phoneRes = await apiFetch('/api/geo/normalize-phone', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone: finalPhone, countryCode: editGeo.countryCode }),
+          body: JSON.stringify({ phone: rawPhone, countryCode: editGeo.countryCode }),
         });
         if (phoneRes.ok) {
           const phoneData = await phoneRes.json();
-          if (phoneData.e164) finalPhone = phoneData.e164;
+          if (phoneData.valid && phoneData.e164) {
+            normalizedPhone = phoneData.e164;
+          }
         }
       }
 
@@ -183,7 +236,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
       onUpdateLead({
         ...lead,
-        phone: finalPhone,
+        phone: rawPhone,
+        phoneNormalized: normalizedPhone,
         email: editEmail.trim() || undefined,
         website: editWebsite.trim() || undefined,
         domain,
@@ -206,26 +260,15 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
     }
   };
 
-  // AI Quick Actions state
-  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
-  const [aiPitch, setAiPitch] = useState<any>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-
   const handleValidateIdentifier = async () => {
     if (!newIdentValue.trim()) return;
     try {
-      const token = localStorage.getItem('leed_session_token');
-      const csrfMatch = document.cookie.match(/leed_csrf=([^;]+)/);
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      if (csrfMatch) headers['x-leed-csrf-token'] = csrfMatch[1];
-
-      const res = await fetch('/api/identifiers/validate', {
+      const canonicalType = canonicalizeIdentifierType(newIdentType, newIdentCountry);
+      const res = await apiFetch('/api/identifiers/validate', {
         method: 'POST',
-        headers,
-        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: newIdentType,
+          type: canonicalType,
           value: newIdentValue.trim(),
           countryCode: newIdentCountry,
         }),
@@ -240,19 +283,41 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
     }
   };
 
-  const handleSaveIdentifier = (e: React.FormEvent) => {
+  const handleSaveIdentifier = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newIdentValue.trim()) return;
 
-    const validatedStatus = identValidationFeedback?.valid ? 'syntax_validated' : 'user_provided';
-    const normalizedVal = identValidationFeedback?.normalizedValue || newIdentValue.trim();
+    const canonicalType = canonicalizeIdentifierType(newIdentType, newIdentCountry);
+    let validationData = identValidationFeedback;
+    if (!validationData) {
+      try {
+        const res = await apiFetch('/api/identifiers/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: canonicalType,
+            value: newIdentValue.trim(),
+            countryCode: newIdentCountry,
+          }),
+        });
+        if (res.ok) {
+          validationData = await res.json();
+        }
+      } catch {
+        // fallback to user_provided
+      }
+    }
+
+    const validatedStatus = validationData?.valid ? 'syntax_validated' : 'user_provided';
+    const normalizedVal =
+      validationData?.normalizedValue || newIdentValue.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
     const newIdentifier: LeadIdentifier = {
-      type: newIdentType,
+      type: canonicalType,
       value: newIdentValue.trim(),
       normalizedValue: normalizedVal,
       countryCode: newIdentCountry,
-      issuingAuthority: newIdentAuthority.trim() || undefined,
+      issuingAuthority: newIdentAuthority.trim() || validationData?.issuingAuthority || undefined,
       source: 'owner_manual_entry',
       status: validatedStatus,
       verified: false,
@@ -319,14 +384,18 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
   const runQuickAiAnalysis = async () => {
     setAiLoading(true);
+    setAiError(null);
     try {
-      const res = await fetch('/api/ai/analyze-lead', {
+      const res = await apiFetch('/api/ai/analyze-lead', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId: lead.id }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI analysis failed');
       setAiAnalysis(data);
+    } catch (err: unknown) {
+      setAiError(err instanceof Error ? err.message : String(err));
     } finally {
       setAiLoading(false);
     }
@@ -334,14 +403,18 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
   const runQuickAiPitch = async () => {
     setAiLoading(true);
+    setAiError(null);
     try {
-      const res = await fetch('/api/ai/generate-pitch', {
+      const res = await apiFetch('/api/ai/generate-pitch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId: lead.id }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI pitch generation failed');
       setAiPitch(data);
+    } catch (err: unknown) {
+      setAiError(err instanceof Error ? err.message : String(err));
     } finally {
       setAiLoading(false);
     }
@@ -432,6 +505,11 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 className="w-20 bg-slate-900 border border-slate-700 text-white rounded px-2 py-0.5 text-right font-mono"
               />
               <span>{lead.currency}</span>
+              {lead.opportunityValue ? (
+                <span className="text-emerald-400 font-mono font-semibold ml-1">
+                  ({formatCurrencyLocale(lead.opportunityValue, lead.currency || 'USD', leadLocale)})
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -673,15 +751,23 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Telephone:</span>
-                      {lead.phone ? (
+                      {lead.phone || lead.phoneNormalized ? (
                         <div className="text-right">
                           <a
-                            href={`tel:${lead.phone}`}
+                            href={`tel:${lead.phoneNormalized || lead.phone}`}
                             className="text-emerald-400 hover:underline font-mono block font-semibold"
                           >
-                            {lead.phone}
+                            {lead.phone || lead.phoneNormalized}
                           </a>
-                          <span className="text-[10px] text-slate-500 font-mono">E.164 Standard</span>
+                          {lead.phoneNormalized && lead.phoneNormalized !== lead.phone ? (
+                            <span className="text-[10px] text-cyan-400 font-mono block">
+                              E.164: {lead.phoneNormalized}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {lead.phoneNormalized ? 'E.164 Normalized' : 'Raw Input'}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span className="text-slate-500">None on record</span>
@@ -745,17 +831,11 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           onChange={(e) => setNewIdentType(e.target.value)}
                           className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2 py-1 text-xs"
                         >
-                          <option value="CRN">CRN (Company Reg No)</option>
-                          <option value="ORGNR">ORGNR (Brønnøysund Org No)</option>
-                          <option value="ABN">ABN (Australian Business No)</option>
-                          <option value="ACN">ACN (Australian Company No)</option>
-                          <option value="EIN">EIN (US Employer ID)</option>
-                          <option value="VAT">VAT / Tax ID</option>
-                          <option value="LEI">LEI (Legal Entity Identifier)</option>
-                          <option value="SIREN">SIREN (France 9-digit)</option>
-                          <option value="SIRET">SIRET (France 14-digit)</option>
-                          <option value="HANDELSREGISTER">Handelsregister (DE)</option>
-                          <option value="OTHER">Other Custom Registry</option>
+                          {uiIdentifierOptions.map((opt) => (
+                            <option key={opt.code} value={opt.code}>
+                              {opt.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
 
@@ -847,7 +927,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       >
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className="px-1.5 py-0.5 bg-slate-950 text-cyan-400 font-mono text-[11px] font-bold rounded border border-slate-800">
-                            {ident.type}
+                            {canonicalizeIdentifierType(ident.type, ident.countryCode || lead.address?.countryCode)}
                           </span>
                           <span className="font-mono text-white text-xs font-semibold">{ident.value}</span>
                           {ident.normalizedValue && ident.normalizedValue !== ident.value && (
@@ -1000,6 +1080,12 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 </button>
               </div>
 
+              {aiError && (
+                <div className="p-3 bg-rose-950/40 border border-rose-800 rounded text-rose-300 text-xs">
+                  {aiError}
+                </div>
+              )}
+
               {aiAnalysis && (
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between pb-2 border-b border-slate-800">
@@ -1039,7 +1125,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-white">{src.sourceName}</span>
                       <span className="text-slate-500 font-mono text-[10px]">
-                        Retrieved: {new Date(src.retrievedAt).toLocaleString()}
+                        Retrieved: {formatDateLocale(src.retrievedAt, leadLocale, leadTimezone)}
                       </span>
                     </div>
 
@@ -1077,7 +1163,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="font-semibold text-white">{act.title}</span>
                         <span className="text-[10px] text-slate-500">
-                          {new Date(act.date).toLocaleDateString()}
+                          {formatDateLocale(act.date, leadLocale, leadTimezone)}
                         </span>
                       </div>
                       {act.outcome && <p className="text-slate-400 text-[11px]">{act.outcome}</p>}
@@ -1118,7 +1204,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     <div key={n.id} className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-1">
                       <div className="flex items-center justify-between text-[11px] text-slate-400">
                         <span className="font-semibold text-slate-300">{n.author}</span>
-                        <span>{new Date(n.createdAt).toLocaleString()}</span>
+                        <span>{formatDateLocale(n.createdAt, leadLocale, leadTimezone)}</span>
                       </div>
                       <p className="text-slate-200 leading-relaxed">{n.content}</p>
                     </div>

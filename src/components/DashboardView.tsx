@@ -16,6 +16,12 @@ import {
   Layers
 } from 'lucide-react';
 import { CanonicalLead, PipelineStage, LeadTask, ConnectorStatus } from '../types.ts';
+import {
+  summarizeValuesByCurrency,
+  formatCurrencyLocale,
+  formatNumberLocale,
+  getLocaleForCountry,
+} from '../../shared/localization.ts';
 
 interface DashboardViewProps {
   leads: CanonicalLead[];
@@ -36,19 +42,20 @@ export function DashboardView({
   onSelectLead,
   onOpenImport,
 }: DashboardViewProps) {
-  const totalPipelineValue = leads.reduce((sum, l) => sum + (l.opportunityValue || 0), 0);
+  const pipelineSummary = summarizeValuesByCurrency(leads, 'USD');
   const activeConnectorsCount = connectors.filter((c) => c.status === 'healthy').length;
   const pendingTasks = tasks.filter((t) => !t.completed);
   const verifiedLeads = leads.filter((l) => l.confidenceScore >= 70);
 
-  // Stage distribution
+  // Stage distribution (currency-safe per stage)
   const stageCounts = stages.map((stage) => {
     const stageLeads = leads.filter((l) => l.pipelineStageId === stage.id);
-    const value = stageLeads.reduce((sum, l) => sum + (l.opportunityValue || 0), 0);
+    const summary = summarizeValuesByCurrency(stageLeads, 'USD');
     return {
       stage,
       count: stageLeads.length,
-      value,
+      formattedValue: summary.primaryFormatted,
+      isMixed: summary.isMixed,
     };
   });
 
@@ -68,14 +75,14 @@ export function DashboardView({
           </div>
           <div className="mt-3 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-slate-900 dark:text-white font-mono tracking-tight">
-              {leads.length}
+              {formatNumberLocale(leads.length)}
             </span>
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-              ({verifiedLeads.length} verified)
+              ({formatNumberLocale(verifiedLeads.length)} high-confidence)
             </span>
           </div>
           <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            Official government registry backed
+            Official government registry &amp; POI intelligence
           </p>
         </div>
 
@@ -87,16 +94,20 @@ export function DashboardView({
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
+          <div className="mt-3 flex items-baseline gap-2 flex-wrap">
             <span className="text-2xl font-bold text-slate-900 dark:text-white font-mono tracking-tight">
-              ${totalPipelineValue.toLocaleString()}
+              {pipelineSummary.primaryFormatted}
             </span>
-            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-              USD
-            </span>
+            {pipelineSummary.primaryCurrency && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                {pipelineSummary.isMixed ? 'Mixed ISO 4217' : pipelineSummary.primaryCurrency}
+              </span>
+            )}
           </div>
           <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            Across active deal stages
+            {pipelineSummary.isMixed
+              ? `By currency (no FX applied): ${pipelineSummary.totals.map((b) => b.formatted).join(' · ')}`
+              : 'Across active deal stages'}
           </p>
         </div>
 
@@ -167,7 +178,7 @@ export function DashboardView({
                 </div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Discover Global Leads</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-                  Query official registries in Norway (Brreg), UK (Companies House), Australia (ABN), and OpenStreetMap.
+                  Query official registries in Norway (Brreg) &amp; UK (Companies House), validate AU ABNs, and search OpenStreetMap POI.
                 </p>
               </div>
               <button
@@ -237,7 +248,7 @@ export function DashboardView({
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              {stageCounts.map(({ stage, count, value }) => (
+              {stageCounts.map(({ stage, count, formattedValue }) => (
                 <div
                   key={stage.id}
                   className="p-3.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40"
@@ -252,10 +263,10 @@ export function DashboardView({
                     </span>
                   </div>
                   <div className="mt-2 text-lg font-bold font-mono text-slate-900 dark:text-white">
-                    {count}
+                    {formatNumberLocale(count)}
                   </div>
-                  <span className="text-[11px] text-slate-400 font-mono block mt-0.5">
-                    ${value.toLocaleString()}
+                  <span className="text-[11px] text-slate-400 font-mono block mt-0.5 truncate" title={formattedValue}>
+                    {formattedValue}
                   </span>
                 </div>
               ))}
@@ -293,7 +304,7 @@ export function DashboardView({
                       </span>
                       {lead.registrationNumber && (
                         <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
-                          CRN: {lead.registrationNumber}
+                          {lead.registrationType || 'REG'}: {lead.registrationNumber}
                         </span>
                       )}
                       <span className="text-[11px] text-slate-400">·</span>
@@ -312,7 +323,11 @@ export function DashboardView({
 
                   <div className="flex items-center gap-4 shrink-0">
                     <span className="text-xs font-mono font-bold text-slate-900 dark:text-white">
-                      ${(lead.opportunityValue || 0).toLocaleString()}
+                      {formatCurrencyLocale(
+                        lead.opportunityValue || 0,
+                        lead.currency || 'USD',
+                        getLocaleForCountry(lead.address?.countryCode, lead.currency)
+                      )}
                     </span>
                     <ChevronRight className="w-4 h-4 text-slate-400" />
                   </div>

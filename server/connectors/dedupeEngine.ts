@@ -1,4 +1,5 @@
 import { CanonicalLead, MergeHistoryRecord } from '../types.js';
+import { canonicalizeIdentifierType } from '../../shared/identifierRegistry.js';
 
 export interface DuplicateMatch {
   leadA: CanonicalLead;
@@ -80,16 +81,18 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
         continue;
       }
 
-      // 2b. Match across multiple normalized identifiers (e.g. matching LEI, VAT, OrgNr, CRN)
+      // 2b. Match across multiple normalized identifiers (e.g. matching LEI, VAT, OrgNr, CRN) using canonical aliases
       let matchedIdent: string | null = null;
       if (a.identifiers && b.identifiers) {
         for (const idA of a.identifiers) {
           const normA = (idA.normalizedValue || idA.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
           if (!normA || normA.length < 5) continue;
+          const typeA = canonicalizeIdentifierType(idA.type, a.address?.countryCode);
           for (const idB of b.identifiers) {
             const normB = (idB.normalizedValue || idB.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-            if (normA === normB && idA.type.toUpperCase() === idB.type.toUpperCase()) {
-              matchedIdent = `${idA.type}: ${idA.value}`;
+            const typeB = canonicalizeIdentifierType(idB.type, b.address?.countryCode);
+            if (normA === normB && typeA === typeB) {
+              matchedIdent = `${typeA}: ${idA.value}`;
               break;
             }
           }
@@ -109,18 +112,15 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
         continue;
       }
 
-      // 3. Exact Phone Match
-      if (
-        a.phone &&
-        b.phone &&
-        a.phone.replace(/[^0-9]/g, '') === b.phone.replace(/[^0-9]/g, '') &&
-        a.phone.replace(/[^0-9]/g, '').length >= 7
-      ) {
+      // 3. Exact Phone Match (checking phoneNormalized E.164 and raw digits)
+      const phoneA = (a.phoneNormalized || a.phone || '').replace(/[^0-9]/g, '');
+      const phoneB = (b.phoneNormalized || b.phone || '').replace(/[^0-9]/g, '');
+      if (phoneA && phoneB && phoneA === phoneB && phoneA.length >= 7) {
         matches.push({
           leadA: a,
           leadB: b,
           matchType: 'phone',
-          matchedValue: a.phone,
+          matchedValue: a.phoneNormalized || a.phone || phoneA,
           similarityScore: 0.95,
           recommendedSurvivorId: a.confidenceScore >= b.confidenceScore ? a.id : b.id,
         });
@@ -177,16 +177,22 @@ export function mergeLeads(
     }
   }
 
-  // Combine identifiers with normalized deduplication
+  // Combine identifiers with canonical + normalized deduplication
   const normKey = (i: any) =>
-    `${(i.type || '').toUpperCase()}:${(i.normalizedValue || i.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')}`;
+    `${canonicalizeIdentifierType(i.type)}:${(i.normalizedValue || i.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '')}`;
   const existingIdKeys = new Set(survivor.identifiers.map(normKey));
-  const combinedIdentifiers = [...survivor.identifiers];
+  const combinedIdentifiers = survivor.identifiers.map((ident) => ({
+    ...ident,
+    type: canonicalizeIdentifierType(ident.type, ident.countryCode || survivor.address?.countryCode),
+  }));
   for (const ident of absorbed.identifiers) {
     const key = normKey(ident);
     if (!existingIdKeys.has(key)) {
       existingIdKeys.add(key);
-      combinedIdentifiers.push(ident);
+      combinedIdentifiers.push({
+        ...ident,
+        type: canonicalizeIdentifierType(ident.type, ident.countryCode || absorbed.address?.countryCode),
+      });
     }
   }
 
@@ -217,8 +223,9 @@ export function mergeLeads(
     domain: survivor.domain || absorbed.domain,
     email: survivor.email || absorbed.email,
     phone: survivor.phone || absorbed.phone,
+    phoneNormalized: survivor.phoneNormalized || absorbed.phoneNormalized,
     registrationNumber: survivor.registrationNumber || absorbed.registrationNumber,
-    registrationType: survivor.registrationType || absorbed.registrationType,
+    registrationType: survivor.registrationType ? canonicalizeIdentifierType(survivor.registrationType) : (absorbed.registrationType ? canonicalizeIdentifierType(absorbed.registrationType) : undefined),
     address: {
       street: survivor.address?.street || absorbed.address?.street,
       city: survivor.address?.city || absorbed.address?.city,

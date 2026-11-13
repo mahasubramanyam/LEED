@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ShieldCheck, Lock, User, Mail, AlertTriangle, KeyRound, CheckCircle2, X } from 'lucide-react';
+import { apiFetch } from '../utils/apiFetch.ts';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -84,23 +85,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           throw new Error('New passwords do not match');
         }
 
-        // Retrieve CSRF token from cookie or header
-        const csrfMatch = document.cookie.match(/leed_csrf=([^;]+)/);
-        const csrfToken = csrfMatch ? csrfMatch[1] : '';
-        const storedToken = localStorage.getItem('leed_session_token');
-
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'x-leed-csrf-token': csrfToken,
-        };
-        if (storedToken) {
-          headers['Authorization'] = `Bearer ${storedToken}`;
-        }
-
-        const res = await fetch('/api/auth/change-password', {
+        const res = await apiFetch('/api/auth/change-password', {
           method: 'POST',
-          headers,
-          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ currentPassword, newPassword: password }),
         });
 

@@ -476,8 +476,25 @@ export default function App() {
     }
   };
 
-  const handleExportCsv = () => {
-    window.open('/api/export/csv', '_blank');
+  const handleExportCsv = async () => {
+    try {
+      const res = await apiFetch('/api/export/csv');
+      if (!res.ok) {
+        console.error('CSV export failed with HTTP status:', res.status);
+        return;
+      }
+      const csvBlob = await res.blob();
+      const url = URL.createObjectURL(csvBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `leed_leads_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export CSV:', err);
+    }
   };
 
   // Badges calculation

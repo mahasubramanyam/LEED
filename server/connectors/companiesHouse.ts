@@ -186,9 +186,14 @@ function mapCompaniesHouseItemToLead(
 
   const identifiers: LeadIdentifier[] = [
     {
-      type: 'CRN',
+      type: 'UK_CRN',
       value: crn,
-      verified: true,
+      normalizedValue: crn.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+      countryCode: 'GB',
+      issuingAuthority: 'UK Companies House',
+      source: isLive ? 'companies_house_api' : 'offline_register_mirror',
+      status: isLive ? 'officially_verified' : 'syntax_validated',
+      verified: isLive,
     },
   ];
 

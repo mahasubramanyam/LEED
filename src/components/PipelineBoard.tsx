@@ -11,6 +11,11 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { CanonicalLead, PipelineStage } from '../types.js';
+import {
+  summarizeValuesByCurrency,
+  formatCurrencyLocale,
+  getLocaleForCountry,
+} from '../../shared/localization.ts';
 
 interface PipelineBoardProps {
   stages: PipelineStage[];
@@ -43,18 +48,22 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
     }
   };
 
+  const boardSummary = summarizeValuesByCurrency(leads, 'USD');
+
   return (
     <div className="space-y-4">
       {/* Board Summary */}
-      <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-900 px-4 py-2.5 rounded-lg border border-slate-800">
+      <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-900 px-4 py-2.5 rounded-lg border border-slate-800 gap-4 flex-wrap">
         <div className="flex items-center gap-2">
           <Kanban className="w-4 h-4 text-indigo-400" />
           <span className="font-semibold text-white">Interactive Sales Pipeline Kanban</span>
           <span>— Move prospects through active qualification and conversion touchpoints.</span>
         </div>
         <div>
-          Total Active Pipeline: <span className="font-semibold text-emerald-400">
-            ${leads.reduce((sum, l) => sum + (l.opportunityValue || 0), 0).toLocaleString()}
+          Total Active Pipeline:{' '}
+          <span className="font-semibold text-emerald-400" title={boardSummary.isMixed ? boardSummary.totals.map((b) => b.formatted).join(' + ') : undefined}>
+            {boardSummary.primaryFormatted}
+            {boardSummary.isMixed ? ' (Mixed currencies)' : ''}
           </span>
         </div>
       </div>
@@ -63,7 +72,8 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
       <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-thin">
         {stages.map((stage, idx) => {
           const stageLeads = leads.filter((l) => l.pipelineStageId === stage.id);
-          const stageTotalValue = stageLeads.reduce((acc, l) => acc + (l.opportunityValue || 0), 0);
+          const stageSummary = summarizeValuesByCurrency(stageLeads, 'USD');
+          const stageHasValue = stageLeads.some((l) => (l.opportunityValue || 0) > 0);
 
           const prevStage = idx > 0 ? stages[idx - 1] : null;
           const nextStage = idx < stages.length - 1 ? stages[idx + 1] : null;
@@ -86,8 +96,8 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                   </span>
                 </div>
 
-                <div className="text-[11px] font-mono font-semibold text-slate-300">
-                  {stageTotalValue > 0 ? `$${stageTotalValue.toLocaleString()}` : '—'}
+                <div className="text-[11px] font-mono font-semibold text-slate-300 truncate max-w-[140px]" title={stageSummary.primaryFormatted}>
+                  {stageHasValue ? stageSummary.primaryFormatted : '—'}
                 </div>
               </div>
 
@@ -143,9 +153,11 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                       {/* Value & Probability */}
                       <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-800 text-slate-300">
                         <span className="font-semibold text-emerald-400">
-                          {lead.opportunityValue
-                            ? `$${lead.opportunityValue.toLocaleString()}`
-                            : '$0'}
+                          {formatCurrencyLocale(
+                            lead.opportunityValue || 0,
+                            lead.currency || 'USD',
+                            getLocaleForCountry(lead.address?.countryCode, lead.currency)
+                          )}
                         </span>
                         {lead.winProbability !== undefined && (
                           <span className="text-slate-400 text-[10px]">

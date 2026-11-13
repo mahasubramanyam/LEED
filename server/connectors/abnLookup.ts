@@ -26,13 +26,13 @@ export function validateAbnChecksum(abnString: string): boolean {
   return sum % 89 === 0;
 }
 
-// Verified real Australian enterprise entries for lookup and verification
-const VERIFIED_AU_ENTITIES = [
+// Curated offline sample of major Australian entities for local reference testing ONLY (not a live ABR API)
+const OFFLINE_AU_REFERENCE_SAMPLE = [
   {
     abn: '33007457141',
     entityName: 'COMMONWEALTH BANK OF AUSTRALIA',
     entityType: 'Australian Public Company',
-    status: 'Active',
+    status: 'Active (Reference Sample)',
     postcode: '2000',
     state: 'NSW',
     tradingName: 'COMMBANK',
@@ -42,7 +42,7 @@ const VERIFIED_AU_ENTITIES = [
     abn: '88098143410',
     entityName: 'ATLASSIAN PTY LTD',
     entityType: 'Australian Proprietary Company',
-    status: 'Active',
+    status: 'Active (Reference Sample)',
     postcode: '2000',
     state: 'NSW',
     tradingName: 'ATLASSIAN',
@@ -52,7 +52,7 @@ const VERIFIED_AU_ENTITIES = [
     abn: '53004085616',
     entityName: 'BHP GROUP LIMITED',
     entityType: 'Australian Public Company',
-    status: 'Active',
+    status: 'Active (Reference Sample)',
     postcode: '3000',
     state: 'VIC',
     tradingName: 'BHP',
@@ -62,7 +62,7 @@ const VERIFIED_AU_ENTITIES = [
     abn: '11005357522',
     entityName: 'CSL LIMITED',
     entityType: 'Australian Public Company',
-    status: 'Active',
+    status: 'Active (Reference Sample)',
     postcode: '3052',
     state: 'VIC',
     tradingName: 'CSL BEHRING',
@@ -72,7 +72,7 @@ const VERIFIED_AU_ENTITIES = [
     abn: '63004044937',
     entityName: 'TELSTRA CORPORATION LIMITED',
     entityType: 'Australian Public Company',
-    status: 'Active',
+    status: 'Active (Reference Sample)',
     postcode: '3000',
     state: 'VIC',
     tradingName: 'TELSTRA',
@@ -82,20 +82,27 @@ const VERIFIED_AU_ENTITIES = [
 
 export async function searchAbn(
   query: string
-): Promise<{ leads: CanonicalLead[]; isChecksumValid?: boolean }> {
+): Promise<{
+  leads: CanonicalLead[];
+  isChecksumValid?: boolean;
+  isLiveApi: boolean;
+  lookupMode: 'checksum_and_offline_reference';
+  message: string;
+}> {
   const clean = query.trim().toLowerCase();
   const now = new Date().toISOString();
 
-  // If numeric, check if user provided an exact ABN
+  // If numeric, evaluate ATO Modulo-89 checksum only (does NOT verify active registry status)
   const numericOnly = query.replace(/\s+/g, '');
   const isAbnNumber = /^\d{11}$/.test(numericOnly);
   const isValidChecksum = isAbnNumber ? validateAbnChecksum(numericOnly) : undefined;
 
-  const matches = VERIFIED_AU_ENTITIES.filter((item) => {
+  const matches = OFFLINE_AU_REFERENCE_SAMPLE.filter((item) => {
     return (
-      item.abn.includes(numericOnly) ||
-      item.entityName.toLowerCase().includes(clean) ||
-      item.tradingName.toLowerCase().includes(clean)
+      (numericOnly.length > 0 && item.abn.includes(numericOnly)) ||
+      (clean.length > 0 &&
+        (item.entityName.toLowerCase().includes(clean) ||
+          item.tradingName.toLowerCase().includes(clean)))
     );
   });
 
@@ -105,31 +112,44 @@ export async function searchAbn(
 
     const sources: LeadSource[] = [
       {
-        sourceName: 'Australian Business Register (ABN Lookup)',
+        sourceName: 'Australian Business Register (Offline Reference + ATO Modulo-89 Validator)',
         providerId: item.abn,
         url: `https://abr.business.gov.au/ABN/View?id=${item.abn}`,
         retrievedAt: now,
-        license: 'Commonwealth of Australia Open Data',
-        attribution: 'Data sourced from Australian Business Register (abr.business.gov.au)',
+        license: 'Commonwealth of Australia Open Data (Live Lookup Requires ABR GUID)',
+        attribution: 'ATO Modulo-89 checksum validated against local reference sample; live ABR lookup requires configured GUID',
       },
     ];
 
     const identifiers: LeadIdentifier[] = [
       {
-        type: 'ABN',
-        value: item.abn,
-        verified: true,
+        type: 'AU_ABN',
+        value: formattedAbn,
+        normalizedValue: item.abn,
+        countryCode: 'AU',
+        issuingAuthority: 'Australian Business Register (ABR)',
+        source: 'offline_reference_checksum',
+        status: 'syntax_validated',
+        verified: false,
       },
     ];
 
     if (domain) {
-      identifiers.push({ type: 'DOMAIN', value: domain, verified: true });
+      identifiers.push({
+        type: 'DOMAIN',
+        value: domain,
+        normalizedValue: domain.toUpperCase(),
+        countryCode: 'AU',
+        source: 'offline_reference',
+        status: 'discovered',
+        verified: false,
+      });
     }
 
     const signals = [
-      'Official Australian Business Number (ABN Checksum Validated)',
-      'Active Status in Australian Business Register',
-      `Registered Entity Type: ${item.entityType}`,
+      'ATO Modulo-89 ABN Checksum Validated (Syntax Only)',
+      'Matched Offline Australian Reference Sample (Live ABR GUID Required for Official Status)',
+      `Reference Entity Type: ${item.entityType}`,
     ];
 
     return {
@@ -138,7 +158,7 @@ export async function searchAbn(
       legalName: item.entityName,
       registrationNumber: formattedAbn,
       registrationType: 'AU_ABN',
-      companyStatus: 'active',
+      companyStatus: 'unknown',
       website: item.website,
       domain,
       address: {
@@ -151,21 +171,21 @@ export async function searchAbn(
       },
       industry: item.entityType,
       category: 'Corporation',
-      confidenceScore: 85,
+      confidenceScore: 68,
       confidenceSignals: signals,
       sources,
       identifiers,
       status: 'new',
       pipelineStageId: 'stage-discovered',
       currency: 'AUD',
-      tags: ['Australia', 'ABN Verified', item.state],
+      tags: ['Australia', 'ABN Checksum Validated', item.state],
       notes: [],
       activities: [
         {
           id: `act-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           type: 'enrichment',
-          title: 'Validated against Australian Business Register',
-          outcome: `ABN ${formattedAbn} active`,
+          title: 'Matched local Australian reference & verified ABN Modulo-89 checksum',
+          outcome: `ABN ${formattedAbn} syntax valid (official live ABR status not queried — ABR GUID required)`,
           date: now,
           actor: 'System Connector',
         },
@@ -175,8 +195,15 @@ export async function searchAbn(
     };
   });
 
+  const message = isAbnNumber
+    ? `ATO Modulo-89 checksum ${isValidChecksum ? 'PASSED' : 'FAILED'} for ${numericOnly}. Live Australian Business Register (ABR) API requires a registered ABR Web Services GUID; ${matches.length} offline reference match(es) returned.`
+    : `ABR live API requires a registered ABR Web Services GUID (abr.business.gov.au). Executed offline search across 5 sample reference records + Modulo-89 checksum utility (${matches.length} match(es)).`;
+
   return {
     leads,
     isChecksumValid: isValidChecksum,
+    isLiveApi: false,
+    lookupMode: 'checksum_and_offline_reference',
+    message,
   };
 }

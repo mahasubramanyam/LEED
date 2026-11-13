@@ -41,8 +41,23 @@ import { getDivisionsForCountry } from './server/geo/divisions.js';
 import { searchCities } from './server/geo/cities.js';
 import { normalizePhoneNumber } from './server/geo/phoneUtils.js';
 import { formatInternationalAddress, validatePostalCode } from './server/geo/addressUtils.js';
-import { validateIdentifier } from './server/identifiers/identifierEngine.js';
+import { validateIdentifier, normalizeIdentifierValue } from './server/identifiers/identifierEngine.js';
 import { buildCountryCapabilityMatrix } from './server/geo/capabilityMatrix.js';
+import { buildCsvDocument } from './shared/csvUtils.js';
+import { canonicalizeIdentifierType, getIdentifierAliases } from './shared/identifierRegistry.js';
+
+let lastStartupMigrationResult: {
+  attempted: boolean;
+  success: boolean;
+  applied: string[];
+  alreadyApplied: string[];
+  error?: string;
+} = {
+  attempted: false,
+  success: false,
+  applied: [],
+  alreadyApplied: [],
+};
 
 
 
@@ -94,18 +109,31 @@ app.get('/api/status', async (req: Request, res: Response) => {
 
   let totalLeads = 0;
   let activeConnectorsCount = 0;
+  let totalConnectorsCount = 6;
+  let migrationStatus: any = lastStartupMigrationResult;
 
   try {
     if (isDbReady) {
-      const leads = await postgresStorage.getLeads();
+      const [leads, connectors, inspection] = await Promise.all([
+        postgresStorage.getLeads(),
+        postgresStorage.getConnectors(),
+        migrator.inspectMigrationStatus(),
+      ]);
       totalLeads = leads.length;
-      const connectors = await postgresStorage.getConnectors();
-      activeConnectorsCount = connectors.filter((c) => c.status === 'healthy').length;
+      totalConnectorsCount = connectors.length;
+      activeConnectorsCount = connectors.filter((c) => c.status === 'healthy' || c.status === 'configured').length;
+      migrationStatus = {
+        ...lastStartupMigrationResult,
+        latestVersion: inspection.latestVersion,
+        migration003Recorded: inspection.migration003Recorded,
+        migration003SchemaReady: inspection.migration003SchemaReady,
+      };
     } else {
       const leads = storage.getLeads();
       totalLeads = leads.length;
       const connectors = storage.getConnectors();
-      activeConnectorsCount = connectors.filter((c) => c.status === 'healthy').length;
+      totalConnectorsCount = connectors.length;
+      activeConnectorsCount = connectors.filter((c) => c.status === 'healthy' || c.status === 'configured').length;
     }
   } catch (err) {
     console.warn('[Status] Warning querying metrics:', err);
@@ -117,7 +145,7 @@ app.get('/api/status', async (req: Request, res: Response) => {
     mode: 'Single-Owner Private Application',
     uptimeSeconds: Math.floor(process.uptime()),
     totalLeads,
-    activeConnectors: `${activeConnectorsCount}/6`,
+    activeConnectors: `${activeConnectorsCount}/${totalConnectorsCount}`,
     storageEngine: isDbReady ? 'postgresql' : 'json_store',
     databaseConnected: isDbReady,
     databaseHealth: {
@@ -127,6 +155,7 @@ app.get('/api/status', async (req: Request, res: Response) => {
       error: dbHealth.error,
       consecutiveFailures: dbHealth.consecutiveFailures,
     },
+    migrationStatus,
     ownerInitialized: initialized,
     timestamp: new Date().toISOString(),
     aiEngineAvailable: !!process.env.GEMINI_API_KEY,
@@ -428,15 +457,23 @@ protectedApi.get('/owner/diagnostics', async (req: Request, res: Response) => {
     const dbHealth = dbManager.getHealthStatus();
 
     let details: any = null;
+    let migrationInspection: any = null;
     if (isPg) {
-      details = await postgresStorage.getDetailedDiagnostics();
+      [details, migrationInspection] = await Promise.all([
+        postgresStorage.getDetailedDiagnostics(),
+        migrator.inspectMigrationStatus(),
+      ]);
     }
 
     res.json({
       connected: isPg,
-      engine: isPg ? 'PostgreSQL 18.6 (Neon Serverless)' : 'json_store',
+      engine: isPg ? 'PostgreSQL (Neon Serverless)' : 'json_store',
       health: dbHealth,
       diagnostics: details,
+      migrations: {
+        startup: lastStartupMigrationResult,
+        inspection: migrationInspection,
+      },
       security: {
         singleOwnerEnforced: true,
         singletonConstraint: 'uq_owner_singleton UNIQUE + chk_owner_singleton CHECK (is_singleton = TRUE)',
@@ -472,6 +509,7 @@ protectedApi.get('/database/status', async (req: Request, res: Response) => {
 
     let pgRecordCounts;
     let schemaTables: string[] = [];
+    let migrationInspection: any = null;
 
     if (isPg) {
       const pool = dbManager.getPool();
@@ -489,7 +527,10 @@ protectedApi.get('/database/status', async (req: Request, res: Response) => {
           campaigns: parseInt(campsCount.rows[0].count, 10),
         };
       }
-      schemaTables = await migrator.getExistingTables();
+      [schemaTables, migrationInspection] = await Promise.all([
+        migrator.getExistingTables(),
+        migrator.inspectMigrationStatus(),
+      ]);
     }
 
     res.json({
@@ -499,6 +540,10 @@ protectedApi.get('/database/status', async (req: Request, res: Response) => {
       health: dbHealth,
       postgresRecordCounts: pgRecordCounts,
       schemaTables,
+      migrations: {
+        startup: lastStartupMigrationResult,
+        inspection: migrationInspection,
+      },
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -589,11 +634,9 @@ protectedApi.post('/geo/normalize-phone', (req: Request, res: Response) => {
 
 // Country-specific address formatting
 protectedApi.post('/geo/format-address', (req: Request, res: Response) => {
-  const components = req.body;
+  const components = req.body || {};
   const formattedAddress = formatInternationalAddress(components);
-  const postalValidation = components.postalCode
-    ? validatePostalCode(components.postalCode, components.countryCode)
-    : { valid: true };
+  const postalValidation = validatePostalCode(components.postalCode || '', components.countryCode || 'US');
   res.json({ formattedAddress, postalValidation });
 });
 
@@ -615,8 +658,13 @@ protectedApi.post('/identifiers/validate', (req: Request, res: Response) => {
 protectedApi.get('/geo/capability-matrix', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
-    const connectors = isPg ? await postgresStorage.getConnectors() : storage.getConnectors();
-    const matrix = buildCountryCapabilityMatrix(connectors);
+    const [connectors, settings, overrides] = await Promise.all([
+      isPg ? postgresStorage.getConnectors() : Promise.resolve(storage.getConnectors()),
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+      isPg ? postgresStorage.getCapabilityOverrides() : Promise.resolve(undefined),
+    ]);
+    const hasChKey = Boolean(process.env.COMPANIES_HOUSE_API_KEY || settings.companiesHouseApiKey);
+    const matrix = buildCountryCapabilityMatrix(connectors, { hasChKey, overrides });
     res.json({
       matrix,
       totalSources: matrix.length,
@@ -629,14 +677,35 @@ protectedApi.get('/geo/capability-matrix', async (req: Request, res: Response) =
   }
 });
 
-// Leads Management
+// Leads Management (Supports filtering, canonical identifier aliases, sorting, and pagination)
 protectedApi.get('/leads', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
-    const { search, country, region, city, identifierType, status, stage, category, hasWebsite, hasEmail, hasPhone } = req.query;
+    const {
+      search,
+      country,
+      region,
+      city,
+      identifierType,
+      status,
+      stage,
+      category,
+      hasWebsite,
+      hasEmail,
+      hasPhone,
+      sortBy,
+      sortDir,
+      page,
+      pageSize,
+    } = req.query;
+
+    const cleanSortBy = typeof sortBy === 'string' ? sortBy : 'createdAt';
+    const cleanSortDir: 'asc' | 'desc' = sortDir === 'asc' ? 'asc' : 'desc';
+
+    let allMatching: CanonicalLead[];
 
     if (isPg) {
-      const leads = await postgresStorage.getLeads({
+      allMatching = await postgresStorage.getLeads({
         search: typeof search === 'string' ? search : undefined,
         country: typeof country === 'string' ? country : undefined,
         region: typeof region === 'string' ? region : undefined,
@@ -648,24 +717,38 @@ protectedApi.get('/leads', async (req: Request, res: Response) => {
         hasWebsite: hasWebsite === 'true',
         hasEmail: hasEmail === 'true',
         hasPhone: hasPhone === 'true',
+        sortBy: cleanSortBy,
+        sortDir: cleanSortDir,
       });
-      res.json({ leads, total: leads.length });
     } else {
-      let leads = storage.getLeads();
+      let leads = [...storage.getLeads()];
       if (search && typeof search === 'string') {
         const q = search.toLowerCase();
+        const qNorm = normalizeIdentifierValue(search);
         leads = leads.filter(
           (l) =>
             l.companyName.toLowerCase().includes(q) ||
             (l.registrationNumber && l.registrationNumber.toLowerCase().includes(q)) ||
             (l.address?.city && l.address.city.toLowerCase().includes(q)) ||
             (l.address?.region && l.address.region.toLowerCase().includes(q)) ||
+            (l.address?.country && l.address.country.toLowerCase().includes(q)) ||
             (l.domain && l.domain.toLowerCase().includes(q)) ||
-            l.tags.some((t) => t.toLowerCase().includes(q))
+            (l.email && l.email.toLowerCase().includes(q)) ||
+            l.tags.some((t) => t.toLowerCase().includes(q)) ||
+            l.identifiers?.some(
+              (i) =>
+                i.value.toLowerCase().includes(q) ||
+                (qNorm.length > 0 && normalizeIdentifierValue(i.normalizedValue || i.value).includes(qNorm))
+            )
         );
       }
       if (country && typeof country === 'string' && country !== 'ALL') {
-        leads = leads.filter((l) => l.address?.countryCode === country || l.address?.country === country);
+        const cUp = country.toUpperCase();
+        leads = leads.filter(
+          (l) =>
+            l.address?.countryCode?.toUpperCase() === cUp ||
+            l.address?.country?.toUpperCase() === cUp
+        );
       }
       if (region && typeof region === 'string' && region !== 'ALL') {
         const r = region.toLowerCase();
@@ -676,8 +759,15 @@ protectedApi.get('/leads', async (req: Request, res: Response) => {
         leads = leads.filter((l) => l.address?.city?.toLowerCase().includes(c));
       }
       if (identifierType && typeof identifierType === 'string' && identifierType !== 'ALL') {
-        const t = identifierType.toUpperCase();
-        leads = leads.filter((l) => l.identifiers?.some((i) => i.type.toUpperCase() === t));
+        const aliases = new Set(getIdentifierAliases(identifierType));
+        const targetCanon = canonicalizeIdentifierType(identifierType);
+        leads = leads.filter((l) =>
+          l.identifiers?.some(
+            (i) =>
+              aliases.has(i.type.toUpperCase()) ||
+              canonicalizeIdentifierType(i.type, l.address?.countryCode) === targetCanon
+          )
+        );
       }
       if (status && typeof status === 'string' && status !== 'ALL') {
         leads = leads.filter((l) => l.status === status);
@@ -685,7 +775,64 @@ protectedApi.get('/leads', async (req: Request, res: Response) => {
       if (stage && typeof stage === 'string' && stage !== 'ALL') {
         leads = leads.filter((l) => l.pipelineStageId === stage);
       }
-      res.json({ leads, total: leads.length });
+      if (category && typeof category === 'string' && category !== 'ALL') {
+        const cat = category.toLowerCase();
+        leads = leads.filter((l) => l.category?.toLowerCase().includes(cat));
+      }
+      if (hasWebsite === 'true') {
+        leads = leads.filter((l) => Boolean(l.website && l.website.trim()));
+      }
+      if (hasEmail === 'true') {
+        leads = leads.filter((l) => Boolean(l.email && l.email.trim()));
+      }
+      if (hasPhone === 'true') {
+        leads = leads.filter((l) => Boolean((l.phone && l.phone.trim()) || (l.phoneNormalized && l.phoneNormalized.trim())));
+      }
+
+      leads.sort((a, b) => {
+        const dir = cleanSortDir === 'asc' ? 1 : -1;
+        switch (cleanSortBy) {
+          case 'companyName':
+            return dir * a.companyName.localeCompare(b.companyName);
+          case 'confidenceScore':
+            return dir * ((a.confidenceScore || 0) - (b.confidenceScore || 0));
+          case 'opportunityValue':
+            return dir * ((a.opportunityValue || 0) - (b.opportunityValue || 0));
+          case 'country':
+            return dir * (a.address?.country || '').localeCompare(b.address?.country || '');
+          case 'updatedAt':
+            return dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
+          default:
+            return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        }
+      });
+
+      allMatching = leads;
+    }
+
+    const total = allMatching.length;
+    const requestedPage = page ? Math.max(1, parseInt(String(page), 10) || 1) : 1;
+    const requestedPageSize = pageSize ? Math.max(1, Math.min(200, parseInt(String(pageSize), 10) || 25)) : null;
+
+    if (requestedPageSize !== null) {
+      const start = (requestedPage - 1) * requestedPageSize;
+      const sliced = allMatching.slice(start, start + requestedPageSize);
+      const totalPages = Math.max(1, Math.ceil(total / requestedPageSize));
+      res.json({
+        leads: sliced,
+        total,
+        page: requestedPage,
+        pageSize: requestedPageSize,
+        totalPages,
+      });
+    } else {
+      res.json({
+        leads: allMatching,
+        total,
+        page: 1,
+        pageSize: total || 25,
+        totalPages: 1,
+      });
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -763,9 +910,9 @@ protectedApi.delete('/leads/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Batch Import from CSV / JSON
+// Batch Import from CSV / JSON with row validation and deduplication
 protectedApi.post('/leads/batch-import', async (req: Request, res: Response) => {
-  const { leads } = req.body;
+  const { leads, mode } = req.body;
   if (!Array.isArray(leads) || leads.length === 0) {
     res.status(400).json({ error: 'Array of leads is required' });
     return;
@@ -773,11 +920,89 @@ protectedApi.post('/leads/batch-import', async (req: Request, res: Response) => 
 
   try {
     const { isPg } = checkStorageEngine();
-    const result = isPg ? await postgresStorage.batchUpsertLeads(leads) : storage.batchUpsertLeads(leads);
+    const skipDuplicates = mode === 'skip';
+    const validLeads: CanonicalLead[] = [];
+    const errors: Array<{ row: number; companyName?: string; error: string }> = [];
+
+    leads.forEach((raw: any, index: number) => {
+      if (!raw || typeof raw.companyName !== 'string' || !raw.companyName.trim()) {
+        errors.push({ row: index + 1, error: 'Missing required companyName' });
+        return;
+      }
+      const cCode = (raw.address?.countryCode || 'US').toUpperCase();
+      const countryRef = getCountryByCode(cCode);
+      const rawPhone = typeof raw.phone === 'string' ? raw.phone.trim() : '';
+      let phoneNormalized = raw.phoneNormalized;
+      if (rawPhone && !phoneNormalized) {
+        const normRes = normalizePhoneNumber(rawPhone, cCode);
+        if (normRes.valid && normRes.e164) phoneNormalized = normRes.e164;
+      }
+
+      const identifiers = Array.isArray(raw.identifiers)
+        ? raw.identifiers.map((i: any) => ({
+            ...i,
+            type: canonicalizeIdentifierType(i.type, i.countryCode || cCode),
+            countryCode: (i.countryCode || cCode).toUpperCase(),
+            normalizedValue: i.normalizedValue || normalizeIdentifierValue(i.value || ''),
+          }))
+        : [];
+
+      validLeads.push({
+        ...raw,
+        id: raw.id || `imp-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 6)}`,
+        companyName: raw.companyName.trim(),
+        phone: rawPhone || undefined,
+        phoneNormalized,
+        registrationType: raw.registrationType
+          ? canonicalizeIdentifierType(raw.registrationType, cCode)
+          : undefined,
+        currency: (raw.currency || countryRef?.currency || 'USD').toUpperCase(),
+        address: {
+          street: raw.address?.street,
+          city: raw.address?.city,
+          region: raw.address?.region,
+          postalCode: raw.address?.postalCode,
+          country: raw.address?.country || countryRef?.name || 'International',
+          countryCode: countryRef?.code || cCode,
+          formattedAddress:
+            raw.address?.formattedAddress ||
+            formatInternationalAddress({
+              street: raw.address?.street,
+              city: raw.address?.city,
+              region: raw.address?.region,
+              postalCode: raw.address?.postalCode,
+              country: raw.address?.country || countryRef?.name || 'International',
+              countryCode: countryRef?.code || cCode,
+            }),
+        },
+        identifiers,
+      });
+    });
+
+    if (validLeads.length === 0) {
+      res.status(400).json({
+        success: false,
+        added: 0,
+        updated: 0,
+        skipped: 0,
+        failed: errors.length,
+        errors,
+        error: 'No valid rows available to import.',
+      });
+      return;
+    }
+
+    const result = isPg
+      ? await postgresStorage.batchUpsertLeads(validLeads, { skipDuplicates })
+      : storage.batchUpsertLeads(validLeads, { skipDuplicates });
+
     res.json({
       success: true,
       added: result.added,
       updated: result.updated,
+      skipped: result.skipped,
+      failed: errors.length,
+      errors: errors.length > 0 ? errors : undefined,
       totalProcessed: leads.length,
     });
   } catch (err: unknown) {
@@ -886,7 +1111,7 @@ protectedApi.post('/leads/:id/activities', async (req: Request, res: Response) =
 
 // Multi-Source Discovery Engine
 protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
-  const { query, countryCode, city, connectorId, autoSave } = req.body;
+  const { query, countryCode, region, city, connectorId, autoSave } = req.body;
 
   if (!query || typeof query !== 'string' || query.trim().length === 0) {
     res.status(400).json({ error: 'Search query is required' });
@@ -894,11 +1119,14 @@ protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
   }
 
   const trimmedQuery = query.trim();
-  const cCode = (countryCode || '').toUpperCase();
+  const cCode = (countryCode || '').toUpperCase().trim();
+  const cleanCity = typeof city === 'string' ? city.trim() : undefined;
+  const cleanRegion = typeof region === 'string' ? region.trim() : undefined;
   const results: CanonicalLead[] = [];
   const errors: string[] = [];
+  const notes: string[] = [];
   let attribution = '';
-  let providerNote = '';
+  let abnLookupInfo: { isLiveApi: boolean; lookupMode: string; isChecksumValid?: boolean } | undefined;
 
   const { isPg } = checkStorageEngine();
   const settings = isPg ? await postgresStorage.getSettings() : storage.getSettings();
@@ -907,12 +1135,15 @@ protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
   const chKey = process.env.COMPANIES_HOUSE_API_KEY || settings.companiesHouseApiKey;
 
   try {
-    // 1. Norway Brreg
+    // 1. Norway Brreg (does not filter natively by county/region)
     if (connectorId === 'conn-brreg' || (!connectorId && cCode === 'NO')) {
       try {
-        const brregRes = await searchBrreg(trimmedQuery, city);
+        const brregRes = await searchBrreg(trimmedQuery, cleanCity);
         results.push(...brregRes.leads);
         attribution = 'Official open public data from the Brønnøysund Register Centre (NLOD license)';
+        if (cleanRegion) {
+          notes.push(`Brreg search endpoint filters by company name (and city poststed) only; region "${cleanRegion}" was not applied by the upstream registry.`);
+        }
         if (isPg) await postgresStorage.recordConnectorActivity('conn-brreg', true);
         else storage.recordConnectorActivity('conn-brreg', true);
       } catch (err: unknown) {
@@ -923,13 +1154,16 @@ protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
       }
     }
 
-    // 2. UK Companies House
+    // 2. UK Companies House (does not support region parameter)
     if (connectorId === 'conn-companies-house' || (!connectorId && cCode === 'GB')) {
       try {
-        const ukRes = await searchCompaniesHouse(trimmedQuery, chKey, city);
+        const ukRes = await searchCompaniesHouse(trimmedQuery, chKey, cleanCity);
         results.push(...ukRes.leads);
         attribution = 'UK Companies House (Open Government Licence v3.0)';
-        if (ukRes.message) providerNote = ukRes.message;
+        if (ukRes.message) notes.push(ukRes.message);
+        if (cleanRegion) {
+          notes.push(`Companies House search does not support region-level filtering ("${cleanRegion}"); matched on name/CRN/locality only.`);
+        }
         if (isPg) await postgresStorage.recordConnectorActivity('conn-companies-house', true);
         else storage.recordConnectorActivity('conn-companies-house', true);
       } catch (err: unknown) {
@@ -940,12 +1174,21 @@ protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
       }
     }
 
-    // 3. Australia ABN
+    // 3. Australia ABN (offline 5-record reference + Modulo-89 checksum validator; live ABR requires GUID)
     if (connectorId === 'conn-abn' || (!connectorId && cCode === 'AU')) {
       try {
         const auRes = await searchAbn(trimmedQuery);
         results.push(...auRes.leads);
-        attribution = 'Australian Business Register (Commonwealth of Australia Open Data)';
+        attribution = 'Australian Business Register (Offline Reference + ATO Modulo-89 Validator; Live API Requires ABR GUID)';
+        abnLookupInfo = {
+          isLiveApi: auRes.isLiveApi,
+          lookupMode: auRes.lookupMode,
+          isChecksumValid: auRes.isChecksumValid,
+        };
+        notes.push(auRes.message);
+        if (cleanRegion) {
+          notes.push(`Offline ABN reference search does not enforce state/territory filter "${cleanRegion}".`);
+        }
         if (isPg) await postgresStorage.recordConnectorActivity('conn-abn', true);
         else storage.recordConnectorActivity('conn-abn', true);
       } catch (err: unknown) {
@@ -956,10 +1199,10 @@ protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
       }
     }
 
-    // 4. OpenStreetMap / Nominatim POI
+    // 4. OpenStreetMap / Nominatim POI (supports city + region + countryCode)
     if (connectorId === 'conn-osm' || (!connectorId && results.length === 0)) {
       try {
-        const osmRes = await searchOpenStreetMap(trimmedQuery, cCode, city);
+        const osmRes = await searchOpenStreetMap(trimmedQuery, cCode, cleanCity, cleanRegion);
         results.push(...osmRes.leads);
         if (!attribution) attribution = '© OpenStreetMap contributors (ODbL License)';
         if (isPg) await postgresStorage.recordConnectorActivity('conn-osm', true);
@@ -982,7 +1225,15 @@ protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
       totalDiscovered: results.length,
       errors: errors.length > 0 ? errors : undefined,
       attribution,
-      providerNote,
+      providerNote: notes.join(' '),
+      abnLookupInfo,
+      appliedFilters: {
+        query: trimmedQuery,
+        countryCode: cCode || undefined,
+        region: cleanRegion || undefined,
+        city: cleanCity || undefined,
+        regionSupportedByConnector: connectorId === 'conn-osm' || (!connectorId && !['NO', 'GB', 'AU'].includes(cCode)),
+      },
     });
   } catch (globalErr: unknown) {
     const msg = globalErr instanceof Error ? globalErr.message : String(globalErr);
@@ -1517,7 +1768,7 @@ protectedApi.put('/settings', async (req: Request, res: Response) => {
   }
 });
 
-// Data Export
+// Data Export (RFC 4180 compliant with full international & identifier coverage)
 protectedApi.get('/export/csv', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
@@ -1525,41 +1776,70 @@ protectedApi.get('/export/csv', async (req: Request, res: Response) => {
     const headers = [
       'ID',
       'Company Name',
+      'Legal Name',
+      'Country',
+      'Country Code',
+      'Region',
+      'City',
+      'Street',
+      'Postal Code',
+      'Formatted Address',
       'Registration Number',
       'Registration Type',
+      'Secondary Identifiers',
       'Status',
+      'Pipeline Stage',
       'Confidence Score',
       'Industry',
       'Category',
-      'City',
-      'Country',
       'Website',
+      'Domain',
       'Email',
       'Phone',
+      'Phone Normalized',
+      'Currency',
       'Opportunity Value',
+      'Tags',
       'Created At',
     ];
 
-    const rows = leads.map((l) => [
-      `"${l.id}"`,
-      `"${l.companyName.replace(/"/g, '""')}"`,
-      `"${l.registrationNumber || ''}"`,
-      `"${l.registrationType || ''}"`,
-      `"${l.status}"`,
-      `"${l.confidenceScore}%"`,
-      `"${(l.industry || '').replace(/"/g, '""')}"`,
-      `"${(l.category || '').replace(/"/g, '""')}"`,
-      `"${(l.address?.city || '').replace(/"/g, '""')}"`,
-      `"${l.address?.country || ''}"`,
-      `"${l.website || ''}"`,
-      `"${l.email || ''}"`,
-      `"${l.phone || ''}"`,
-      `"${l.opportunityValue || 0}"`,
-      `"${l.createdAt}"`,
-    ]);
+    const rows = leads.map((l) => {
+      const secondaryIdents = (l.identifiers || [])
+        .map((i) => `${canonicalizeIdentifierType(i.type, i.countryCode || l.address?.countryCode)}:${i.value}`)
+        .join('; ');
+      return [
+        l.id,
+        l.companyName,
+        l.legalName || '',
+        l.address?.country || '',
+        l.address?.countryCode || '',
+        l.address?.region || '',
+        l.address?.city || '',
+        l.address?.street || '',
+        l.address?.postalCode || '',
+        l.address?.formattedAddress || '',
+        l.registrationNumber || '',
+        l.registrationType ? canonicalizeIdentifierType(l.registrationType, l.address?.countryCode) : '',
+        secondaryIdents,
+        l.status,
+        l.pipelineStageId || '',
+        `${l.confidenceScore}%`,
+        l.industry || '',
+        l.category || '',
+        l.website || '',
+        l.domain || '',
+        l.email || '',
+        l.phone || '',
+        l.phoneNormalized || '',
+        l.currency || 'USD',
+        l.opportunityValue || 0,
+        (l.tags || []).join('; '),
+        l.createdAt,
+      ];
+    });
 
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    res.setHeader('Content-Type', 'text/csv');
+    const csv = buildCsvDocument(headers, rows, true);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=leads_export_${Date.now()}.csv`);
     res.send(csv);
   } catch (err: unknown) {
@@ -1572,7 +1852,7 @@ protectedApi.get('/export/json', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
     const leads = isPg ? await postgresStorage.getLeads() : storage.getLeads();
-    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=leads_export_${Date.now()}.json`);
     res.send(JSON.stringify(leads, null, 2));
   } catch (err: unknown) {
@@ -1590,9 +1870,38 @@ async function startServer() {
   if (dbManager.isConfigured()) {
     const check = await dbManager.checkConnection(3, 1000);
     if (check.connected) {
-      console.log(`[Startup] PostgreSQL connected successfully (${check.latencyMs}ms). Running schema migrations...`);
-      const migResult = await migrator.runMigrations();
-      console.log(`[Startup] Migrations applied: ${migResult.applied.length}, already applied: ${migResult.alreadyApplied.length}`);
+      const preInspection = await migrator.inspectMigrationStatus();
+      if (process.env.AUTO_RUN_MIGRATIONS === 'true') {
+        console.log(`[Startup] PostgreSQL connected successfully (${check.latencyMs}ms). Running schema migrations...`);
+        const migResult = await migrator.runMigrations();
+        lastStartupMigrationResult = {
+          attempted: true,
+          success: migResult.success,
+          applied: migResult.applied,
+          alreadyApplied: migResult.alreadyApplied,
+          error: migResult.error,
+        };
+        if (!migResult.success) {
+          console.error(`[Startup] Schema migrations FAILED: ${migResult.error || 'Unknown error'}`);
+        } else {
+          console.log(`[Startup] Migrations succeeded — applied: ${migResult.applied.length}, already applied: ${migResult.alreadyApplied.length}`);
+        }
+      } else {
+        console.log(`[Startup] PostgreSQL connected successfully (${check.latencyMs}ms). Read-only schema inspection (pending migrations require explicit approval).`);
+        lastStartupMigrationResult = {
+          attempted: false,
+          success: preInspection.migration003SchemaReady,
+          applied: [],
+          alreadyApplied: preInspection.appliedVersions.map((v) => v.name),
+          error: preInspection.migration003SchemaReady
+            ? undefined
+            : 'Pending schema migrations require explicit approval before execution.',
+        };
+      }
+      const inspection = await migrator.inspectMigrationStatus();
+      console.log(
+        `[Startup] Migration 003 verification — recorded=${inspection.migration003Recorded}, missingColumns=${inspection.missingLeadIdentifierColumns.length}, missingIndexes=${inspection.missingMigration003Indexes.length}, capabilitiesTable=${inspection.countryCapabilitiesTableExists}`
+      );
     } else {
       console.warn(`[Startup] PostgreSQL connection check failed: ${check.error}`);
       if (IS_PROD) {

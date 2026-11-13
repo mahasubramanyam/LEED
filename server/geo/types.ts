@@ -54,6 +54,7 @@ export type SourceType =
   | 'public_geo_directory'
   | 'web_inspector'
   | 'manual_registry_portal'
+  | 'geographic_reference_only'
   | 'restricted_unavailable';
 
 export type IntegrationStatus =

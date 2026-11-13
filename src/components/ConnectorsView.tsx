@@ -273,7 +273,7 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
               className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded p-2 focus:outline-none focus:border-indigo-500 font-mono"
             />
             <p className="text-[11px] text-slate-500 mt-1">
-              If left blank, the application uses verified official register mirrors. Free API keys can be generated at developer.company-information.service.gov.uk.
+              If left blank, UK Companies House lookups run against offline fallback samples only. Free API keys can be generated at developer.company-information.service.gov.uk.
             </p>
           </div>
 

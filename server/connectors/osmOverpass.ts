@@ -37,10 +37,13 @@ interface NominatimResult {
 
 let lastOsmRequestTime = 0;
 
+import { getCountryByCode } from '../geo/countries.js';
+
 export async function searchOpenStreetMap(
   query: string,
   countryCode?: string,
-  city?: string
+  city?: string,
+  region?: string
 ): Promise<{ leads: CanonicalLead[]; rawCount: number }> {
   // Rate limiting compliance: Nominatim usage policy requires <= 1 request/second
   const nowMs = Date.now();
@@ -51,7 +54,8 @@ export async function searchOpenStreetMap(
   lastOsmRequestTime = Date.now();
 
   const searchParts: string[] = [query.trim()];
-  if (city) searchParts.push(city.trim());
+  if (city && city.trim()) searchParts.push(city.trim());
+  if (region && region.trim()) searchParts.push(region.trim());
 
   const fullQuery = searchParts.join(', ');
   const url = new URL('https://nominatim.openstreetmap.org/search');
@@ -92,10 +96,11 @@ export async function searchOpenStreetMap(
       const addr = item.address;
       const street = [addr?.house_number, addr?.road].filter(Boolean).join(' ') || '';
       const locality = addr?.city || addr?.town || addr?.village || addr?.suburb || city || '';
-      const region = addr?.state || '';
+      const resolvedRegion = addr?.state || region || '';
       const postalCode = addr?.postcode || '';
       const country = addr?.country || 'International';
       const cCode = (addr?.country_code || countryCode || 'US').toUpperCase();
+      const countryRef = getCountryByCode(cCode);
 
       const website = item.extratags?.website || item.extratags?.['contact:website'];
       const phone = item.extratags?.phone || item.extratags?.['contact:phone'];
@@ -124,13 +129,13 @@ export async function searchOpenStreetMap(
 
       const identifiers: LeadIdentifier[] = [];
       if (domain) {
-        identifiers.push({ type: 'DOMAIN', value: domain, verified: false });
+        identifiers.push({ type: 'DOMAIN', value: domain, normalizedValue: domain.toUpperCase(), countryCode: cCode, source: 'osm_nominatim', status: 'discovered', verified: false });
       }
       if (phone) {
-        identifiers.push({ type: 'PHONE', value: phone, verified: false });
+        identifiers.push({ type: 'PHONE', value: phone, normalizedValue: phone.replace(/[^0-9]/g, ''), countryCode: cCode, source: 'osm_nominatim', status: 'discovered', verified: false });
       }
       if (email) {
-        identifiers.push({ type: 'EMAIL', value: email, verified: false });
+        identifiers.push({ type: 'EMAIL', value: email, normalizedValue: email.toUpperCase(), countryCode: cCode, source: 'osm_nominatim', status: 'discovered', verified: false });
       }
 
       const signals: string[] = ['Geocoded Physical Location & Coordinates'];
@@ -168,11 +173,11 @@ export async function searchOpenStreetMap(
         address: {
           street,
           city: locality,
-          region,
+          region: resolvedRegion,
           postalCode,
-          country,
+          country: countryRef?.name || country,
           countryCode: cCode,
-          formattedAddress: [street, locality, postalCode, country].filter(Boolean).join(', '),
+          formattedAddress: [street, locality, resolvedRegion, postalCode, countryRef?.name || country].filter(Boolean).join(', '),
         },
         coordinates: {
           lat: parseFloat(item.lat),
@@ -186,7 +191,7 @@ export async function searchOpenStreetMap(
         identifiers,
         status: 'new',
         pipelineStageId: 'stage-discovered',
-        currency: cCode === 'GB' ? 'GBP' : cCode === 'NO' ? 'NOK' : cCode === 'AU' ? 'AUD' : cCode === 'DE' || cCode === 'FR' ? 'EUR' : 'USD',
+        currency: countryRef?.currency || 'USD',
         tags: [cCode, 'OpenStreetMap', categoryName].filter(Boolean),
         notes: [],
         activities: [

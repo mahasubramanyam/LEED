@@ -74,6 +74,23 @@ interface DiagnosticsData {
     tables: Array<{ name: string; count: number }>;
     totalRows: number;
   };
+  migrations?: {
+    startup?: {
+      attempted: boolean;
+      success: boolean;
+      applied: string[];
+      alreadyApplied: string[];
+      error?: string;
+    } | null;
+    inspection?: {
+      recordedVersions: string[];
+      migration003Recorded: boolean;
+      migration003SchemaReady: boolean;
+      missingLeadIdentifierColumns: string[];
+      missingMigration003Indexes: string[];
+      countryCapabilitiesTableExists: boolean;
+    } | null;
+  };
   security: {
     singleOwnerEnforced: boolean;
     singletonConstraint: string;
@@ -502,13 +519,72 @@ export function OwnerControlCentre({
             </div>
           </div>
 
-          {/* 17 Tables Inventory */}
+          {/* Schema Migration 003 Live Status */}
+          {diagData?.migrations?.inspection && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                    Migration 003 (Global Intelligence) Live Schema Status
+                  </h2>
+                </div>
+                <span
+                  className={`px-2.5 py-0.5 text-xs font-semibold rounded-md ${
+                    diagData.migrations.inspection.migration003SchemaReady &&
+                    diagData.migrations.inspection.migration003Recorded
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
+                      : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
+                  }`}
+                >
+                  {diagData.migrations.inspection.migration003SchemaReady &&
+                  diagData.migrations.inspection.migration003Recorded
+                    ? 'Applied & Verified in Neon'
+                    : 'Pending / Incomplete in Neon'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">SCHEMA_MIGRATIONS (003)</span>
+                  <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                    {diagData.migrations.inspection.migration003Recorded ? 'Recorded' : 'Not Recorded'}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">LEAD_IDENTIFIERS COLUMNS</span>
+                  <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                    {diagData.migrations.inspection.missingLeadIdentifierColumns.length === 0
+                      ? 'All 5 Present'
+                      : `Missing: ${diagData.migrations.inspection.missingLeadIdentifierColumns.join(', ')}`}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">INDEXES (003)</span>
+                  <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                    {diagData.migrations.inspection.missingMigration003Indexes.length === 0
+                      ? 'All 8 Present'
+                      : `Missing: ${diagData.migrations.inspection.missingMigration003Indexes.length}`}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">COUNTRY_SOURCE_CAPABILITIES</span>
+                  <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                    {diagData.migrations.inspection.countryCapabilitiesTableExists ? 'Table Exists' : 'Missing'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PostgreSQL Schema Tables Inventory */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">PostgreSQL Schema Ledger (17 Tables)</h2>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  PostgreSQL Schema Ledger ({diagData?.diagnostics?.tables?.length ?? 18} Tables)
+                </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  12 core CRM intelligence tables + 5 security & platform telemetry tables
+                  Core CRM intelligence tables, capability matrix, security ledger, and migration tracking
                 </p>
               </div>
               <span className="text-xs font-mono font-medium text-slate-600 dark:text-slate-400">
@@ -519,6 +595,7 @@ export function OwnerControlCentre({
             <div className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {(diagData?.diagnostics?.tables || [
+                  { name: 'schema_migrations', count: 0 },
                   { name: 'owner_users', count: 1 },
                   { name: 'owner_sessions', count: 1 },
                   { name: 'pipeline_stages', count: 0 },
@@ -530,8 +607,8 @@ export function OwnerControlCentre({
                   { name: 'tasks', count: 0 },
                   { name: 'campaigns', count: 0 },
                   { name: 'campaign_messages', count: 0 },
-                  { name: 'dedupe_candidates', count: 0 },
-                  { name: 'merge_history', count: 0 },
+                  { name: 'lead_merge_history', count: 0 },
+                  { name: 'country_source_capabilities', count: 0 },
                   { name: 'connector_credentials', count: 0 },
                   { name: 'connector_runs', count: 0 },
                   { name: 'audit_events', count: 0 },
@@ -776,11 +853,13 @@ export function OwnerControlCentre({
                 <h2 className="text-sm font-semibold text-slate-900 dark:text-white">UK Companies House API Key</h2>
               </div>
               <span className={`px-2 py-0.5 text-xs font-semibold rounded-md ${
-                settings.companiesHouseApiKey || process.env.COMPANIES_HOUSE_API_KEY
+                (settings as any).companiesHouseConfigured || connectors.find((c) => c.id === 'conn-companies-house')?.isConfigured
                   ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
                   : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
               }`}>
-                {settings.companiesHouseApiKey ? 'Configured in Neon' : 'Active via Environment Secret'}
+                {(settings as any).companiesHouseConfigured || connectors.find((c) => c.id === 'conn-companies-house')?.isConfigured
+                  ? 'Configured (Server / Neon)'
+                  : 'API Key Not Configured'}
               </span>
             </div>
 
@@ -806,7 +885,7 @@ export function OwnerControlCentre({
             </form>
             {keySuccess && (
               <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium mt-2 block">
-                Key updated and stored securely in app_settings.
+                Key updated and stored securely in connector_credentials.
               </span>
             )}
           </div>

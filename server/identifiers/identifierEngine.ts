@@ -1,3 +1,5 @@
+import { canonicalizeIdentifierType, getIdentifierSpec } from '../../shared/identifierRegistry.js';
+
 export interface BusinessIdentifierRecord {
   id?: string;
   type: string;
@@ -129,18 +131,18 @@ export function validateIdentifier(
   countryHint = 'US',
   existingStatus?: 'user_provided' | 'discovered' | 'syntax_validated' | 'officially_verified'
 ): IdentifierValidationResult {
-  const normType = (type || 'TAX_ID').toUpperCase().trim();
+  const normType = canonicalizeIdentifierType(type || 'TAX_ID', countryHint);
+  const spec = getIdentifierSpec(normType);
   const rawValue = (value || '').trim();
   const normalized = normalizeIdentifierValue(rawValue);
 
   let valid = false;
   let error: string | undefined;
   let countryCode = countryHint.toUpperCase();
-  let issuingAuthority = 'National Commercial Authority';
+  let issuingAuthority = spec?.issuingAuthority || 'National Commercial Authority';
 
   switch (normType) {
-    case 'UK_CRN':
-    case 'CRN': {
+    case 'UK_CRN': {
       countryCode = 'GB';
       issuingAuthority = 'UK Companies House';
       // 8 characters: 8 digits, or 2 letters (SC, NI, OC, SO, LP) followed by 6 digits
@@ -150,8 +152,7 @@ export function validateIdentifier(
       break;
     }
 
-    case 'NO_ORG':
-    case 'BRREG_ORG': {
+    case 'NO_ORG': {
       countryCode = 'NO';
       issuingAuthority = 'Brønnøysundregistrene (Brreg)';
       valid = validateNorwegianOrgNr(normalized);
@@ -159,8 +160,7 @@ export function validateIdentifier(
       break;
     }
 
-    case 'AU_ABN':
-    case 'ABN': {
+    case 'AU_ABN': {
       countryCode = 'AU';
       issuingAuthority = 'Australian Business Register (ABR)';
       valid = validateAustralianAbn(normalized);
@@ -168,8 +168,7 @@ export function validateIdentifier(
       break;
     }
 
-    case 'AU_ACN':
-    case 'ACN': {
+    case 'AU_ACN': {
       countryCode = 'AU';
       issuingAuthority = 'Australian Securities & Investments Commission (ASIC)';
       valid = /^[0-9]{9}$/.test(normalized);
@@ -177,8 +176,7 @@ export function validateIdentifier(
       break;
     }
 
-    case 'US_EIN':
-    case 'EIN': {
+    case 'US_EIN': {
       countryCode = 'US';
       issuingAuthority = 'Internal Revenue Service (IRS)';
       // 9 digits, often written XX-XXXXXXX
@@ -187,8 +185,7 @@ export function validateIdentifier(
       break;
     }
 
-    case 'FR_SIREN':
-    case 'SIREN': {
+    case 'FR_SIREN': {
       countryCode = 'FR';
       issuingAuthority = 'Institut National de la Statistique et des Études Économiques (INSEE)';
       valid = /^[0-9]{9}$/.test(normalized) && validateLuhn(normalized);
@@ -196,8 +193,7 @@ export function validateIdentifier(
       break;
     }
 
-    case 'FR_SIRET':
-    case 'SIRET': {
+    case 'FR_SIRET': {
       countryCode = 'FR';
       issuingAuthority = 'INSEE';
       valid = /^[0-9]{14}$/.test(normalized) && validateLuhn(normalized);
@@ -212,8 +208,7 @@ export function validateIdentifier(
       break;
     }
 
-    case 'EU_VAT':
-    case 'VAT': {
+    case 'EU_VAT': {
       issuingAuthority = 'European Commission VIES / National Tax Office';
       // Starts with 2-letter country code followed by 8-12 alphanumeric characters
       const vatPattern = /^[A-Z]{2}[A-Z0-9]{8,12}$/;
@@ -237,19 +232,21 @@ export function validateIdentifier(
     case 'NONPROFIT_REG': {
       issuingAuthority = countryCode === 'GB' ? 'Charity Commission' : countryCode === 'US' ? 'IRS 501(c)(3)' : 'Charity Regulator';
       valid = normalized.length >= 4;
+      if (!valid) error = 'Nonprofit registration identifier must be at least 4 alphanumeric characters';
       break;
     }
 
     case 'BUSINESS_LICENSE': {
       issuingAuthority = 'Department of Economic Development / Municipality';
       valid = normalized.length >= 3;
+      if (!valid) error = 'Business license number must be at least 3 alphanumeric characters';
       break;
     }
 
     default: {
-      // General Tax ID / Registration number
       valid = normalized.length >= 3;
-      issuingAuthority = 'National Business Register';
+      issuingAuthority = spec?.issuingAuthority || 'National Business Register';
+      if (!valid) error = 'Identifier value must contain at least 3 alphanumeric characters';
       break;
     }
   }

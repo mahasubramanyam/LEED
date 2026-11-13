@@ -1,5 +1,8 @@
 import pg from 'pg';
+import crypto from 'crypto';
 import { dbManager } from './pool.js';
+import { canonicalizeIdentifierType, getIdentifierAliases } from '../../shared/identifierRegistry.js';
+import { normalizeIdentifierValue } from '../identifiers/identifierEngine.js';
 import {
   CanonicalLead,
   PipelineStage,
@@ -16,6 +19,50 @@ import {
 } from '../types.js';
 
 export const AUDIT_GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
+
+function deriveCredentialKey(): Buffer {
+  const seed =
+    process.env.SESSION_SECRET ||
+    process.env.COOKIE_SECRET ||
+    process.env.OWNER_SETUP_SECRET ||
+    process.env.DATABASE_URL ||
+    'leed-local-credential-encryption-seed';
+  return crypto.createHash('sha256').update(seed).digest();
+}
+
+function encryptCredentialPayload(payload: Record<string, unknown>): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', deriveCredentialKey(), iv);
+  const json = JSON.stringify(payload);
+  const encrypted = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return JSON.stringify({
+    v: 1,
+    iv: iv.toString('base64'),
+    tag: tag.toString('base64'),
+    data: encrypted.toString('base64'),
+  });
+}
+
+function decryptCredentialPayload(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.iv || !parsed.tag || !parsed.data) return null;
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      deriveCredentialKey(),
+      Buffer.from(parsed.iv, 'base64')
+    );
+    decipher.setAuthTag(Buffer.from(parsed.tag, 'base64'));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(parsed.data, 'base64')),
+      decipher.final(),
+    ]);
+    return JSON.parse(decrypted.toString('utf8'));
+  } catch {
+    return null;
+  }
+}
 
 export interface AuditEventRecord {
   id: string;
@@ -67,6 +114,8 @@ export class PostgresStorage {
     hasWebsite?: boolean;
     hasEmail?: boolean;
     hasPhone?: boolean;
+    sortBy?: string;
+    sortDir?: 'asc' | 'desc';
   } = {}): Promise<CanonicalLead[]> {
     const pool = this.getClient();
     let client: pg.PoolClient | null = null;
@@ -129,19 +178,28 @@ export class PostgresStorage {
       let paramIdx = 1;
 
       if (filters.search) {
+        const cleanSearchNorm = filters.search.toUpperCase().replace(/[^A-Z0-9]/g, '');
         query += ` AND (
           l.company_name ILIKE $${paramIdx} OR
           l.registration_number ILIKE $${paramIdx} OR
           l.city ILIKE $${paramIdx} OR
           l.region ILIKE $${paramIdx} OR
-          l.domain ILIKE $${paramIdx}
+          l.country ILIKE $${paramIdx} OR
+          l.domain ILIKE $${paramIdx} OR
+          l.email ILIKE $${paramIdx} OR
+          l.tags::text ILIKE $${paramIdx} OR
+          EXISTS (
+            SELECT 1 FROM lead_identifiers li
+            WHERE li.lead_id = l.id
+              AND (li.value ILIKE $${paramIdx} OR ($${paramIdx + 1} != '' AND li.normalized_value ILIKE $${paramIdx + 1}))
+          )
         )`;
-        values.push(`%${filters.search}%`);
-        paramIdx++;
+        values.push(`%${filters.search}%`, cleanSearchNorm ? `%${cleanSearchNorm}%` : '');
+        paramIdx += 2;
       }
 
       if (filters.country && filters.country !== 'ALL') {
-        query += ` AND (l.country_code = $${paramIdx} OR l.country = $${paramIdx})`;
+        query += ` AND (UPPER(l.country_code) = UPPER($${paramIdx}) OR UPPER(l.country) = UPPER($${paramIdx}))`;
         values.push(filters.country);
         paramIdx++;
       }
@@ -159,8 +217,9 @@ export class PostgresStorage {
       }
 
       if (filters.identifierType && filters.identifierType !== 'ALL') {
-        query += ` AND EXISTS (SELECT 1 FROM lead_identifiers li WHERE li.lead_id = l.id AND li.type = $${paramIdx})`;
-        values.push(filters.identifierType);
+        const aliases = getIdentifierAliases(filters.identifierType);
+        query += ` AND EXISTS (SELECT 1 FROM lead_identifiers li WHERE li.lead_id = l.id AND UPPER(li.type) = ANY($${paramIdx}::text[]))`;
+        values.push(aliases);
         paramIdx++;
       }
 
@@ -176,6 +235,12 @@ export class PostgresStorage {
         paramIdx++;
       }
 
+      if (filters.category && filters.category !== 'ALL') {
+        query += ` AND l.category ILIKE $${paramIdx}`;
+        values.push(`%${filters.category}%`);
+        paramIdx++;
+      }
+
       if (filters.hasWebsite) {
         query += ` AND l.website IS NOT NULL AND l.website != ''`;
       }
@@ -185,10 +250,21 @@ export class PostgresStorage {
       }
 
       if (filters.hasPhone) {
-        query += ` AND l.phone IS NOT NULL AND l.phone != ''`;
+        query += ` AND ((l.phone IS NOT NULL AND l.phone != '') OR (l.phone_normalized IS NOT NULL AND l.phone_normalized != ''))`;
       }
 
-      query += ` GROUP BY l.id ORDER BY l.created_at DESC`;
+      const sortColumns: Record<string, string> = {
+        createdAt: 'l.created_at',
+        updatedAt: 'l.updated_at',
+        companyName: 'l.company_name',
+        confidenceScore: 'l.confidence_score',
+        opportunityValue: 'l.opportunity_value',
+        country: 'l.country',
+      };
+      const sortCol = sortColumns[filters.sortBy || 'createdAt'] || 'l.created_at';
+      const sortDir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
+
+      query += ` GROUP BY l.id ORDER BY ${sortCol} ${sortDir}`;
 
       const { rows } = await client.query(query, values);
       return rows.map((r: any) => this.mapRowToLead(r));
@@ -272,6 +348,10 @@ export class PostgresStorage {
     try {
       await client.query('BEGIN');
 
+      const canonicalRegType = lead.registrationType
+        ? canonicalizeIdentifierType(lead.registrationType, lead.address?.countryCode)
+        : null;
+
       await client.query(
         `INSERT INTO leads (
           id, company_name, legal_name, registration_number, registration_type,
@@ -329,7 +409,7 @@ export class PostgresStorage {
           lead.companyName,
           lead.legalName || null,
           lead.registrationNumber || null,
-          lead.registrationType || null,
+          canonicalRegType,
           lead.companyStatus || 'active',
           lead.website || null,
           lead.domain || null,
@@ -384,38 +464,75 @@ export class PostgresStorage {
         }
       }
 
-      // Re-insert identifiers if present
-      if (lead.identifiers && lead.identifiers.length > 0) {
-        for (let idx = 0; idx < lead.identifiers.length; idx++) {
-          const ident = lead.identifiers[idx];
-          const identId = ident.id || `ident-${lead.id}-${idx}`;
-          const normVal = ident.normalizedValue || (ident.value ? ident.value.toUpperCase().replace(/[^A-Z0-9]/g, '') : null);
-          const cCode = ident.countryCode || lead.address?.countryCode || null;
+      // Reconcile identifiers transactionally: delete removed rows while preserving/updating remaining ones
+      const normalizedIdentifiers = (lead.identifiers || [])
+        .filter((ident) => ident && ident.value && ident.value.trim().length > 0)
+        .map((ident, idx) => {
+          const cCode = (ident.countryCode || lead.address?.countryCode || 'US').toUpperCase();
+          const canonType = canonicalizeIdentifierType(ident.type, cCode);
+          const rawVal = ident.value.trim();
+          const normVal = ident.normalizedValue || normalizeIdentifierValue(rawVal);
           const status = ident.status || (ident.verified ? 'officially_verified' : 'user_provided');
-          await client.query(
-            `INSERT INTO lead_identifiers (id, lead_id, type, value, verified, country_code, normalized_value, issuing_authority, source, status, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-             ON CONFLICT (lead_id, type, value) DO UPDATE SET
-               verified = EXCLUDED.verified,
-               country_code = COALESCE(EXCLUDED.country_code, lead_identifiers.country_code),
-               normalized_value = COALESCE(EXCLUDED.normalized_value, lead_identifiers.normalized_value),
-               issuing_authority = COALESCE(EXCLUDED.issuing_authority, lead_identifiers.issuing_authority),
-               source = COALESCE(EXCLUDED.source, lead_identifiers.source),
-               status = EXCLUDED.status`,
-            [
-              identId,
-              lead.id,
-              ident.type,
-              ident.value,
-              ident.verified ?? false,
-              cCode,
-              normVal,
-              ident.issuingAuthority || null,
-              ident.source || null,
-              status,
-            ]
+          return {
+            id: ident.id || `ident-${lead.id}-${idx}-${Date.now().toString(36).slice(-4)}`,
+            type: canonType,
+            value: rawVal,
+            normalizedValue: normVal,
+            countryCode: cCode,
+            issuingAuthority: ident.issuingAuthority || undefined,
+            source: ident.source || undefined,
+            status,
+            verified: ident.verified ?? status === 'officially_verified',
+          };
+        });
+
+      const keptPairs = new Set(normalizedIdentifiers.map((i) => `${i.type}\u0000${i.value}`));
+      const existingIdentRes = await client.query(
+        'SELECT id, type, value FROM lead_identifiers WHERE lead_id = $1',
+        [lead.id]
+      );
+      const idsToDelete = existingIdentRes.rows
+        .filter((row: { id: string; type: string; value: string }) => {
+          const canonRowType = canonicalizeIdentifierType(row.type, lead.address?.countryCode);
+          return (
+            !keptPairs.has(`${row.type}\u0000${row.value}`) &&
+            !keptPairs.has(`${canonRowType}\u0000${row.value}`)
           );
-        }
+        })
+        .map((row: { id: string }) => row.id);
+
+      if (idsToDelete.length > 0) {
+        await client.query(
+          'DELETE FROM lead_identifiers WHERE lead_id = $1 AND id = ANY($2::text[])',
+          [lead.id, idsToDelete]
+        );
+      }
+
+      for (const ident of normalizedIdentifiers) {
+        // Also ensure legacy alias duplicate rows with identical normalized type don't collide
+        await client.query(
+          `INSERT INTO lead_identifiers (id, lead_id, type, value, verified, country_code, normalized_value, issuing_authority, source, status, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+           ON CONFLICT (lead_id, type, value) DO UPDATE SET
+             verified = EXCLUDED.verified,
+             country_code = COALESCE(EXCLUDED.country_code, lead_identifiers.country_code),
+             normalized_value = COALESCE(EXCLUDED.normalized_value, lead_identifiers.normalized_value),
+             issuing_authority = COALESCE(EXCLUDED.issuing_authority, lead_identifiers.issuing_authority),
+             source = COALESCE(EXCLUDED.source, lead_identifiers.source),
+             status = EXCLUDED.status`,
+          [
+            ident.id,
+            lead.id,
+            ident.type,
+            ident.value,
+            ident.verified,
+            ident.countryCode,
+            ident.normalizedValue,
+            ident.issuingAuthority || null,
+            ident.source || null,
+            ident.status,
+          ]
+        );
       }
 
       // Re-insert notes if present
@@ -447,7 +564,11 @@ export class PostgresStorage {
       }
 
       await client.query('COMMIT');
-      return lead;
+      return {
+        ...lead,
+        registrationType: canonicalRegType || lead.registrationType,
+        identifiers: normalizedIdentifiers,
+      };
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -456,20 +577,129 @@ export class PostgresStorage {
     }
   }
 
-  public async batchUpsertLeads(newLeads: CanonicalLead[]): Promise<{ added: number; updated: number }> {
+  public async batchUpsertLeads(
+    newLeads: CanonicalLead[],
+    options: { skipDuplicates?: boolean } = {}
+  ): Promise<{ added: number; updated: number; skipped: number }> {
     let added = 0;
     let updated = 0;
-    for (const lead of newLeads) {
-      const existing = await this.getLead(lead.id);
-      if (existing) {
-        await this.upsertLead({ ...existing, ...lead });
+    let skipped = 0;
+
+    const existingLeads = await this.getLeads();
+    const byId = new Map<string, CanonicalLead>();
+    const byDomain = new Map<string, CanonicalLead>();
+    const byReg = new Map<string, CanonicalLead>();
+    const byIdent = new Map<string, CanonicalLead>();
+    const byPhone = new Map<string, CanonicalLead>();
+
+    const indexLead = (l: CanonicalLead) => {
+      byId.set(l.id, l);
+      if (l.domain) byDomain.set(l.domain.toLowerCase().trim(), l);
+      if (l.registrationNumber) {
+        const cleanReg = normalizeIdentifierValue(l.registrationNumber);
+        if (cleanReg.length >= 4) byReg.set(cleanReg, l);
+      }
+      for (const ident of l.identifiers || []) {
+        const cleanVal = normalizeIdentifierValue(ident.normalizedValue || ident.value);
+        if (cleanVal.length >= 4) {
+          const canonType = canonicalizeIdentifierType(ident.type, l.address?.countryCode);
+          byIdent.set(`${canonType}:${cleanVal}`, l);
+        }
+      }
+      const pDigits = (l.phoneNormalized || l.phone || '').replace(/[^0-9]/g, '');
+      if (pDigits.length >= 7) byPhone.set(pDigits, l);
+    };
+
+    for (const ex of existingLeads) indexLead(ex);
+
+    for (const rawLead of newLeads) {
+      const lead: CanonicalLead = {
+        ...rawLead,
+        registrationType: rawLead.registrationType
+          ? canonicalizeIdentifierType(rawLead.registrationType, rawLead.address?.countryCode)
+          : undefined,
+        identifiers: (rawLead.identifiers || []).map((i) => ({
+          ...i,
+          type: canonicalizeIdentifierType(i.type, i.countryCode || rawLead.address?.countryCode),
+          normalizedValue: i.normalizedValue || normalizeIdentifierValue(i.value),
+        })),
+      };
+
+      let match: CanonicalLead | undefined = byId.get(lead.id);
+      if (!match && lead.domain) match = byDomain.get(lead.domain.toLowerCase().trim());
+      if (!match && lead.registrationNumber) {
+        const cleanReg = normalizeIdentifierValue(lead.registrationNumber);
+        if (cleanReg.length >= 4) match = byReg.get(cleanReg);
+      }
+      if (!match) {
+        for (const ident of lead.identifiers || []) {
+          const cleanVal = normalizeIdentifierValue(ident.normalizedValue || ident.value);
+          if (cleanVal.length >= 4) {
+            match = byIdent.get(`${ident.type}:${cleanVal}`);
+            if (match) break;
+          }
+        }
+      }
+      if (!match) {
+        const pDigits = (lead.phoneNormalized || lead.phone || '').replace(/[^0-9]/g, '');
+        if (pDigits.length >= 7) match = byPhone.get(pDigits);
+      }
+
+      if (match) {
+        if (options.skipDuplicates) {
+          skipped++;
+          continue;
+        }
+        const identKey = (i: LeadIdentifier) =>
+          `${canonicalizeIdentifierType(i.type, i.countryCode || match!.address?.countryCode)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`;
+        const mergedIdentsMap = new Map<string, LeadIdentifier>();
+        for (const i of match.identifiers || []) mergedIdentsMap.set(identKey(i), i);
+        for (const i of lead.identifiers || []) {
+          const k = identKey(i);
+          if (!mergedIdentsMap.has(k)) mergedIdentsMap.set(k, i);
+        }
+
+        const merged: CanonicalLead = {
+          ...match,
+          ...lead,
+          id: match.id,
+          createdAt: match.createdAt,
+          legalName: lead.legalName || match.legalName,
+          registrationNumber: lead.registrationNumber || match.registrationNumber,
+          registrationType: lead.registrationType || match.registrationType,
+          website: lead.website || match.website,
+          domain: lead.domain || match.domain,
+          email: lead.email || match.email,
+          phone: lead.phone || match.phone,
+          phoneNormalized: lead.phoneNormalized || match.phoneNormalized,
+          address: {
+            street: lead.address?.street || match.address?.street,
+            city: lead.address?.city || match.address?.city,
+            region: lead.address?.region || match.address?.region,
+            postalCode: lead.address?.postalCode || match.address?.postalCode,
+            country: lead.address?.country || match.address?.country || 'International',
+            countryCode: lead.address?.countryCode || match.address?.countryCode || 'US',
+            formattedAddress: lead.address?.formattedAddress || match.address?.formattedAddress,
+          },
+          opportunityValue: lead.opportunityValue && lead.opportunityValue > 0 ? lead.opportunityValue : match.opportunityValue,
+          confidenceScore: Math.max(match.confidenceScore || 0, lead.confidenceScore || 0),
+          confidenceSignals: Array.from(new Set([...(match.confidenceSignals || []), ...(lead.confidenceSignals || [])])),
+          tags: Array.from(new Set([...(match.tags || []), ...(lead.tags || [])])),
+          identifiers: Array.from(mergedIdentsMap.values()),
+          sources: match.sources?.length ? match.sources : lead.sources,
+          notes: match.notes || [],
+          activities: match.activities || lead.activities || [],
+        };
+        const saved = await this.upsertLead(merged);
+        indexLead(saved);
         updated++;
       } else {
-        await this.upsertLead(lead);
+        const saved = await this.upsertLead(lead);
+        indexLead(saved);
         added++;
       }
     }
-    return { added, updated };
+    return { added, updated, skipped };
   }
 
   public async deleteLead(id: string): Promise<boolean> {
@@ -978,14 +1208,29 @@ export class PostgresStorage {
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      const { rows } = await client.query('SELECT * FROM app_settings WHERE id = $1', ['primary_settings']);
-      if (rows.length > 0) {
-        const r = rows[0];
+      const [settingsRes, credRes] = await Promise.all([
+        client.query('SELECT * FROM app_settings WHERE id = $1', ['primary_settings']),
+        client.query('SELECT encrypted_payload FROM connector_credentials WHERE connector_id = $1 LIMIT 1', [
+          'conn-companies-house',
+        ]),
+      ]);
+
+      let companiesHouseApiKey: string | undefined;
+      if (credRes.rows.length > 0 && credRes.rows[0]?.encrypted_payload) {
+        const decrypted = decryptCredentialPayload(credRes.rows[0].encrypted_payload);
+        if (decrypted && typeof decrypted.apiKey === 'string' && decrypted.apiKey.trim()) {
+          companiesHouseApiKey = decrypted.apiKey.trim();
+        }
+      }
+
+      if (settingsRes.rows.length > 0) {
+        const r = settingsRes.rows[0];
         return {
           ownerName: r.owner_name,
           ownerEmail: r.owner_email,
           defaultCountry: r.default_country,
           defaultCurrency: r.default_currency,
+          companiesHouseApiKey,
           userAgent: r.user_agent,
           enableSafeWebsiteCrawl: r.enable_safe_website_crawl,
           outreachApprovalRequired: r.outreach_approval_required,
@@ -1000,6 +1245,7 @@ export class PostgresStorage {
         ownerEmail: 'owner@pipeline.local',
         defaultCountry: 'GB',
         defaultCurrency: 'USD',
+        companiesHouseApiKey,
         userAgent: 'GlobalLeadPipeline/1.0',
         enableSafeWebsiteCrawl: true,
         outreachApprovalRequired: true,
@@ -1047,6 +1293,27 @@ export class PostgresStorage {
           JSON.stringify(updated.suppressionDomains),
         ]
       );
+
+      if (Object.prototype.hasOwnProperty.call(updates, 'companiesHouseApiKey')) {
+        const keyVal = (updates.companiesHouseApiKey || '').trim();
+        if (keyVal) {
+          const encrypted = encryptCredentialPayload({ apiKey: keyVal });
+          await client.query(
+            `INSERT INTO connector_credentials (id, connector_id, auth_type, encrypted_payload, status, created_at, updated_at)
+             VALUES ('cred-companies-house', 'conn-companies-house', 'api_key', $1, 'configured', NOW(), NOW())
+             ON CONFLICT (id) DO UPDATE SET
+               encrypted_payload = EXCLUDED.encrypted_payload,
+               status = 'configured',
+               updated_at = NOW()`,
+            [encrypted]
+          );
+          updated.companiesHouseApiKey = keyVal;
+        } else {
+          await client.query(`DELETE FROM connector_credentials WHERE connector_id = 'conn-companies-house'`);
+          updated.companiesHouseApiKey = undefined;
+        }
+      }
+
       return updated;
     } finally {
       if (client) client.release();
@@ -1054,30 +1321,67 @@ export class PostgresStorage {
   }
 
   // ==========================================
-  // 7. CONNECTORS & AUDIT
+  // 7. CONNECTORS, CAPABILITY OVERRIDES & AUDIT
   // ==========================================
+
+  public async getCapabilityOverrides(): Promise<Map<string, { lastCheckedAt?: string; notes?: string }>> {
+    const overrides = new Map<string, { lastCheckedAt?: string; notes?: string }>();
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const tblCheck = await client.query(`SELECT to_regclass('public.country_source_capabilities') as tbl`);
+      if (!tblCheck.rows[0]?.tbl) return overrides;
+      const { rows } = await client.query(
+        'SELECT country_code, notes, last_checked_at FROM country_source_capabilities'
+      );
+      for (const r of rows) {
+        if (r.country_code) {
+          overrides.set(String(r.country_code).toUpperCase(), {
+            lastCheckedAt: r.last_checked_at ? new Date(r.last_checked_at).toISOString() : undefined,
+            notes: r.notes || undefined,
+          });
+        }
+      }
+      return overrides;
+    } catch {
+      return overrides;
+    } finally {
+      if (client) client.release();
+    }
+  }
 
   public async getConnectors(): Promise<ConnectorStatus[]> {
     const pool = this.getClient();
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      // Aggregate statistics from connector_runs
-      const { rows } = await client.query(`
-        SELECT 
-          connector_id,
-          COUNT(*) as total_calls,
-          MAX(executed_at) as last_run_at,
-          (ARRAY_AGG(error_message ORDER BY executed_at DESC))[1] as last_error,
-          (ARRAY_AGG(status ORDER BY executed_at DESC))[1] as last_status
-        FROM connector_runs
-        GROUP BY connector_id
-      `);
+      const [runsRes, credsRes] = await Promise.all([
+        client.query(`
+          SELECT 
+            connector_id,
+            COUNT(*) as total_calls,
+            MAX(executed_at) as last_run_at,
+            (ARRAY_AGG(error_message ORDER BY executed_at DESC))[1] as last_error,
+            (ARRAY_AGG(status ORDER BY executed_at DESC))[1] as last_status
+          FROM connector_runs
+          GROUP BY connector_id
+        `),
+        client.query(`SELECT connector_id, status FROM connector_credentials`),
+      ]);
 
       const statsMap = new Map<string, any>();
-      for (const r of rows) {
+      for (const r of runsRes.rows) {
         statsMap.set(r.connector_id, r);
       }
+
+      const credMap = new Set<string>();
+      for (const c of credsRes.rows) {
+        if (c.status === 'configured') credMap.add(c.connector_id);
+      }
+
+      const hasChKey = Boolean(process.env.COMPANIES_HOUSE_API_KEY || credMap.has('conn-companies-house'));
+      const hasAbrGuid = Boolean(process.env.ABR_GUID);
 
       const defaultConnectors: ConnectorStatus[] = [
         {
@@ -1097,9 +1401,9 @@ export class PostgresStorage {
           name: 'UK Companies House Registry',
           category: 'government_registry',
           countryCoverage: ['GB'],
-          status: 'healthy',
+          status: hasChKey ? 'configured' : 'unconfigured',
           authType: 'api_key',
-          isConfigured: !!process.env.COMPANIES_HOUSE_API_KEY,
+          isConfigured: hasChKey,
           rateLimitNote: '600 reqs / 5 mins. Free key at developer.company-information.service.gov.uk',
           attribution: 'Crown Copyright (Open Government Licence v3.0)',
           totalCalls: 0,
@@ -1121,11 +1425,11 @@ export class PostgresStorage {
           name: 'Australian Business Register (ABN Lookup)',
           category: 'government_registry',
           countryCoverage: ['AU'],
-          status: 'healthy',
-          authType: 'none_open',
-          isConfigured: true,
-          rateLimitNote: 'ABN modulo-89 algorithmic checksum verification',
-          attribution: 'Commonwealth of Australia Open Data',
+          status: hasAbrGuid ? 'configured' : 'unconfigured',
+          authType: 'api_key',
+          isConfigured: hasAbrGuid,
+          rateLimitNote: 'ATO Modulo-89 checksum & 5-record sample offline; live ABR API requires registered ABR GUID',
+          attribution: 'Commonwealth of Australia Open Data (ABR)',
           totalCalls: 0,
         },
         {
@@ -1145,7 +1449,7 @@ export class PostgresStorage {
           name: 'Gemini AI Sales & Intelligence Engine',
           category: 'ai_engine',
           countryCoverage: ['GLOBAL'],
-          status: 'healthy',
+          status: process.env.GEMINI_API_KEY ? 'healthy' : 'unconfigured',
           authType: 'environment',
           isConfigured: !!process.env.GEMINI_API_KEY,
           rateLimitNote: 'gemini-3.8-flash server-side inference',
@@ -1162,7 +1466,7 @@ export class PostgresStorage {
             totalCalls: parseInt(stats.total_calls, 10),
             lastRunAt: stats.last_run_at,
             lastError: stats.last_error || undefined,
-            status: stats.last_status === 'error' ? 'degraded' : 'healthy',
+            status: stats.last_status === 'error' ? 'degraded' : conn.isConfigured ? 'healthy' : 'unconfigured',
           };
         }
         return conn;
@@ -1411,6 +1715,7 @@ export class PostgresStorage {
       ]);
 
       const tableNames = [
+        'schema_migrations',
         'owner_users',
         'owner_sessions',
         'pipeline_stages',
@@ -1422,12 +1727,12 @@ export class PostgresStorage {
         'tasks',
         'campaigns',
         'campaign_messages',
-        'dedupe_candidates',
-        'merge_history',
+        'lead_merge_history',
         'connector_credentials',
         'connector_runs',
         'audit_events',
         'app_settings',
+        'country_source_capabilities',
       ];
 
       const counts = await Promise.all(

@@ -101,8 +101,13 @@ export async function searchBrreg(
 
       const identifiers: LeadIdentifier[] = [
         {
-          type: 'BRREG_ORG',
+          type: 'NO_ORG',
           value: e.organisasjonsnummer,
+          normalizedValue: e.organisasjonsnummer.replace(/[^A-Z0-9]/gi, '').toUpperCase(),
+          countryCode: 'NO',
+          issuingAuthority: 'Brønnøysundregistrene (Brreg)',
+          source: 'brreg_api',
+          status: 'officially_verified',
           verified: true,
         },
       ];
@@ -111,6 +116,10 @@ export async function searchBrreg(
         identifiers.push({
           type: 'DOMAIN',
           value: domain,
+          normalizedValue: domain.toUpperCase(),
+          countryCode: 'NO',
+          source: 'brreg_api',
+          status: 'discovered',
           verified: false,
         });
       }

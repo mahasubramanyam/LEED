@@ -347,10 +347,10 @@ describe('LEED Phase 3 Verification Suite', () => {
       assert.ok(gbCap);
       assert.strictEqual(gbCap.authRequirement, 'api_key');
 
-      // Verify AU (Australia) capability tier
+      // Verify AU (Australia) capability tier — live ABR requires GUID, local tool provides offline checksum/sample
       const auCap = matrix.find((m) => m.countryCode === 'AU');
       assert.ok(auCap);
-      assert.strictEqual(auCap.integrationStatus, 'live_open_api');
+      assert.strictEqual(auCap.integrationStatus, 'requires_api_key');
 
       // Verify restricted/manual countries are never falsely shown as live open APIs
       const deCap = matrix.find((m) => m.countryCode === 'DE');
@@ -475,8 +475,8 @@ describe('LEED Phase 3 Verification Suite', () => {
       };
 
       const { updatedSurvivor } = mergeLeads(primary, absorbed, 'exact_registration_match');
-      assert.strictEqual(updatedSurvivor.identifiers.length, 3, 'Should deduplicate CRN and combine VAT + LEI');
-      assert.ok(updatedSurvivor.identifiers.some((i) => i.type === 'VAT'));
+      assert.strictEqual(updatedSurvivor.identifiers.length, 3, 'Should deduplicate CRN/UK_CRN and combine EU_VAT + LEI');
+      assert.ok(updatedSurvivor.identifiers.some((i) => i.type === 'EU_VAT'));
       assert.ok(updatedSurvivor.identifiers.some((i) => i.type === 'LEI'));
     });
   });

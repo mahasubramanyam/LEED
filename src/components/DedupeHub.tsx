@@ -12,6 +12,8 @@ import {
   Layers,
 } from 'lucide-react';
 import { DuplicateMatch, MergeHistoryRecord, CanonicalLead } from '../types.js';
+import { apiFetch } from '../utils/apiFetch.ts';
+import { formatDateLocale } from '../../shared/localization.ts';
 
 interface DedupeHubProps {
   onRefreshLeads: () => void;
@@ -32,13 +34,13 @@ export const DedupeHub: React.FC<DedupeHubProps> = ({
     setIsLoading(true);
     try {
       const [candRes, histRes] = await Promise.all([
-        fetch('/api/dedupe/candidates'),
-        fetch('/api/dedupe/history'),
+        apiFetch('/api/dedupe/candidates'),
+        apiFetch('/api/dedupe/history'),
       ]);
-      const candData = await candRes.json();
-      const histData = await histRes.json();
+      const candData = candRes.ok ? await candRes.json() : { candidates: [] };
+      const histData = histRes.ok ? await histRes.json() : [];
       setCandidates(candData.candidates || []);
-      setHistory(histData || []);
+      setHistory(Array.isArray(histData) ? histData : []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -52,7 +54,7 @@ export const DedupeHub: React.FC<DedupeHubProps> = ({
 
   const handleMerge = async (match: DuplicateMatch, survivorId: string, absorbedId: string) => {
     try {
-      const res = await fetch('/api/dedupe/merge', {
+      const res = await apiFetch('/api/dedupe/merge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -75,7 +77,7 @@ export const DedupeHub: React.FC<DedupeHubProps> = ({
 
   const handleUndo = async (historyId: string) => {
     try {
-      const res = await fetch(`/api/dedupe/undo/${historyId}`, {
+      const res = await apiFetch(`/api/dedupe/undo/${historyId}`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -294,7 +296,7 @@ export const DedupeHub: React.FC<DedupeHubProps> = ({
                     <span className="text-emerald-400 font-medium">Survivor ID {record.survivorLeadId}</span>
                   </div>
                   <div className="text-[11px] text-slate-400 mt-0.5">
-                    Reason: {record.mergedReason} • Timestamp: {new Date(record.mergedAt).toLocaleString()}
+                    Reason: {record.mergedReason} • Timestamp: {formatDateLocale(record.mergedAt)}
                   </div>
                 </div>
 

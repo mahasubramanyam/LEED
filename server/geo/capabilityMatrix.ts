@@ -2,12 +2,21 @@ import { CountrySourceCapability, IntegrationStatus } from './types.js';
 import { getAllCountries } from './countries.js';
 import { ConnectorStatus } from '../types.js';
 
-export function buildCountryCapabilityMatrix(activeConnectors: ConnectorStatus[] = []): CountrySourceCapability[] {
+export interface CapabilityMatrixOptions {
+  hasChKey?: boolean;
+  overrides?: Map<string, { lastCheckedAt?: string; notes?: string }>;
+}
+
+export function buildCountryCapabilityMatrix(
+  activeConnectors: ConnectorStatus[] = [],
+  options: CapabilityMatrixOptions = {}
+): CountrySourceCapability[] {
   const countries = getAllCountries();
   const connectorMap = new Map<string, ConnectorStatus>();
   for (const c of activeConnectors) {
     connectorMap.set(c.id, c);
   }
+  const overrides = options.overrides;
 
   const matrix: CountrySourceCapability[] = [];
 
@@ -20,18 +29,26 @@ export function buildCountryCapabilityMatrix(activeConnectors: ConnectorStatus[]
     flag: '🇳🇴',
     providerName: 'Brønnøysund Register Centre (Brreg)',
     sourceType: 'official_open_registry',
-    integrationStatus: brregConn?.status === 'healthy' ? 'live_open_api' : 'live_open_api',
+    integrationStatus: 'live_open_api',
     authRequirement: 'none_open',
     sourceUrl: 'https://data.brreg.no/enhetsregisteret/api',
-    lastCheckedAt: brregConn?.lastRunAt || new Date().toISOString(),
-    notes: 'Official open government API. Real-time querying of 9-digit Norwegian organisation numbers, legal status, NACE codes, and registered postal addresses.',
+    lastCheckedAt: overrides?.get('NO')?.lastCheckedAt || brregConn?.lastRunAt || undefined,
+    notes:
+      overrides?.get('NO')?.notes ||
+      'Official open government API. Real-time querying of 9-digit Norwegian organisation numbers (NO_ORG), legal status, NACE codes, and registered postal addresses.',
     licensingInfo: 'Norwegian Licence for Open Government Data (NLOD 2.0)',
-    coverageFeatures: ['Company Search', 'Official OrgNr', 'NACE Classification', 'Director/Office Address', 'Legal Status Verification'],
+    coverageFeatures: ['Company Search', 'Official OrgNr (NO_ORG)', 'NACE Classification', 'Registered Address', 'Legal Status Verification'],
   });
 
   // 2. Official Registry Integration: UK Companies House
   const chConn = connectorMap.get('conn-companies-house');
-  const hasChKey = !!process.env.COMPANIES_HOUSE_API_KEY || (chConn?.isConfigured ?? false);
+  const hasChKey = Boolean(
+    options.hasChKey ||
+      process.env.COMPANIES_HOUSE_API_KEY ||
+      chConn?.isConfigured ||
+      chConn?.status === 'configured' ||
+      chConn?.status === 'healthy'
+  );
   matrix.push({
     id: 'cap-gb-ch',
     countryCode: 'GB',
@@ -42,28 +59,35 @@ export function buildCountryCapabilityMatrix(activeConnectors: ConnectorStatus[]
     integrationStatus: hasChKey ? 'configured_api_key' : 'requires_api_key',
     authRequirement: 'api_key',
     sourceUrl: 'https://developer.company-information.service.gov.uk',
-    lastCheckedAt: chConn?.lastRunAt,
-    notes: 'Official Crown registry for England, Wales, Scotland, and Northern Ireland. Free API key required (600 calls/5 min rate limit).',
+    lastCheckedAt: overrides?.get('GB')?.lastCheckedAt || chConn?.lastRunAt || undefined,
+    notes:
+      overrides?.get('GB')?.notes ||
+      (hasChKey
+        ? 'API key configured. Official live REST lookup active for UK Companies House (England, Wales, Scotland, Northern Ireland; 600 calls/5 min).'
+        : 'Official Crown registry for England, Wales, Scotland, and Northern Ireland. Free API key required in Settings/Owner Control Centre; currently only offline sample fallback is available without a key.'),
     licensingInfo: 'Crown Copyright, Open Government Licence (OGL v3.0)',
-    coverageFeatures: ['Company Search', 'Verified CRN', 'Filing History', 'Registered Office', 'Incorporation Date', 'SIC Codes'],
+    coverageFeatures: ['Company Search', 'Verified CRN (UK_CRN)', 'Filing History', 'Registered Office', 'Incorporation Date', 'SIC Codes'],
   });
 
-  // 3. Official Open Registry: Australia ABN Lookup
+  // 3. Credentialed Registry: Australia ABR / ABN Lookup (Live ABR API requires GUID; offline checksum utility only)
   const abnConn = connectorMap.get('conn-abn');
+  const hasAbrGuid = Boolean(process.env.ABR_GUID || abnConn?.isConfigured);
   matrix.push({
     id: 'cap-au-abn',
     countryCode: 'AU',
     countryName: 'Australia',
     flag: '🇦🇺',
     providerName: 'Australian Business Register (ABR / ABN Lookup)',
-    sourceType: 'official_open_registry',
-    integrationStatus: 'live_open_api',
-    authRequirement: 'none_open',
-    sourceUrl: 'https://abr.business.gov.au',
-    lastCheckedAt: abnConn?.lastRunAt,
-    notes: 'Public Commonwealth register supporting 11-digit ABNs, ASIC Company Numbers (ACN), trading names, and GST status with Modulo-89 checksum verification.',
-    licensingInfo: 'Commonwealth of Australia Open Data (data.gov.au)',
-    coverageFeatures: ['ABN Checksum', 'ACN Verification', 'Trading Names', 'GST Registration', 'State Location'],
+    sourceType: 'official_api_credentials',
+    integrationStatus: hasAbrGuid ? 'configured_api_key' : 'requires_api_key',
+    authRequirement: 'api_key',
+    sourceUrl: 'https://abr.business.gov.au/Documentation/WebServiceMethods',
+    lastCheckedAt: overrides?.get('AU')?.lastCheckedAt || abnConn?.lastRunAt || undefined,
+    notes:
+      overrides?.get('AU')?.notes ||
+      'Live Australian Business Register XML/JSON lookups require an official ABR Web Services GUID. Currently provides local ATO Modulo-89 checksum validation and a 5-record offline reference sample only.',
+    licensingInfo: 'Commonwealth of Australia Open Data (ABR Terms of Access)',
+    coverageFeatures: ['Offline ABN Modulo-89 Checksum', '5-Record Sample Reference', 'Live Registry Requires ABR GUID'],
   });
 
   // 4. Multi-Jurisdiction Geospatial Directory: OpenStreetMap Overpass & Nominatim
@@ -78,8 +102,10 @@ export function buildCountryCapabilityMatrix(activeConnectors: ConnectorStatus[]
     integrationStatus: 'live_open_api',
     authRequirement: 'none_open',
     sourceUrl: 'https://nominatim.openstreetmap.org',
-    lastCheckedAt: osmConn?.lastRunAt || new Date().toISOString(),
-    notes: 'Global crowdsourced business, retail, and commercial point-of-interest discovery. Strictly throttled to 1 req/sec in compliance with Nominatim Usage Policy.',
+    lastCheckedAt: overrides?.get('GLOBAL')?.lastCheckedAt || osmConn?.lastRunAt || undefined,
+    notes:
+      overrides?.get('GLOBAL')?.notes ||
+      'Global crowdsourced business, retail, and commercial point-of-interest directory (NOT an official corporate registry). Throttled to 1 req/sec per Nominatim Usage Policy.',
     licensingInfo: 'Open Data Commons Open Database License (ODbL 1.0)',
     coverageFeatures: ['Commercial POI Search', 'Global Coordinates', 'Street Addresses', 'Website & Phone discovery'],
   });
@@ -96,7 +122,7 @@ export function buildCountryCapabilityMatrix(activeConnectors: ConnectorStatus[]
     integrationStatus: 'live_open_api',
     authRequirement: 'none',
     sourceUrl: 'https://internal.leed/inspection',
-    lastCheckedAt: webConn?.lastRunAt,
+    lastCheckedAt: webConn?.lastRunAt || undefined,
     notes: 'Direct HTTP inspection of candidate domain homepages. Enforces DNS rebinding protection, RFC 1918 private IP blocking, 300KB streaming caps, and robots.txt compliance.',
     licensingInfo: 'Direct Target Web Inspection (Owner User-Agent Disclosed)',
     coverageFeatures: ['Email Extraction', 'SSL Validation', 'Social Profiles', 'Server Latency', 'Homepage Metadata'],
@@ -113,9 +139,12 @@ export function buildCountryCapabilityMatrix(activeConnectors: ConnectorStatus[]
     integrationStatus: 'requires_api_key',
     authRequirement: 'api_key',
     sourceUrl: 'https://www.sec.gov/edgar/searchedgar/companysearch',
-    notes: 'Public company financial filings via SEC EDGAR. Private company enrichment requires external subscription credentials (D&B / ZoomInfo / Clearbit).',
+    lastCheckedAt: overrides?.get('US')?.lastCheckedAt || undefined,
+    notes:
+      overrides?.get('US')?.notes ||
+      'SEC EDGAR covers US publicly traded/reporting filings only (not a complete US state corporate registration database). Private US business enrichment requires state SOS or external provider credentials.',
     licensingInfo: 'Commercial Provider License / SEC Public Domain',
-    coverageFeatures: ['Public Filings', '10-K / 10-Q Reports', 'Executive Officers', 'CIK Identifier'],
+    coverageFeatures: ['Public SEC Filings Only', '10-K / 10-Q Reports', 'CIK Identifier', 'State-by-State Registry External'],
   });
 
   // 7. Restricted, Manual or Portal-Only Jurisdictions
@@ -187,13 +216,14 @@ export function buildCountryCapabilityMatrix(activeConnectors: ConnectorStatus[]
       integrationStatus: item.status,
       authRequirement: 'manual_portal',
       sourceUrl: item.sourceUrl,
-      notes: item.notes,
+      lastCheckedAt: overrides?.get(item.countryCode)?.lastCheckedAt || undefined,
+      notes: overrides?.get(item.countryCode)?.notes || item.notes,
       licensingInfo: 'Jurisdictional Portal Terms of Use',
       coverageFeatures: ['Company Name', 'Registration Number', 'Legal Status'],
     });
   }
 
-  // 8. Add general geographic reference coverage indicator for all remaining sovereign states
+  // 8. Add general geographic reference coverage indicator for all remaining sovereign states & territories
   const documentedCodes = new Set(matrix.map((m) => m.countryCode));
   for (const country of countries) {
     if (!documentedCodes.has(country.code)) {
@@ -203,11 +233,14 @@ export function buildCountryCapabilityMatrix(activeConnectors: ConnectorStatus[]
         countryName: country.name,
         flag: country.flag,
         providerName: `${country.name} Geographic & Address Reference`,
-        sourceType: 'public_geo_directory',
+        sourceType: 'geographic_reference_only',
         integrationStatus: 'unavailable',
         authRequirement: 'none',
         sourceUrl: `https://en.wikipedia.org/wiki/ISO_3166-2:${country.code}`,
-        notes: `Standard geographic, postal, telephone dialing (+${country.callingCode.replace(/[^0-9]/g, '')}), currency (${country.currency}), and timezone data verified. No dedicated official business registry connector integrated currently.`,
+        lastCheckedAt: overrides?.get(country.code)?.lastCheckedAt || undefined,
+        notes:
+          overrides?.get(country.code)?.notes ||
+          `Geographic reference only: ISO codes, postal rules, telephone dialing (+${country.callingCode.replace(/[^0-9]/g, '')}), currency (${country.currency}), and timezone specs verified. No official national business registry connector integrated.`,
         licensingInfo: 'ISO 3166 / ISO 4217 Open Reference Standards',
         coverageFeatures: ['ISO Alpha-2 / Alpha-3', 'Calling Code Normalization', 'Address Formatting Rules', 'Currency / Timezone Specs'],
       });

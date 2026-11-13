@@ -15,6 +15,7 @@ import {
   Lightbulb,
 } from 'lucide-react';
 import { CanonicalLead } from '../types.js';
+import { apiFetch } from '../utils/apiFetch.ts';
 
 interface AiSalesAgentProps {
   leads: CanonicalLead[];
@@ -59,7 +60,7 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/ai/analyze-lead', {
+      const res = await apiFetch('/api/ai/analyze-lead', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId: currentLead.id }),
@@ -88,7 +89,7 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/ai/generate-pitch', {
+      const res = await apiFetch('/api/ai/generate-pitch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId: currentLead.id, valueProposition }),
@@ -108,7 +109,7 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/ai/meeting-brief', {
+      const res = await apiFetch('/api/ai/meeting-brief', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId: currentLead.id }),
@@ -127,7 +128,7 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/ai/market-report', {
+      const res = await apiFetch('/api/ai/market-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ country: marketCountry, industry: marketIndustry }),
