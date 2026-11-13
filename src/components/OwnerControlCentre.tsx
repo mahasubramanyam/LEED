@@ -91,7 +91,9 @@ interface DiagnosticsData {
       error?: string;
     } | null;
     inspection?: {
-      recordedVersions: string[];
+      recordedVersions?: string[];
+      appliedVersions?: Array<{ version: string; name: string; appliedAt: string }>;
+      migrations001To003Recorded?: boolean;
       migration003Recorded: boolean;
       migration003SchemaReady: boolean;
       missingLeadIdentifierColumns: string[];
@@ -99,7 +101,12 @@ interface DiagnosticsData {
       countryCapabilitiesTableExists: boolean;
       migration004Recorded?: boolean;
       migration004SchemaReady?: boolean;
+      migration004ExpectedColumnsCount?: number;
+      migration004PresentColumnsCount?: number;
       missingMigration004Columns?: string[];
+      migration004ExpectedIndexesCount?: number;
+      migration004PresentIndexesCount?: number;
+      missingMigration004Indexes?: string[];
     } | null;
   };
   security: {
@@ -195,6 +202,23 @@ export function OwnerControlCentre({
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
   const [newSuppressionDomain, setNewSuppressionDomain] = useState('');
+
+  // Migration 004 Owner Approval State
+  const [showMigration004Confirm, setShowMigration004Confirm] = useState(false);
+  const [migration004ConfirmChecked, setMigration004ConfirmChecked] = useState(false);
+  const [applyingMigration004, setApplyingMigration004] = useState(false);
+  const [migration004Feedback, setMigration004Feedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    verification?: {
+      migration004Recorded: boolean;
+      migrations001To003Recorded: boolean;
+      columnsPresentCount: number;
+      expectedColumnsCount: number;
+      indexesPresentCount: number;
+      expectedIndexesCount: number;
+    };
+  } | null>(null);
 
   // Fetch Diagnostics & Encryption Status
   const fetchDiagnostics = useCallback(async () => {
@@ -477,6 +501,47 @@ export function OwnerControlCentre({
     }));
   };
 
+  const handleApproveMigration004 = async () => {
+    if (!migration004ConfirmChecked) return;
+    setApplyingMigration004(true);
+    setMigration004Feedback(null);
+    try {
+      const res = await apiFetch('/api/database/migrations/004/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmMigration: '004' }),
+      });
+      const data = await res.json();
+      await Promise.all([fetchDiagnostics(), onRefreshConnectors(), fetchAuditLog()]);
+
+      if (!res.ok || !data.success) {
+        setMigration004Feedback({
+          type: 'error',
+          message: data.error || 'Migration 004 execution failed and was rolled back.',
+          verification: data.verification,
+        });
+        return;
+      }
+
+      setShowMigration004Confirm(false);
+      setMigration004ConfirmChecked(false);
+      setMigration004Feedback({
+        type: 'success',
+        message:
+          data.message ||
+          'Migration 004 approved, applied transactionally, and verified.',
+        verification: data.verification,
+      });
+    } catch (err: any) {
+      setMigration004Feedback({
+        type: 'error',
+        message: err?.message || 'Network or authorization error while executing Migration 004.',
+      });
+    } finally {
+      setApplyingMigration004(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner / Executive Identity */}
@@ -663,28 +728,173 @@ export function OwnerControlCentre({
                 </div>
               </div>
 
-              {/* Migration 004 Live Schema Status */}
-              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="text-xs text-slate-600 dark:text-slate-300">
-                  <span className="font-semibold">Migration 004 (Unified Connector Architecture): </span>
-                  <span className="font-mono text-[11px]">
-                    recorded={String(Boolean(diagData.migrations.inspection.migration004Recorded))}, pendingColumns=
-                    {diagData.migrations.inspection.missingMigration004Columns?.length ?? 0}
-                  </span>
+              {/* Migration 004 Live Schema Status & Owner Approval */}
+              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-900 dark:text-white">
+                      Migration 004 (Unified Connector Architecture)
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Script <code className="font-mono">004_unified_connector_architecture.sql</code> — 18 additive columns + 2 indexes.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <span
+                      className={`px-2.5 py-0.5 text-xs font-semibold rounded-md ${
+                        diagData.migrations.inspection.migration004SchemaReady &&
+                        diagData.migrations.inspection.migration004Recorded
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
+                          : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
+                      }`}
+                    >
+                      {diagData.migrations.inspection.migration004SchemaReady &&
+                      diagData.migrations.inspection.migration004Recorded
+                        ? '004 Applied & Verified'
+                        : '004 Pending Approval'}
+                    </span>
+
+                    {!(
+                      diagData.migrations.inspection.migration004SchemaReady &&
+                      diagData.migrations.inspection.migration004Recorded
+                    ) &&
+                      !showMigration004Confirm && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMigration004ConfirmChecked(false);
+                            setMigration004Feedback(null);
+                            setShowMigration004Confirm(true);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs"
+                        >
+                          <Database className="w-3.5 h-3.5" />
+                          Approve &amp; Apply Migration 004
+                        </button>
+                      )}
+                  </div>
                 </div>
-                <span
-                  className={`px-2.5 py-0.5 text-xs font-semibold rounded-md self-start sm:self-auto ${
-                    diagData.migrations.inspection.migration004SchemaReady &&
-                    diagData.migrations.inspection.migration004Recorded
-                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
-                      : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
-                  }`}
-                >
-                  {diagData.migrations.inspection.migration004SchemaReady &&
-                  diagData.migrations.inspection.migration004Recorded
-                    ? '004 Applied & Verified'
-                    : '004 Pending Approval'}
-                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">SCHEMA_MIGRATIONS (004)</span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                      {diagData.migrations.inspection.migration004Recorded ? 'Recorded' : 'Not Recorded'}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">MIGRATIONS 001–003</span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                      {diagData.migrations.inspection.migrations001To003Recorded ??
+                      diagData.migrations.inspection.migration003Recorded
+                        ? 'All 3 Recorded'
+                        : 'Check Required'}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">ADDITIVE COLUMNS (004)</span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
+                      {diagData.migrations.inspection.migration004PresentColumnsCount ??
+                        Math.max(0, 18 - (diagData.migrations.inspection.missingMigration004Columns?.length ?? 0))}{' '}
+                      / {diagData.migrations.inspection.migration004ExpectedColumnsCount ?? 18} Present
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">CONNECTOR_RUNS INDEXES</span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
+                      {diagData.migrations.inspection.migration004PresentIndexesCount ??
+                        Math.max(0, 2 - (diagData.migrations.inspection.missingMigration004Indexes?.length ?? 2))}{' '}
+                      / {diagData.migrations.inspection.migration004ExpectedIndexesCount ?? 2} Present
+                    </span>
+                  </div>
+                </div>
+
+                {/* Explicit Confirmation Panel for Migration 004 Only */}
+                {showMigration004Confirm && (
+                  <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 space-y-3">
+                    <div className="flex items-start gap-2.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div className="text-xs text-slate-800 dark:text-slate-200 space-y-1">
+                        <p className="font-semibold">
+                          Confirm Execution: Migration 004 Only (<code className="font-mono">004_unified_connector_architecture.sql</code>)
+                        </p>
+                        <p className="text-slate-600 dark:text-slate-400">
+                          This owner-only action applies Migration 004 inside a single PostgreSQL transaction with automatic rollback on error. It adds 18 additive columns and 2 indexes without altering existing data, credentials, encryption keys, or Migrations 001–003, and records the approval in the tamper-evident audit log.
+                        </p>
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={migration004ConfirmChecked}
+                        onChange={(e) => setMigration004ConfirmChecked(e.target.checked)}
+                        disabled={applyingMigration004}
+                        className="rounded border-amber-400 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>
+                        I explicitly confirm applying <strong>Migration 004</strong> (<code>004_unified_connector_architecture.sql</code>) to the connected Neon PostgreSQL database.
+                      </span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!migration004ConfirmChecked || applyingMigration004}
+                        onClick={handleApproveMigration004}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {applyingMigration004 ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            Applying Migration 004...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            Confirm &amp; Execute Migration 004
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={applyingMigration004}
+                        onClick={() => {
+                          setShowMigration004Confirm(false);
+                          setMigration004ConfirmChecked(false);
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Execution Verification / Error Feedback */}
+                {migration004Feedback && (
+                  <div
+                    className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${
+                      migration004Feedback.type === 'success'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                    }`}
+                  >
+                    {migration004Feedback.type === 'success' ? (
+                      <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                    )}
+                    <div className="space-y-1">
+                      <p className="font-semibold">{migration004Feedback.message}</p>
+                      {migration004Feedback.verification && (
+                        <p className="font-mono text-[11px]">
+                          004 recorded={String(migration004Feedback.verification.migration004Recorded)} · 001–003 recorded={String(migration004Feedback.verification.migrations001To003Recorded)} · columns={migration004Feedback.verification.columnsPresentCount}/{migration004Feedback.verification.expectedColumnsCount} · indexes={migration004Feedback.verification.indexesPresentCount}/{migration004Feedback.verification.expectedIndexesCount}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

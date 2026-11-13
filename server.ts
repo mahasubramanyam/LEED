@@ -578,14 +578,147 @@ protectedApi.get('/database/status', async (req: Request, res: Response) => {
   }
 });
 
-// Run Schema Migrations (DDL)
+// Run Schema Migrations (DDL) - Owner Role Enforced
 protectedApi.post('/database/run-migrations', async (req: Request, res: Response) => {
+  if (!req.owner || req.owner.role !== 'owner') {
+    res.status(403).json({ error: 'Owner authorization required to run schema migrations.', code: 'FORBIDDEN' });
+    return;
+  }
   try {
     const result = await migrator.runMigrations();
+    await postgresStorage.recordAuditEvent(
+      result.success ? 'SCHEMA_MIGRATIONS_EXECUTED' : 'SCHEMA_MIGRATIONS_FAILED',
+      req.owner.email,
+      'schema_migration',
+      result.applied.join(',') || 'none',
+      { applied: result.applied, alreadyApplied: result.alreadyApplied, error: result.error },
+      normalizeClientIp(req)
+    );
     res.json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: `Schema migration failed: ${msg}` });
+  }
+});
+
+// Dedicated Owner-Only Approval Action for Migration 004 Only
+protectedApi.post('/database/migrations/004/approve', async (req: Request, res: Response) => {
+  if (!req.owner || req.owner.role !== 'owner') {
+    res.status(403).json({
+      error: 'Owner authorization required to approve and execute Migration 004.',
+      code: 'FORBIDDEN',
+    });
+    return;
+  }
+
+  const { confirmMigration } = req.body || {};
+  if (confirmMigration !== '004') {
+    res.status(400).json({
+      error: 'Explicit owner confirmation is required (confirmMigration must equal "004").',
+      code: 'CONFIRMATION_REQUIRED',
+    });
+    return;
+  }
+
+  if (!dbManager.isDbConnected()) {
+    res.status(503).json({
+      error: 'PostgreSQL database is not connected. Cannot apply Migration 004.',
+      code: 'DATABASE_UNAVAILABLE',
+    });
+    return;
+  }
+
+  const clientIp = normalizeClientIp(req);
+  try {
+    // Execute Migration 004 only using existing transactional runMigrations() infrastructure
+    const result = await migrator.runMigrations(undefined, { targetVersion: '004' });
+    const inspection = await migrator.inspectMigrationStatus();
+
+    const verified =
+      result.success &&
+      inspection.migration004Recorded &&
+      inspection.migrations001To003Recorded &&
+      inspection.missingMigration004Columns.length === 0 &&
+      inspection.missingMigration004Indexes.length === 0 &&
+      inspection.migration004SchemaReady;
+
+    const verification = {
+      migration004Recorded: inspection.migration004Recorded,
+      migrations001To003Recorded: inspection.migrations001To003Recorded,
+      columnsPresentCount: inspection.migration004PresentColumnsCount,
+      expectedColumnsCount: inspection.migration004ExpectedColumnsCount,
+      missingColumns: inspection.missingMigration004Columns,
+      indexesPresentCount: inspection.migration004PresentIndexesCount,
+      expectedIndexesCount: inspection.migration004ExpectedIndexesCount,
+      missingIndexes: inspection.missingMigration004Indexes,
+      migration004SchemaReady: inspection.migration004SchemaReady,
+      verified,
+    };
+
+    try {
+      await postgresStorage.recordAuditEvent(
+        verified ? 'MIGRATION_004_APPROVED_AND_APPLIED' : 'MIGRATION_004_APPROVAL_FAILED',
+        req.owner.email,
+        'schema_migration',
+        '004_unified_connector_architecture.sql',
+        {
+          applied: result.applied,
+          alreadyApplied: result.alreadyApplied,
+          verification,
+          error: result.error,
+        },
+        clientIp
+      );
+    } catch (auditErr) {
+      console.warn('[Migration 004] Could not record audit event:', auditErr);
+    }
+
+    if (!result.success || !verified) {
+      res.status(500).json({
+        success: false,
+        migration: '004_unified_connector_architecture.sql',
+        applied: result.applied,
+        alreadyApplied: result.alreadyApplied,
+        verification,
+        inspection,
+        error:
+          result.error ||
+          'Migration 004 executed but post-execution schema verification did not pass.',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      migration: '004_unified_connector_architecture.sql',
+      applied: result.applied,
+      alreadyApplied: result.alreadyApplied,
+      verification,
+      inspection,
+      message:
+        result.applied.length > 0
+          ? 'Migration 004 approved, applied transactionally, and verified (18/18 columns, 2/2 indexes, 001–003 intact).'
+          : 'Migration 004 was already applied and verified in Neon (18/18 columns, 2/2 indexes, 001–003 intact).',
+    });
+  } catch (err: unknown) {
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const safeMsg = rawMsg.replace(/:[^:@]+@/, ':***@');
+    try {
+      await postgresStorage.recordAuditEvent(
+        'MIGRATION_004_APPROVAL_FAILED',
+        req.owner.email,
+        'schema_migration',
+        '004_unified_connector_architecture.sql',
+        { error: safeMsg },
+        clientIp
+      );
+    } catch {
+      // ignore secondary audit error
+    }
+    res.status(500).json({
+      success: false,
+      error: `Migration 004 execution failed and was rolled back: ${safeMsg}`,
+    });
   }
 });
 

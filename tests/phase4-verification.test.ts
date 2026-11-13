@@ -1145,7 +1145,14 @@ describe('LEED Phase 4 Unified Connector Architecture Verification Suite', () =>
       assert.match(upSql, /connector_configs JSONB/);
       assert.match(downSql, /DROP COLUMN IF EXISTS request_id/);
 
-      const expected004Cols = [
+      const expected004CredCols = [
+        'key_version',
+        'masked_hint',
+        'rotated_at',
+        'validated_at',
+        'validation_status',
+      ];
+      const expected004RunCols = [
         'operation',
         'started_at',
         'completed_at',
@@ -1159,6 +1166,7 @@ describe('LEED Phase 4 Unified Connector Architecture Verification Suite', () =>
         'rate_limit_reset_at',
         'request_id',
       ];
+      const expected004SettingsCols = ['connector_configs'];
 
       const mockClient = {
         query: async (sql: string) => {
@@ -1182,8 +1190,14 @@ describe('LEED Phase 4 Unified Connector Architecture Verification Suite', () =>
               ),
             };
           }
+          if (sql.includes("table_name = 'connector_credentials'")) {
+            return { rows: expected004CredCols.map((column_name) => ({ column_name })) };
+          }
           if (sql.includes("table_name = 'connector_runs'")) {
-            return { rows: expected004Cols.map((column_name) => ({ column_name })) };
+            return { rows: expected004RunCols.map((column_name) => ({ column_name })) };
+          }
+          if (sql.includes("table_name = 'app_settings'")) {
+            return { rows: expected004SettingsCols.map((column_name) => ({ column_name })) };
           }
           if (sql.includes('pg_indexes')) {
             return {
@@ -1196,6 +1210,8 @@ describe('LEED Phase 4 Unified Connector Architecture Verification Suite', () =>
                 'idx_leads_country',
                 'idx_country_caps_code',
                 'idx_country_caps_status',
+                'idx_connector_runs_conn_executed',
+                'idx_connector_runs_status',
               ].map((indexname) => ({ indexname })),
             };
           }
@@ -1206,9 +1222,88 @@ describe('LEED Phase 4 Unified Connector Architecture Verification Suite', () =>
 
       const migrator = new Migrator();
       const status = await migrator.inspectMigrationStatus(mockClient);
+      assert.strictEqual(status.migrations001To003Recorded, true);
       assert.strictEqual(status.migration004Recorded, true);
       assert.strictEqual(status.migration004SchemaReady, true);
+      assert.strictEqual(status.migration004PresentColumnsCount, 18);
+      assert.strictEqual(status.migration004PresentIndexesCount, 2);
       assert.deepStrictEqual(status.missingMigration004Columns, []);
+      assert.deepStrictEqual(status.missingMigration004Indexes, []);
+    });
+
+    it('executes ONLY targetVersion 004 inside a transaction, leaves other pending migrations untouched, and rolls back on error', async () => {
+      const os = await import('os');
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leed-mig004-'));
+      try {
+        fs.writeFileSync(path.join(tmpDir, '001_init.sql'), 'SELECT 1;');
+        fs.writeFileSync(path.join(tmpDir, '002_sec.sql'), 'SELECT 2;');
+        fs.writeFileSync(path.join(tmpDir, '003_geo.sql'), 'SELECT 3;');
+        fs.writeFileSync(path.join(tmpDir, '004_unified.sql'), 'ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS connector_configs JSONB;');
+        fs.writeFileSync(path.join(tmpDir, '005_future.sql'), 'CREATE TABLE should_never_run(id TEXT);');
+
+        const executed: string[] = [];
+        const recorded = new Set(['001', '002', '003']);
+        const mockClientSuccess = {
+          query: async (sql: string, params?: any[]) => {
+            executed.push(sql);
+            if (sql.includes('SELECT version FROM schema_migrations')) {
+              return { rows: Array.from(recorded).map((version) => ({ version })) };
+            }
+            if (sql.includes('INSERT INTO schema_migrations')) {
+              recorded.add(params?.[0]);
+            }
+            return { rows: [] };
+          },
+        } as unknown as pg.PoolClient;
+
+        const scopedMigrator = new Migrator(tmpDir);
+        const res = await scopedMigrator.runMigrations(mockClientSuccess, { targetVersion: '004' });
+        assert.strictEqual(res.success, true);
+        assert.deepStrictEqual(res.applied, ['004_unified.sql']);
+        assert.deepStrictEqual(res.alreadyApplied, ['001_init.sql', '002_sec.sql', '003_geo.sql']);
+        assert.ok(recorded.has('004'));
+        assert.strictEqual(recorded.has('005'), false);
+        assert.strictEqual(executed.some((s) => s.includes('should_never_run')), false);
+        assert.strictEqual(executed[0], 'BEGIN');
+        assert.strictEqual(executed[executed.length - 1], 'COMMIT');
+
+        // Failure case must ROLLBACK and not record 004
+        const rollbackExecuted: string[] = [];
+        const recordedOnFail = new Set(['001', '002', '003']);
+        const mockClientFail = {
+          query: async (sql: string, params?: any[]) => {
+            rollbackExecuted.push(sql);
+            if (sql.includes('SELECT version FROM schema_migrations')) {
+              return { rows: Array.from(recordedOnFail).map((version) => ({ version })) };
+            }
+            if (sql.includes('ALTER TABLE app_settings')) {
+              throw new Error('simulated DDL error');
+            }
+            if (sql.includes('INSERT INTO schema_migrations')) {
+              recordedOnFail.add(params?.[0]);
+            }
+            return { rows: [] };
+          },
+        } as unknown as pg.PoolClient;
+
+        const failRes = await scopedMigrator.runMigrations(mockClientFail, { targetVersion: '004' });
+        assert.strictEqual(failRes.success, false);
+        assert.match(failRes.error || '', /simulated DDL error/);
+        assert.strictEqual(recordedOnFail.has('004'), false);
+        assert.ok(rollbackExecuted.includes('ROLLBACK'));
+        assert.strictEqual(rollbackExecuted.includes('COMMIT'), false);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('verifies Migration 004 approval route enforces owner role, CSRF-protected router, explicit confirmation, and audit logging', () => {
+      const serverSrc = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf-8');
+      assert.match(serverSrc, /protectedApi\.post\('\/database\/migrations\/004\/approve'/);
+      assert.match(serverSrc, /req\.owner\.role !== 'owner'/);
+      assert.match(serverSrc, /confirmMigration !== '004'/);
+      assert.match(serverSrc, /runMigrations\(undefined,\s*\{\s*targetVersion:\s*'004'\s*\}\)/);
+      assert.match(serverSrc, /MIGRATION_004_APPROVED_AND_APPLIED/);
     });
   });
 

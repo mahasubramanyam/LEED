@@ -23,9 +23,23 @@ export class Migrator {
 
   /**
    * Executes pending forward (.sql) migrations in alphabetical order within a transaction.
+   * Optionally scopes execution strictly to a single targetVersion (e.g. '004').
    * Tracks applied versions in `schema_migrations`.
    */
-  public async runMigrations(clientOrPool?: pg.Pool | pg.PoolClient): Promise<MigrationResult> {
+  public async runMigrations(
+    clientOrPool?: pg.Pool | pg.PoolClient,
+    options?: { targetVersion?: string }
+  ): Promise<MigrationResult> {
+    const targetVersion = options?.targetVersion?.trim();
+    if (targetVersion && !/^\d{3}$/.test(targetVersion)) {
+      return {
+        success: false,
+        applied: [],
+        alreadyApplied: [],
+        error: `Invalid target migration version "${targetVersion}".`,
+      };
+    }
+
     const pool = clientOrPool || dbManager.getPool();
     if (!pool) {
       return {
@@ -62,10 +76,33 @@ export class Migrator {
         return { success: true, applied: [], alreadyApplied: [] };
       }
 
-      const files = fs
+      const allFiles = fs
         .readdirSync(this.migrationsDir)
         .filter((f) => f.endsWith('.sql') && !f.endsWith('.down.sql'))
         .sort();
+
+      const files = targetVersion
+        ? allFiles.filter((f) => f.split('_')[0] === targetVersion)
+        : allFiles;
+
+      if (targetVersion && files.length === 0) {
+        await client.query('ROLLBACK');
+        return {
+          success: false,
+          applied: [],
+          alreadyApplied: allFiles.filter((f) => appliedSet.has(f.split('_')[0])),
+          error: `Target migration ${targetVersion} script not found.`,
+        };
+      }
+
+      if (targetVersion) {
+        for (const f of allFiles) {
+          const v = f.split('_')[0];
+          if (v !== targetVersion && appliedSet.has(v)) {
+            alreadyApplied.push(f);
+          }
+        }
+      }
 
       for (const file of files) {
         const version = file.split('_')[0];
@@ -187,7 +224,7 @@ export class Migrator {
     }
   }
   /**
-   * Read-only inspection of schema_migrations and Migration 003 schema objects.
+   * Read-only inspection of schema_migrations and Migration 003 / 004 schema objects.
    * Never executes DDL or mutates database state.
    */
   public async inspectMigrationStatus(clientOrPool?: pg.Pool | pg.PoolClient): Promise<{
@@ -195,6 +232,7 @@ export class Migrator {
     schemaMigrationsExists: boolean;
     appliedVersions: Array<{ version: string; name: string; appliedAt: string }>;
     latestVersion: string | null;
+    migrations001To003Recorded: boolean;
     migration003Recorded: boolean;
     leadIdentifiersColumns: string[];
     expectedLeadIdentifierColumns: string[];
@@ -206,7 +244,12 @@ export class Migrator {
     migration003SchemaReady: boolean;
     migration004Recorded: boolean;
     migration004SchemaReady: boolean;
+    migration004ExpectedColumnsCount: number;
+    migration004PresentColumnsCount: number;
     missingMigration004Columns: string[];
+    migration004ExpectedIndexesCount: number;
+    migration004PresentIndexesCount: number;
+    missingMigration004Indexes: string[];
     error?: string;
   }> {
     const expectedCols = ['country_code', 'normalized_value', 'issuing_authority', 'source', 'status'];
@@ -219,6 +262,13 @@ export class Migrator {
       'idx_leads_country',
       'idx_country_caps_code',
       'idx_country_caps_status',
+    ];
+    const expected004CredCols = [
+      'key_version',
+      'masked_hint',
+      'rotated_at',
+      'validated_at',
+      'validation_status',
     ];
     const expected004RunCols = [
       'operation',
@@ -234,6 +284,13 @@ export class Migrator {
       'rate_limit_reset_at',
       'request_id',
     ];
+    const expected004SettingsCols = ['connector_configs'];
+    const allExpected004Cols = [
+      ...expected004CredCols.map((c) => `connector_credentials.${c}`),
+      ...expected004RunCols.map((c) => `connector_runs.${c}`),
+      ...expected004SettingsCols.map((c) => `app_settings.${c}`),
+    ];
+    const expected004Indexes = ['idx_connector_runs_conn_executed', 'idx_connector_runs_status'];
 
     const pool = clientOrPool || dbManager.getPool();
     if (!pool) {
@@ -242,6 +299,7 @@ export class Migrator {
         schemaMigrationsExists: false,
         appliedVersions: [],
         latestVersion: null,
+        migrations001To003Recorded: false,
         migration003Recorded: false,
         leadIdentifiersColumns: [],
         expectedLeadIdentifierColumns: expectedCols,
@@ -253,7 +311,12 @@ export class Migrator {
         migration003SchemaReady: false,
         migration004Recorded: false,
         migration004SchemaReady: false,
-        missingMigration004Columns: expected004RunCols,
+        migration004ExpectedColumnsCount: allExpected004Cols.length,
+        migration004PresentColumnsCount: 0,
+        missingMigration004Columns: allExpected004Cols,
+        migration004ExpectedIndexesCount: expected004Indexes.length,
+        migration004PresentIndexesCount: 0,
+        missingMigration004Indexes: expected004Indexes,
         error: 'Database connection pool not available',
       };
     }
@@ -285,11 +348,26 @@ export class Migrator {
       const colSet = new Set(leadIdentifiersColumns);
       const missingLeadIdentifierColumns = expectedCols.filter((c) => !colSet.has(c));
 
+      const credColRes = await client.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'connector_credentials' ORDER BY ordinal_position ASC`
+      );
+      const credColSet = new Set(credColRes.rows.map((r: { column_name: string }) => r.column_name));
+
       const runsColRes = await client.query(
         `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'connector_runs' ORDER BY ordinal_position ASC`
       );
       const runsColSet = new Set(runsColRes.rows.map((r: { column_name: string }) => r.column_name));
-      const missingMigration004Columns = expected004RunCols.filter((c) => !runsColSet.has(c));
+
+      const settingsColRes = await client.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'app_settings' ORDER BY ordinal_position ASC`
+      );
+      const settingsColSet = new Set(settingsColRes.rows.map((r: { column_name: string }) => r.column_name));
+
+      const missingMigration004Columns = [
+        ...expected004CredCols.filter((c) => !credColSet.has(c)).map((c) => `connector_credentials.${c}`),
+        ...expected004RunCols.filter((c) => !runsColSet.has(c)).map((c) => `connector_runs.${c}`),
+        ...expected004SettingsCols.filter((c) => !settingsColSet.has(c)).map((c) => `app_settings.${c}`),
+      ];
 
       const idxRes = await client.query(
         `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' ORDER BY indexname ASC`
@@ -297,9 +375,12 @@ export class Migrator {
       const existingIndexes = idxRes.rows.map((r: { indexname: string }) => r.indexname);
       const idxSet = new Set(existingIndexes);
       const missingMigration003Indexes = expectedIndexes.filter((idx) => !idxSet.has(idx));
+      const missingMigration004Indexes = expected004Indexes.filter((idx) => !idxSet.has(idx));
 
-      const migration003Recorded = appliedVersions.some((v) => v.version === '003');
-      const migration004Recorded = appliedVersions.some((v) => v.version === '004');
+      const recordedSet = new Set(appliedVersions.map((v) => v.version));
+      const migrations001To003Recorded = ['001', '002', '003'].every((v) => recordedSet.has(v));
+      const migration003Recorded = recordedSet.has('003');
+      const migration004Recorded = recordedSet.has('004');
       const latestVersion = appliedVersions.length > 0 ? appliedVersions[appliedVersions.length - 1].version : null;
 
       return {
@@ -307,6 +388,7 @@ export class Migrator {
         schemaMigrationsExists,
         appliedVersions,
         latestVersion,
+        migrations001To003Recorded,
         migration003Recorded,
         leadIdentifiersColumns,
         expectedLeadIdentifierColumns: expectedCols,
@@ -321,8 +403,16 @@ export class Migrator {
           missingMigration003Indexes.length === 0 &&
           countryCapabilitiesTableExists,
         migration004Recorded,
-        migration004SchemaReady: migration004Recorded && missingMigration004Columns.length === 0,
+        migration004SchemaReady:
+          migration004Recorded &&
+          missingMigration004Columns.length === 0 &&
+          missingMigration004Indexes.length === 0,
+        migration004ExpectedColumnsCount: allExpected004Cols.length,
+        migration004PresentColumnsCount: allExpected004Cols.length - missingMigration004Columns.length,
         missingMigration004Columns,
+        migration004ExpectedIndexesCount: expected004Indexes.length,
+        migration004PresentIndexesCount: expected004Indexes.length - missingMigration004Indexes.length,
+        missingMigration004Indexes,
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -331,6 +421,7 @@ export class Migrator {
         schemaMigrationsExists: false,
         appliedVersions: [],
         latestVersion: null,
+        migrations001To003Recorded: false,
         migration003Recorded: false,
         leadIdentifiersColumns: [],
         expectedLeadIdentifierColumns: expectedCols,
@@ -342,7 +433,12 @@ export class Migrator {
         migration003SchemaReady: false,
         migration004Recorded: false,
         migration004SchemaReady: false,
-        missingMigration004Columns: expected004RunCols,
+        migration004ExpectedColumnsCount: allExpected004Cols.length,
+        migration004PresentColumnsCount: 0,
+        missingMigration004Columns: allExpected004Cols,
+        migration004ExpectedIndexesCount: expected004Indexes.length,
+        migration004PresentIndexesCount: 0,
+        missingMigration004Indexes: expected004Indexes,
         error: msg.replace(/:[^:@]+@/, ':***@'),
       };
     } finally {
