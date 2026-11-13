@@ -231,7 +231,6 @@ export function normalizeConnectorResult(result: StandardizedConnectorResult): {
     socialLinks: result.company.socialLinks,
     webMetadata: result.company.webMetadata,
     status: 'new',
-    pipelineStageId: 'stage-discovered',
     currency: countryRef?.currency || 'USD',
     tags: Array.from(new Set(result.company.tags || [])),
     notes: [],

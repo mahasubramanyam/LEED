@@ -190,7 +190,6 @@ export async function searchOpenStreetMap(
         sources,
         identifiers,
         status: 'new',
-        pipelineStageId: 'stage-discovered',
         currency: countryRef?.currency || 'USD',
         tags: [cCode, 'OpenStreetMap', categoryName].filter(Boolean),
         notes: [],

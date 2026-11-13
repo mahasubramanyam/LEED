@@ -22,6 +22,9 @@ interface PipelineBoardProps {
   leads: CanonicalLead[];
   onSelectLead: (lead: CanonicalLead) => void;
   onMoveLeadStage: (leadId: string, stageId: string, lostReason?: string) => void;
+  onInitializeStages?: () => Promise<void>;
+  isInitializingStages?: boolean;
+  initStageError?: string | null;
 }
 
 export const PipelineBoard: React.FC<PipelineBoardProps> = ({
@@ -29,6 +32,9 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
   leads,
   onSelectLead,
   onMoveLeadStage,
+  onInitializeStages,
+  isInitializingStages = false,
+  initStageError = null,
 }) => {
   const [lostModalLeadId, setLostModalLeadId] = useState<string | null>(null);
   const [lostReason, setLostReason] = useState('No Response after Follow-ups');
@@ -68,9 +74,35 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
         </div>
       </div>
 
-      {/* Kanban Columns Horizontal Scroller */}
-      <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-thin">
-        {stages.map((stage, idx) => {
+      {/* Empty Pipeline Initialization Banner */}
+      {stages.length === 0 ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3">
+          <div className="mx-auto w-10 h-10 rounded-full bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center">
+            <Kanban className="w-5 h-5 text-indigo-400" />
+          </div>
+          <h3 className="text-sm font-bold text-white">No Pipeline Stages Configured</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            Your PostgreSQL <code className="text-slate-300">pipeline_stages</code> table currently has 0 stages. Initialize the standard 8-stage sales pipeline or save your first lead to create default stages automatically.
+          </p>
+          {initStageError && (
+            <div className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800 rounded-lg px-3 py-2 max-w-md mx-auto">
+              {initStageError}
+            </div>
+          )}
+          {onInitializeStages && (
+            <button
+              onClick={onInitializeStages}
+              disabled={isInitializingStages}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition inline-flex items-center gap-2"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              {isInitializingStages ? 'Initializing Stages...' : 'Initialize Default Pipeline Stages'}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-thin">
+          {stages.map((stage, idx) => {
           const stageLeads = leads.filter((l) => l.pipelineStageId === stage.id);
           const stageSummary = summarizeValuesByCurrency(stageLeads, 'USD');
           const stageHasValue = stageLeads.some((l) => (l.opportunityValue || 0) > 0);
@@ -204,7 +236,8 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
 
       {/* Lost Reason Modal */}
       {lostModalLeadId && (

@@ -176,7 +176,6 @@ export async function searchAbn(
       sources,
       identifiers,
       status: 'new',
-      pipelineStageId: 'stage-discovered',
       currency: 'AUD',
       tags: ['Australia', 'ABN Checksum Validated', item.state],
       notes: [],

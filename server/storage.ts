@@ -14,6 +14,7 @@ import { PostgresStorage } from './db/storagePg.js';
 import { migrator } from './db/migrator.js';
 import { jsonMigrator, MigrationSummary } from './db/migrateJsonToSql.js';
 import { canonicalizeIdentifierType } from '../shared/identifierRegistry.js';
+import { DEFAULT_PIPELINE_STAGES } from '../shared/defaultStages.js';
 import { normalizeIdentifierValue } from './identifiers/identifierEngine.js';
 import { ConnectorConfigRecord, ConnectorRunRecord } from './connectors/core/types.js';
 import {
@@ -38,16 +39,7 @@ interface DatabaseSchema {
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'pipeline_store.json');
 
-const DEFAULT_STAGES: PipelineStage[] = [
-  { id: 'stage-discovered', name: 'Discovered', color: '#64748b', order: 1 },
-  { id: 'stage-qualified', name: 'Qualified', color: '#3b82f6', order: 2 },
-  { id: 'stage-pitch-ready', name: 'Outreach Drafted', color: '#8b5cf6', order: 3 },
-  { id: 'stage-contacted', name: 'Contacted', color: '#f59e0b', order: 4 },
-  { id: 'stage-meeting', name: 'Meeting Scheduled', color: '#06b6d4', order: 5 },
-  { id: 'stage-proposal', name: 'Proposal / Review', color: '#ec4899', order: 6 },
-  { id: 'stage-won', name: 'Closed Won', color: '#10b981', order: 7 },
-  { id: 'stage-lost', name: 'Closed Lost', color: '#ef4444', order: 8 },
-];
+const DEFAULT_STAGES: PipelineStage[] = DEFAULT_PIPELINE_STAGES.map((s) => ({ ...s }));
 
 const DEFAULT_CONNECTORS: ConnectorStatus[] = [
   {
@@ -552,9 +544,22 @@ class StorageManager {
     return this.db.leads.find((l) => l.id === id);
   }
 
+  private resolveStageId(requestedStageId?: string): string | undefined {
+    const clean = typeof requestedStageId === 'string' ? requestedStageId.trim() : '';
+    if (!clean) {
+      return this.db.stages[0]?.id;
+    }
+    if (this.db.stages.some((s) => s.id === clean)) {
+      return clean;
+    }
+    throw new Error(`Invalid pipelineStageId "${clean}": stage does not exist in pipeline_stages.`);
+  }
+
   public upsertLead(lead: CanonicalLead): CanonicalLead {
+    const resolvedStageId = this.resolveStageId(lead.pipelineStageId);
     const normalizedLead: CanonicalLead = {
       ...lead,
+      pipelineStageId: resolvedStageId,
       registrationType: lead.registrationType
         ? canonicalizeIdentifierType(lead.registrationType, lead.address?.countryCode)
         : undefined,
@@ -643,85 +648,97 @@ class StorageManager {
         return false;
       });
 
-      if (idx >= 0) {
-        if (options.skipDuplicates) {
-          skipped++;
-          continue;
-        }
-        const existing = this.db.leads[idx];
-        const mergedIdentsMap = new Map<string, any>();
-        for (const i of existing.identifiers || []) {
-          mergedIdentsMap.set(`${canonicalizeIdentifierType(i.type)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`, i);
-        }
-        for (const i of lead.identifiers || []) {
-          const k = `${canonicalizeIdentifierType(i.type)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`;
-          if (!mergedIdentsMap.has(k)) mergedIdentsMap.set(k, i);
-        }
+        if (idx >= 0) {
+          if (options.skipDuplicates) {
+            skipped++;
+            continue;
+          }
+          const existing = this.db.leads[idx];
+          const resolvedStageId = this.resolveStageId(existing.pipelineStageId);
+          const mergedIdentsMap = new Map<string, any>();
+          for (const i of existing.identifiers || []) {
+            mergedIdentsMap.set(`${canonicalizeIdentifierType(i.type)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`, i);
+          }
+          for (const i of lead.identifiers || []) {
+            const k = `${canonicalizeIdentifierType(i.type)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`;
+            if (!mergedIdentsMap.has(k)) mergedIdentsMap.set(k, i);
+          }
 
-        const sourceKey = (s: { sourceName: string; providerId?: string; url?: string }) =>
-          `${s.sourceName}:${s.providerId || s.url || ''}`;
-        const existingSourceKeys = new Set((existing.sources || []).map(sourceKey));
-        const combinedSources = [...(existing.sources || [])];
-        for (const s of lead.sources || []) {
-          const sk = sourceKey(s);
-          if (!existingSourceKeys.has(sk)) {
-            existingSourceKeys.add(sk);
-            combinedSources.push(s);
+          const sourceKey = (s: { sourceName: string; providerId?: string; url?: string }) =>
+            `${s.sourceName}:${s.providerId || s.url || ''}`;
+          const existingSourceKeys = new Set((existing.sources || []).map(sourceKey));
+          const combinedSources = [...(existing.sources || [])];
+          for (const s of lead.sources || []) {
+            const sk = sourceKey(s);
+            if (!existingSourceKeys.has(sk)) {
+              existingSourceKeys.add(sk);
+              combinedSources.push(s);
+            }
+          }
+
+          const existingActIds = new Set((existing.activities || []).map((a) => a.id));
+          const combinedActivities = [
+            ...(existing.activities || []),
+            ...(lead.activities || []).filter((a) => !existingActIds.has(a.id)),
+          ];
+
+          const mergedLead: CanonicalLead = {
+            ...existing,
+            id: existing.id,
+            createdAt: existing.createdAt,
+            updatedAt: now,
+            companyName: existing.companyName || lead.companyName,
+            legalName: existing.legalName || lead.legalName,
+            registrationNumber: existing.registrationNumber || lead.registrationNumber,
+            registrationType: existing.registrationType || lead.registrationType,
+            website: existing.website || lead.website,
+            domain: existing.domain || lead.domain,
+            email: existing.email || lead.email,
+            phone: existing.phone || lead.phone,
+            phoneNormalized: existing.phoneNormalized || lead.phoneNormalized,
+            address: {
+              street: existing.address?.street || lead.address?.street,
+              city: existing.address?.city || lead.address?.city,
+              region: existing.address?.region || lead.address?.region,
+              postalCode: existing.address?.postalCode || lead.address?.postalCode,
+              country: existing.address?.country || lead.address?.country || 'International',
+              countryCode: existing.address?.countryCode || lead.address?.countryCode || 'US',
+              formattedAddress: existing.address?.formattedAddress || lead.address?.formattedAddress,
+            },
+            coordinates: existing.coordinates || lead.coordinates,
+            status: existing.status,
+            pipelineStageId: resolvedStageId,
+            opportunityValue: existing.opportunityValue ?? lead.opportunityValue,
+            winProbability: existing.winProbability ?? lead.winProbability,
+            lostReason: existing.lostReason,
+            currency: existing.currency || lead.currency || 'USD',
+            confidenceScore: Math.max(existing.confidenceScore || 0, lead.confidenceScore || 0),
+            confidenceSignals: Array.from(new Set([...(existing.confidenceSignals || []), ...(lead.confidenceSignals || [])])),
+            identifiers: Array.from(mergedIdentsMap.values()),
+            sources: combinedSources,
+            notes: existing.notes || [],
+            activities: combinedActivities,
+            tags: Array.from(new Set([...(existing.tags || []), ...(lead.tags || [])])),
+          };
+          this.db.leads[idx] = mergedLead;
+          savedLeadIds.push(mergedLead.id);
+          updated++;
+        } else {
+          try {
+            const resolvedStageId = this.resolveStageId(lead.pipelineStageId);
+            const persistedLead: CanonicalLead = { ...lead, pipelineStageId: resolvedStageId };
+            this.db.leads.unshift(persistedLead);
+            savedLeadIds.push(persistedLead.id);
+            added++;
+          } catch (rowErr: unknown) {
+            failed++;
+            errors.push({
+              row: rowIdx + 1,
+              companyName: lead.companyName,
+              error: rowErr instanceof Error ? rowErr.message : String(rowErr),
+            });
           }
         }
-
-        const existingActIds = new Set((existing.activities || []).map((a) => a.id));
-        const combinedActivities = [
-          ...(existing.activities || []),
-          ...(lead.activities || []).filter((a) => !existingActIds.has(a.id)),
-        ];
-
-        const mergedLead: CanonicalLead = {
-          ...existing,
-          id: existing.id,
-          createdAt: existing.createdAt,
-          updatedAt: now,
-          companyName: existing.companyName || lead.companyName,
-          legalName: existing.legalName || lead.legalName,
-          registrationNumber: existing.registrationNumber || lead.registrationNumber,
-          registrationType: existing.registrationType || lead.registrationType,
-          website: existing.website || lead.website,
-          domain: existing.domain || lead.domain,
-          email: existing.email || lead.email,
-          phone: existing.phone || lead.phone,
-          phoneNormalized: existing.phoneNormalized || lead.phoneNormalized,
-          address: {
-            street: existing.address?.street || lead.address?.street,
-            city: existing.address?.city || lead.address?.city,
-            region: existing.address?.region || lead.address?.region,
-            postalCode: existing.address?.postalCode || lead.address?.postalCode,
-            country: existing.address?.country || lead.address?.country || 'International',
-            countryCode: existing.address?.countryCode || lead.address?.countryCode || 'US',
-            formattedAddress: existing.address?.formattedAddress || lead.address?.formattedAddress,
-          },
-          coordinates: existing.coordinates || lead.coordinates,
-          status: existing.status,
-          pipelineStageId: existing.pipelineStageId,
-          opportunityValue: existing.opportunityValue ?? lead.opportunityValue,
-          winProbability: existing.winProbability ?? lead.winProbability,
-          lostReason: existing.lostReason,
-          currency: existing.currency || lead.currency || 'USD',
-          confidenceScore: Math.max(existing.confidenceScore || 0, lead.confidenceScore || 0),
-          confidenceSignals: Array.from(new Set([...(existing.confidenceSignals || []), ...(lead.confidenceSignals || [])])),
-          identifiers: Array.from(mergedIdentsMap.values()),
-          sources: combinedSources,
-          notes: existing.notes || [],
-          activities: combinedActivities,
-          tags: Array.from(new Set([...(existing.tags || []), ...(lead.tags || [])])),
-        };
-        this.db.leads[idx] = mergedLead;
-        savedLeadIds.push(mergedLead.id);
-        updated++;
-      } else {
-        this.db.leads.unshift(lead);
-        savedLeadIds.push(lead.id);
-        added++;
-      }
     }
     this.saveDatabase(this.db);
     return { added, updated, skipped, failed, errors, savedLeadIds };
@@ -739,6 +756,15 @@ class StorageManager {
 
   public getStages(): PipelineStage[] {
     return this.db.stages;
+  }
+
+  public initializeDefaultStages(): { initialized: boolean; insertedCount: number; stages: PipelineStage[] } {
+    if (this.db.stages && this.db.stages.length > 0) {
+      return { initialized: false, insertedCount: 0, stages: this.db.stages };
+    }
+    this.db.stages = DEFAULT_STAGES.map((s) => ({ ...s }));
+    this.saveDatabase(this.db);
+    return { initialized: true, insertedCount: this.db.stages.length, stages: this.db.stages };
   }
 
   public getTasks(): LeadTask[] {

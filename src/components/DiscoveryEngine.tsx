@@ -449,9 +449,12 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
         throw new Error(data.error || 'Failed to save discovered leads');
       }
 
-      const newAdded = new Set(addedIds);
-      leadsToSave.forEach((l) => newAdded.add(l.id));
-      setAddedIds(newAdded);
+      const savedCount = (data.added || 0) + (data.updated || 0) + (data.skipped || 0);
+      if (savedCount > 0 && (!data.failed || data.failed === 0)) {
+        const newAdded = new Set(addedIds);
+        leadsToSave.forEach((l) => newAdded.add(l.id));
+        setAddedIds(newAdded);
+      }
 
       const details: string[] = [];
       if (data.ambiguousMatches?.length) {

@@ -48,6 +48,8 @@ import { DiscoveryService } from '../server/discovery/discoveryService.js';
 import { PostgresStorage } from '../server/db/storagePg.js';
 import { CanonicalLead } from '../server/types.js';
 import { inspectWebsite } from '../server/connectors/webInspector.js';
+import { normalizeConnectorResult } from '../server/connectors/core/normalizer.js';
+import { DEFAULT_PIPELINE_STAGES } from '../shared/defaultStages.js';
 
 function createContext(
   connectorId = 'test-conn',
@@ -1159,6 +1161,406 @@ describe('LEED Phase 5 Global Business Discovery Engine Verification Suite', () 
         'DiscoveryEngine.tsx must use apiFetch() exclusively (no raw fetch)'
       );
       assert.ok(discoveryUi.includes('apiFetch('));
+    });
+  });
+
+  describe('14. Pipeline Stage Foreign-Key Resolution & Idempotent Initialization (Isolated Stateful Mock Pool)', () => {
+    interface MockStageRow {
+      id: string;
+      name: string;
+      color: string;
+      display_order: number;
+    }
+
+    function createStatefulMockPgPool(initialStages: MockStageRow[] = []) {
+      let stages = new Map<string, MockStageRow>(initialStages.map((s) => [s.id, { ...s }]));
+      let leads = new Map<string, any>();
+      let identifiers = new Map<string, any>();
+      let sources = new Map<string, any>();
+      let activities = new Map<string, any>();
+      const txLog: string[] = [];
+
+      const buildLeadRow = (l: any) => ({
+        ...l,
+        sources_json: Array.from(sources.values()).filter((s) => s.lead_id === l.id),
+        identifiers_json: Array.from(identifiers.values()).filter((i) => i.lead_id === l.id),
+        notes_json: [],
+        activities_json: Array.from(activities.values()).filter((a) => a.lead_id === l.id),
+      });
+
+      return {
+        txLog,
+        getStageRows: () =>
+          Array.from(stages.values()).sort((a, b) => a.display_order - b.display_order),
+        getLeadRows: () => Array.from(leads.values()),
+        async connect() {
+          let snapshot: {
+            stages: Map<string, MockStageRow>;
+            leads: Map<string, any>;
+            identifiers: Map<string, any>;
+            sources: Map<string, any>;
+            activities: Map<string, any>;
+          } | null = null;
+
+          return {
+            async query(sql: string, params: any[] = []) {
+              const q = sql.replace(/\s+/g, ' ').trim();
+              if (q === 'BEGIN') {
+                txLog.push('BEGIN');
+                snapshot = {
+                  stages: new Map(Array.from(stages.entries()).map(([k, v]) => [k, { ...v }])),
+                  leads: new Map(Array.from(leads.entries()).map(([k, v]) => [k, { ...v }])),
+                  identifiers: new Map(Array.from(identifiers.entries()).map(([k, v]) => [k, { ...v }])),
+                  sources: new Map(Array.from(sources.entries()).map(([k, v]) => [k, { ...v }])),
+                  activities: new Map(Array.from(activities.entries()).map(([k, v]) => [k, { ...v }])),
+                };
+                return { rows: [], rowCount: 0 };
+              }
+              if (q === 'COMMIT') {
+                txLog.push('COMMIT');
+                snapshot = null;
+                return { rows: [], rowCount: 0 };
+              }
+              if (q === 'ROLLBACK') {
+                txLog.push('ROLLBACK');
+                if (snapshot) {
+                  stages = snapshot.stages;
+                  leads = snapshot.leads;
+                  identifiers = snapshot.identifiers;
+                  sources = snapshot.sources;
+                  activities = snapshot.activities;
+                  snapshot = null;
+                }
+                return { rows: [], rowCount: 0 };
+              }
+              if (q.startsWith('SELECT id, name, color, display_order FROM pipeline_stages')) {
+                const rows = Array.from(stages.values()).sort((a, b) => a.display_order - b.display_order);
+                return { rows, rowCount: rows.length };
+              }
+              if (q.startsWith('SELECT id, name FROM pipeline_stages WHERE id = $1')) {
+                const found = stages.get(params[0]);
+                return { rows: found ? [{ id: found.id, name: found.name }] : [], rowCount: found ? 1 : 0 };
+              }
+              if (q.startsWith('INSERT INTO pipeline_stages')) {
+                const [id, name, color, display_order] = params;
+                if (stages.has(id)) {
+                  return { rows: [], rowCount: 0 };
+                }
+                stages.set(id, { id, name, color, display_order });
+                return { rows: [], rowCount: 1 };
+              }
+              if (q.startsWith('SELECT l.*,')) {
+                if (q.includes('WHERE l.id = $1')) {
+                  const found = leads.get(params[0]);
+                  return { rows: found ? [buildLeadRow(found)] : [], rowCount: found ? 1 : 0 };
+                }
+                const all = Array.from(leads.values()).map(buildLeadRow);
+                return { rows: all, rowCount: all.length };
+              }
+              if (q.startsWith('INSERT INTO leads')) {
+                const stageId = params[28];
+                if (stageId !== null && stageId !== undefined && !stages.has(stageId)) {
+                  throw new Error('insert or update on table "leads" violates foreign key constraint "leads_pipeline_stage_id_fkey"');
+                }
+                const row = {
+                  id: params[0],
+                  company_name: params[1],
+                  legal_name: params[2],
+                  registration_number: params[3],
+                  registration_type: params[4],
+                  company_status: params[5],
+                  website: params[6],
+                  domain: params[7],
+                  email: params[8],
+                  email_status: params[9],
+                  phone: params[10],
+                  phone_normalized: params[11],
+                  street: params[12],
+                  city: params[13],
+                  region: params[14],
+                  postal_code: params[15],
+                  country: params[16],
+                  country_code: params[17],
+                  formatted_address: params[18],
+                  latitude: params[19],
+                  longitude: params[20],
+                  industry: params[21],
+                  category: params[22],
+                  employee_range: params[23],
+                  founded_year: params[24],
+                  confidence_score: params[25],
+                  confidence_signals: params[26],
+                  status: params[27],
+                  pipeline_stage_id: stageId,
+                  opportunity_value: params[29],
+                  currency: params[30],
+                  win_probability: params[31],
+                  lost_reason: params[32],
+                  tags: params[33],
+                  web_metadata: params[34],
+                  social_links: params[35],
+                  custom_fields: params[36],
+                  created_at: params[37],
+                  updated_at: params[38],
+                };
+                leads.set(row.id, row);
+                return { rows: [], rowCount: 1 };
+              }
+              if (q.startsWith('UPDATE leads SET pipeline_stage_id = $1')) {
+                const [stageId, newStatus, lostReason, leadId] = params;
+                if (stageId !== null && stageId !== undefined && !stages.has(stageId)) {
+                  throw new Error('insert or update on table "leads" violates foreign key constraint "leads_pipeline_stage_id_fkey"');
+                }
+                const existing = leads.get(leadId);
+                if (existing) {
+                  existing.pipeline_stage_id = stageId;
+                  if (newStatus) existing.status = newStatus;
+                  existing.lost_reason = lostReason;
+                }
+                return { rows: [], rowCount: existing ? 1 : 0 };
+              }
+              if (q.startsWith('SELECT id, type, value FROM lead_identifiers')) {
+                const rows = Array.from(identifiers.values()).filter((i) => i.lead_id === params[0]);
+                return { rows, rowCount: rows.length };
+              }
+              if (q.startsWith('INSERT INTO lead_identifiers')) {
+                identifiers.set(`${params[1]}:${params[2]}:${params[3]}`, {
+                  id: params[0],
+                  lead_id: params[1],
+                  type: params[2],
+                  value: params[3],
+                  verified: params[4],
+                  country_code: params[5],
+                  normalized_value: params[6],
+                  issuing_authority: params[7],
+                  source: params[8],
+                  status: params[9],
+                });
+                return { rows: [], rowCount: 1 };
+              }
+              if (q.startsWith('INSERT INTO lead_sources')) {
+                sources.set(params[0], {
+                  id: params[0],
+                  lead_id: params[1],
+                  source_name: params[2],
+                  provider_id: params[3],
+                  url: params[4],
+                  retrieved_at: params[5],
+                  license: params[6],
+                  attribution: params[7],
+                });
+                return { rows: [], rowCount: 1 };
+              }
+              if (q.startsWith('INSERT INTO activities')) {
+                activities.set(params[0], {
+                  id: params[0],
+                  lead_id: params[1],
+                  type: params[2],
+                  title: params[3],
+                  notes: params[4],
+                  outcome: params[5],
+                  actor: params[6],
+                  date: params[7],
+                });
+                return { rows: [], rowCount: 1 };
+              }
+              return { rows: [], rowCount: 0 };
+            },
+            release() {
+              // noop
+            },
+          };
+        },
+      };
+    }
+
+    it('14.1 Empty pipeline initializes default stages transactionally when saving normalized Norway Brreg lead', async () => {
+      const normalized = normalizeConnectorResult({
+        providerId: 'conn-brreg',
+        providerName: 'Norway Brønnøysund Register (Brreg)',
+        sourceCategory: 'government_registry',
+        externalSourceId: '923609016',
+        retrievedAt: '2026-11-13T12:00:00Z',
+        accessMode: 'live_api',
+        verificationStatus: 'officially_verified',
+        countryCode: 'NO',
+        company: {
+          companyName: 'NORDIC SEMICONDUCTOR ASA',
+          registrationNumber: '923609016',
+          registrationType: 'NO_ORG',
+          address: {
+            city: 'Trondheim',
+            country: 'Norway',
+            countryCode: 'NO',
+          },
+          industry: 'Semiconductor Manufacturing',
+        },
+        providerMetadata: {},
+      });
+      assert.ok(normalized.lead, 'Brreg result should normalize cleanly');
+      assert.strictEqual(
+        normalized.lead.pipelineStageId,
+        undefined,
+        'Normalizer must NOT hardcode a fabricated pipelineStageId'
+      );
+
+      const mockPool = createStatefulMockPgPool([]); // empty pipeline_stages (0 rows)
+      const pgStore = new PostgresStorage();
+      (pgStore as any).getClient = () => mockPool;
+
+      const summary = await pgStore.batchUpsertLeads([normalized.lead]);
+
+      assert.strictEqual(summary.added, 1);
+      assert.strictEqual(summary.failed, 0);
+      assert.strictEqual(summary.errors.length, 0);
+      assert.strictEqual(mockPool.getStageRows().length, DEFAULT_PIPELINE_STAGES.length);
+      assert.strictEqual(mockPool.getLeadRows().length, 1);
+      assert.strictEqual(mockPool.getLeadRows()[0].pipeline_stage_id, DEFAULT_PIPELINE_STAGES[0].id);
+    });
+
+    it('14.2 Existing custom pipeline is preserved untouched and omitted stage resolves to first custom stage', async () => {
+      const mockPool = createStatefulMockPgPool([
+        { id: 'custom-intake', name: 'Custom Intake', color: '#111111', display_order: 1 },
+        { id: 'custom-won', name: 'Custom Won', color: '#222222', display_order: 2 },
+      ]);
+      const pgStore = new PostgresStorage();
+      (pgStore as any).getClient = () => mockPool;
+
+      const initRes = await pgStore.initializeDefaultStages();
+      assert.strictEqual(initRes.initialized, false);
+      assert.strictEqual(initRes.insertedCount, 0);
+      assert.deepStrictEqual(
+        mockPool.getStageRows().map((s) => s.id),
+        ['custom-intake', 'custom-won']
+      );
+
+      const leadWithoutStage = makeSampleLead({
+        id: 'lead-custom-pipeline-1',
+        companyName: 'Oslo Maritime Systems AS',
+        pipelineStageId: undefined,
+      });
+      leadWithoutStage.pipelineStageId = undefined;
+
+      const saved = await pgStore.upsertLead(leadWithoutStage);
+      assert.strictEqual(saved.pipelineStageId, 'custom-intake');
+      assert.deepStrictEqual(
+        mockPool.getStageRows().map((s) => s.id),
+        ['custom-intake', 'custom-won']
+      );
+    });
+
+    it('14.3 Repeated stage initialization is strictly idempotent with zero duplicates', async () => {
+      const mockPool = createStatefulMockPgPool([]);
+      const pgStore = new PostgresStorage();
+      (pgStore as any).getClient = () => mockPool;
+
+      const first = await pgStore.initializeDefaultStages();
+      const second = await pgStore.initializeDefaultStages();
+      const third = await pgStore.initializeDefaultStages();
+
+      assert.strictEqual(first.initialized, true);
+      assert.strictEqual(first.insertedCount, DEFAULT_PIPELINE_STAGES.length);
+      assert.strictEqual(second.initialized, false);
+      assert.strictEqual(second.insertedCount, 0);
+      assert.strictEqual(third.initialized, false);
+      assert.strictEqual(third.insertedCount, 0);
+      assert.strictEqual(mockPool.getStageRows().length, DEFAULT_PIPELINE_STAGES.length);
+    });
+
+    it('14.4 Valid explicit stage insertion and moveLeadStage succeed cleanly', async () => {
+      const mockPool = createStatefulMockPgPool([
+        { id: 'custom-intake', name: 'Custom Intake', color: '#111111', display_order: 1 },
+        { id: 'custom-won', name: 'Custom Won', color: '#222222', display_order: 2 },
+      ]);
+      const pgStore = new PostgresStorage();
+      (pgStore as any).getClient = () => mockPool;
+
+      const lead = makeSampleLead({
+        id: 'lead-valid-stage-1',
+        companyName: 'Bergen Energy AS',
+        pipelineStageId: 'custom-intake',
+      });
+      const created = await pgStore.upsertLead(lead);
+      assert.strictEqual(created.pipelineStageId, 'custom-intake');
+
+      const moved = await pgStore.moveLeadStage('lead-valid-stage-1', 'custom-won', undefined, 'Owner');
+      assert.ok(moved);
+      assert.strictEqual(moved.pipelineStageId, 'custom-won');
+    });
+
+    it('14.5 Invalid stage reference triggers transactional rollback and reports clear per-row batch error', async () => {
+      const mockPool = createStatefulMockPgPool([
+        { id: 'custom-intake', name: 'Custom Intake', color: '#111111', display_order: 1 },
+      ]);
+      const pgStore = new PostgresStorage();
+      (pgStore as any).getClient = () => mockPool;
+
+      const badLead = makeSampleLead({
+        id: 'lead-invalid-stage-1',
+        companyName: 'Broken Stage Corp',
+        pipelineStageId: 'stage-nonexistent-999',
+      });
+
+      await assert.rejects(
+        async () => pgStore.upsertLead(badLead),
+        /Invalid pipelineStageId "stage-nonexistent-999": stage does not exist in pipeline_stages\./
+      );
+      assert.ok(mockPool.txLog.includes('ROLLBACK'), 'Failed upsert must issue ROLLBACK');
+      assert.strictEqual(mockPool.getLeadRows().length, 0, 'Rolled-back insert must leave leads table clean');
+
+      const validLead = makeSampleLead({
+        id: 'lead-valid-sibling-1',
+        companyName: 'Trondheim Hydro AS',
+        pipelineStageId: 'custom-intake',
+      });
+
+      const batchRes = await pgStore.batchUpsertLeads([validLead, badLead]);
+      assert.strictEqual(batchRes.added, 1);
+      assert.strictEqual(batchRes.failed, 1);
+      assert.strictEqual(batchRes.errors.length, 1);
+      assert.strictEqual(batchRes.errors[0].row, 2);
+      assert.strictEqual(batchRes.errors[0].companyName, 'Broken Stage Corp');
+      assert.match(batchRes.errors[0].error, /Invalid pipelineStageId "stage-nonexistent-999"/);
+
+      await assert.rejects(
+        async () => pgStore.moveLeadStage('lead-valid-sibling-1', 'stage-nonexistent-999', undefined, 'Owner'),
+        /Invalid pipelineStageId "stage-nonexistent-999"/
+      );
+      assert.strictEqual(
+        mockPool.getLeadRows()[0].pipeline_stage_id,
+        'custom-intake',
+        'Failed moveLeadStage must preserve existing stage via rollback'
+      );
+    });
+
+    it('14.6 Server routes & frontend components avoid hardcoded stage-discovered and protect stage initialization', () => {
+      const root = process.cwd();
+      const serverCode = fs.readFileSync(path.join(root, 'server.ts'), 'utf-8');
+      const importModalCode = fs.readFileSync(path.join(root, 'src/components/ImportModal.tsx'), 'utf-8');
+      const leadsViewCode = fs.readFileSync(path.join(root, 'src/components/LeadsView.tsx'), 'utf-8');
+      const normalizerCode = fs.readFileSync(path.join(root, 'server/connectors/core/normalizer.ts'), 'utf-8');
+      const pipelineBoardCode = fs.readFileSync(path.join(root, 'src/components/PipelineBoard.tsx'), 'utf-8');
+
+      assert.ok(
+        serverCode.includes("protectedApi.post('/pipeline/stages/initialize'"),
+        'Stage initialization endpoint must be registered under protectedApi'
+      );
+      assert.ok(
+        !importModalCode.includes("pipelineStageId: 'stage-discovered'"),
+        'ImportModal must not hardcode stage-discovered'
+      );
+      assert.ok(
+        !leadsViewCode.includes("'stage-discovered'"),
+        'LeadsView must not hardcode stage-discovered'
+      );
+      assert.ok(
+        !normalizerCode.includes("'stage-discovered'"),
+        'Connector normalizer must not hardcode stage-discovered'
+      );
+      assert.ok(
+        pipelineBoardCode.includes('Initialize Default Pipeline Stages'),
+        'PipelineBoard should expose owner-triggered empty pipeline initialization action'
+      );
     });
   });
 });

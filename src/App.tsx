@@ -270,20 +270,40 @@ export default function App() {
     setAuthModalOpen(true);
   };
 
+  const [isInitializingStages, setIsInitializingStages] = useState(false);
+  const [initStageError, setInitStageError] = useState<string | null>(null);
+
+  const handleInitializeStages = async () => {
+    setIsInitializingStages(true);
+    setInitStageError(null);
+    try {
+      const res = await apiFetch('/api/pipeline/stages/initialize', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to initialize default pipeline stages');
+      }
+      await fetchAllData();
+    } catch (err: unknown) {
+      setInitStageError(err instanceof Error ? err.message : 'Failed to initialize default pipeline stages');
+    } finally {
+      setIsInitializingStages(false);
+    }
+  };
+
   // Lead Actions
   const handleAddLeadToCrm = async (newLead: CanonicalLead) => {
-    try {
-      const res = await apiFetch('/api/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newLead),
-      });
-      if (res.ok) {
-        fetchAllData();
-      }
-    } catch (err) {
-      console.error(err);
+    const res = await apiFetch('/api/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newLead),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || 'Failed to create lead');
     }
+    await fetchAllData();
   };
 
   const handleBatchAddLeads = async (newLeads: CanonicalLead[]) => {
@@ -624,6 +644,9 @@ export default function App() {
                   leads={leads}
                   onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
                   onMoveLeadStage={handleMoveStage}
+                  onInitializeStages={handleInitializeStages}
+                  isInitializingStages={isInitializingStages}
+                  initStageError={initStageError}
                 />
               )}
 

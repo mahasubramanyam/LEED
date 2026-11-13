@@ -482,10 +482,15 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
             <div className="flex items-center gap-1.5 text-slate-400">
               <span className="text-slate-500 font-semibold">Stage:</span>
               <select
-                value={lead.pipelineStageId}
-                onChange={(e) => handleUpdateStage(e.target.value)}
+                value={lead.pipelineStageId || ''}
+                onChange={(e) => {
+                  if (e.target.value) handleUpdateStage(e.target.value);
+                }}
                 className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-0.5 font-medium"
               >
+                {(!lead.pipelineStageId || !stages.some((s) => s.id === lead.pipelineStageId)) && (
+                  <option value="">Unassigned</option>
+                )}
                 {stages.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}

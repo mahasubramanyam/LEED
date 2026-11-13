@@ -119,7 +119,7 @@ export interface CanonicalLead {
     inspectedAt?: string;
   };
   status: LeadStatus;
-  pipelineStageId: string;
+  pipelineStageId?: string;
   opportunityValue?: number;
   currency: string;
   winProbability?: number; // 0-100

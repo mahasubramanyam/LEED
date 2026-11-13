@@ -236,7 +236,6 @@ function mapCompaniesHouseItemToLead(
     sources,
     identifiers,
     status: 'new',
-    pipelineStageId: 'stage-discovered',
     currency: 'GBP',
     tags: ['United Kingdom', 'Companies House', item.company_type || 'ltd'].filter(Boolean),
     notes: [],

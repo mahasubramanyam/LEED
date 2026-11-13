@@ -38,7 +38,7 @@ interface LeadsViewProps {
   leads: CanonicalLead[];
   stages: PipelineStage[];
   onSelectLead: (lead: CanonicalLead) => void;
-  onCreateLead?: (lead: CanonicalLead) => void;
+  onCreateLead?: (lead: CanonicalLead) => Promise<void> | void;
   onUpdateLeadStage: (leadId: string, stageId: string) => void;
   onDeleteLead: (leadId: string) => void;
   onBatchUpdateStage: (leadIds: string[], stageId: string) => void;
@@ -290,7 +290,7 @@ export function LeadsView({
         ],
         identifiers,
         status: 'new',
-        pipelineStageId: stages[0]?.id || 'stage-discovered',
+        pipelineStageId: stages[0]?.id || undefined,
         currency: newGeo.currency || 'USD',
         tags: [newGeo.countryCode],
         notes: [],
@@ -307,7 +307,9 @@ export function LeadsView({
         updatedAt: now,
       };
 
-      onCreateLead(lead);
+      if (onCreateLead) {
+        await onCreateLead(lead);
+      }
       setIsCreateOpen(false);
       setNewName('');
       setNewWebsite('');
@@ -316,7 +318,7 @@ export function LeadsView({
       setNewIdentValue('');
     } catch (err) {
       console.error(err);
-      setCreateError('Failed to create lead');
+      setCreateError(err instanceof Error ? err.message : 'Failed to create lead');
     } finally {
       setIsCreating(false);
     }
@@ -839,14 +841,19 @@ export function LeadsView({
                       {/* Pipeline Stage Select */}
                       <td className="p-3.5" onClick={(e) => e.stopPropagation()}>
                         <select
-                          value={lead.pipelineStageId}
-                          onChange={(e) => onUpdateLeadStage(lead.id, e.target.value)}
+                          value={lead.pipelineStageId || ''}
+                          onChange={(e) => {
+                            if (e.target.value) onUpdateLeadStage(lead.id, e.target.value);
+                          }}
                           className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-[11px] rounded px-2 py-1 focus:outline-hidden font-medium"
                           style={{
                             borderLeftColor: stage?.color || '#3b82f6',
                             borderLeftWidth: '3px',
                           }}
                         >
+                          {(!lead.pipelineStageId || !stages.some((s) => s.id === lead.pipelineStageId)) && (
+                            <option value="">Unassigned</option>
+                          )}
                           {stages.map((s) => (
                             <option key={s.id} value={s.id}>
                               {s.name}

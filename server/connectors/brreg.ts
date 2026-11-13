@@ -170,7 +170,6 @@ export async function searchBrreg(
         sources,
         identifiers,
         status: 'new',
-        pipelineStageId: 'stage-discovered',
         currency: 'NOK',
         tags: ['Norway', 'Official Registry', e.organisasjonsform?.kode || 'AS'].filter(Boolean),
         notes: [],

@@ -1034,7 +1034,12 @@ protectedApi.post('/leads', async (req: Request, res: Response) => {
     res.status(201).json(saved);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+    const status = msg.includes('Database connection unavailable')
+      ? 503
+      : msg.includes('Invalid pipelineStageId') || msg.includes('does not exist in pipeline_stages')
+      ? 400
+      : 500;
+    res.status(status).json({ error: msg });
   }
 });
 
@@ -1052,7 +1057,12 @@ protectedApi.put('/leads/:id', async (req: Request, res: Response) => {
     res.json(updated);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+    const status = msg.includes('Database connection unavailable')
+      ? 503
+      : msg.includes('Invalid pipelineStageId') || msg.includes('does not exist in pipeline_stages')
+      ? 400
+      : 500;
+    res.status(status).json({ error: msg });
   }
 });
 
@@ -1795,9 +1805,40 @@ protectedApi.get('/pipeline/stages', async (req: Request, res: Response) => {
   }
 });
 
+protectedApi.post('/pipeline/stages/initialize', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    if (isPg) {
+      const result = await postgresStorage.initializeDefaultStages();
+      if (result.initialized && req.owner) {
+        await postgresStorage.recordAuditEvent(
+          'PIPELINE_STAGES_INITIALIZED',
+          req.owner.email,
+          'pipeline_stages',
+          'default_stages',
+          { insertedCount: result.insertedCount, stageIds: result.stages.map((s) => s.id) },
+          normalizeClientIp(req)
+        );
+      }
+      res.json({ success: true, ...result });
+    } else {
+      const result = storage.initializeDefaultStages();
+      res.json({ success: true, ...result });
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+  }
+});
+
 protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
   const { leadId, stageId, lostReason } = req.body;
   const author = req.owner?.fullName || 'Lead Intelligence Operator';
+
+  if (!leadId || typeof leadId !== 'string' || !stageId || typeof stageId !== 'string') {
+    res.status(400).json({ error: 'Both leadId and stageId are required.' });
+    return;
+  }
 
   try {
     const { isPg } = checkStorageEngine();
@@ -1816,6 +1857,12 @@ protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
       }
       const stages = storage.getStages();
       const targetStage = stages.find((s) => s.id === stageId);
+      if (!targetStage) {
+        res.status(400).json({
+          error: `Invalid pipelineStageId "${stageId}": stage does not exist in pipeline_stages.`,
+        });
+        return;
+      }
       const prevStageId = lead.pipelineStageId;
       const prevStageName = stages.find((s) => s.id === prevStageId)?.name || prevStageId;
 
@@ -1830,8 +1877,8 @@ protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
       lead.activities.unshift({
         id: `act-${Date.now()}`,
         type: 'stage_change',
-        title: `Pipeline Stage Updated: ${targetStage?.name || stageId}`,
-        outcome: `Transitioned from ${prevStageName} to ${targetStage?.name || stageId}${lostReason ? ` (${lostReason})` : ''}`,
+        title: `Pipeline Stage Updated: ${targetStage.name}`,
+        outcome: `Transitioned from ${prevStageName} to ${targetStage.name}${lostReason ? ` (${lostReason})` : ''}`,
         date: new Date().toISOString(),
         actor: author,
       });
@@ -1841,7 +1888,12 @@ protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    const status = msg.includes('Database connection unavailable')
+      ? 503
+      : msg.includes('Invalid pipelineStageId') || msg.includes('does not exist in pipeline_stages')
+      ? 400
+      : 500;
+    res.status(status).json({ error: msg });
   }
 });
 
@@ -2010,7 +2062,12 @@ protectedApi.post('/campaigns/:id/messages/:messageId/action', async (req: Reque
               actor: author,
             });
             lead.status = 'contacted';
-            lead.pipelineStageId = 'stage-contacted';
+            const contactedStage =
+              storage.getStages().find((s) => s.id === 'stage-contacted') ||
+              storage.getStages().find((s) => s.name.toLowerCase().includes('contacted'));
+            if (contactedStage) {
+              lead.pipelineStageId = contactedStage.id;
+            }
             storage.upsertLead(lead);
           }
         }

@@ -442,7 +442,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         ],
         identifiers,
         status: 'new',
-        pipelineStageId: 'stage-discovered',
+        pipelineStageId: undefined,
         currency,
         opportunityValue: oppValNum,
         tags: Array.from(new Set(['CSV Import', countryCode, ...parsedTags])),

@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { dbManager } from './pool.js';
 import { canonicalizeIdentifierType, getIdentifierAliases } from '../../shared/identifierRegistry.js';
+import { DEFAULT_PIPELINE_STAGES } from '../../shared/defaultStages.js';
 import { normalizeIdentifierValue } from '../identifiers/identifierEngine.js';
 import {
   ConnectorConfigRecord,
@@ -308,13 +309,22 @@ export class PostgresStorage {
     }
   }
 
-  public async upsertLead(lead: CanonicalLead): Promise<CanonicalLead> {
+  public async upsertLead(
+    lead: CanonicalLead,
+    options: { autoInitStagesIfEmpty?: boolean } = {}
+  ): Promise<CanonicalLead> {
     const pool = this.getClient();
     const client = await pool.connect();
     const now = new Date().toISOString();
 
     try {
       await client.query('BEGIN');
+
+      const resolvedStageId = await this.resolvePipelineStageId(
+        client,
+        lead.pipelineStageId,
+        options.autoInitStagesIfEmpty ?? true
+      );
 
       const canonicalRegType = lead.registrationType
         ? canonicalizeIdentifierType(lead.registrationType, lead.address?.countryCode)
@@ -401,7 +411,7 @@ export class PostgresStorage {
           lead.confidenceScore || 50,
           JSON.stringify(lead.confidenceSignals || []),
           lead.status || 'new',
-          lead.pipelineStageId || null,
+          resolvedStageId,
           lead.opportunityValue || 0,
           lead.currency || 'USD',
           lead.winProbability || 0,
@@ -534,6 +544,7 @@ export class PostgresStorage {
       await client.query('COMMIT');
       return {
         ...lead,
+        pipelineStageId: resolvedStageId ?? undefined,
         registrationType: canonicalRegType || lead.registrationType,
         identifiers: normalizedIdentifiers,
       };
@@ -547,7 +558,7 @@ export class PostgresStorage {
 
   public async batchUpsertLeads(
     newLeads: CanonicalLead[],
-    options: { skipDuplicates?: boolean } = {}
+    options: { skipDuplicates?: boolean; autoInitStagesIfEmpty?: boolean } = {}
   ): Promise<{
     added: number;
     updated: number;
@@ -730,12 +741,16 @@ export class PostgresStorage {
             activities: mergedActivities,
             customFields: { ...(lead.customFields || {}), ...(match.customFields || {}) },
           };
-          const saved = await this.upsertLead(merged);
+          const saved = await this.upsertLead(merged, {
+            autoInitStagesIfEmpty: options.autoInitStagesIfEmpty ?? true,
+          });
           indexLead(saved);
           savedLeadIds.push(saved.id);
           updated++;
         } else {
-          const saved = await this.upsertLead(lead);
+          const saved = await this.upsertLead(lead, {
+            autoInitStagesIfEmpty: options.autoInitStagesIfEmpty ?? true,
+          });
           indexLead(saved);
           savedLeadIds.push(saved.id);
           added++;
@@ -844,9 +859,12 @@ export class PostgresStorage {
     try {
       await client.query('BEGIN');
 
-      // Fetch stage details
-      const stageRes = await client.query('SELECT name FROM pipeline_stages WHERE id = $1', [stageId]);
-      const targetStageName = stageRes.rows[0]?.name || stageId;
+      // Validate target stage exists in pipeline_stages before updating lead
+      const stageRes = await client.query('SELECT id, name FROM pipeline_stages WHERE id = $1', [stageId]);
+      if (stageRes.rows.length === 0) {
+        throw new Error(`Invalid pipelineStageId "${stageId}": stage does not exist in pipeline_stages.`);
+      }
+      const targetStageName = stageRes.rows[0].name;
 
       const newStatus = lostReason ? 'lost' : stageId === 'stage-won' ? 'converted' : 'active';
 
@@ -895,7 +913,7 @@ export class PostgresStorage {
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      const { rows } = await client.query('SELECT * FROM pipeline_stages ORDER BY display_order ASC');
+      const { rows } = await client.query('SELECT id, name, color, display_order FROM pipeline_stages ORDER BY display_order ASC');
       return rows.map((r: any) => ({
         id: r.id,
         name: r.name,
@@ -905,6 +923,144 @@ export class PostgresStorage {
     } finally {
       if (client) client.release();
     }
+  }
+
+  /**
+   * Idempotently initializes default pipeline stages inside a transaction ONLY if pipeline_stages is currently empty.
+   * Never deletes, overwrites, or duplicates existing pipeline stages.
+   */
+  public async initializeDefaultStages(options: { client?: pg.PoolClient } = {}): Promise<{
+    initialized: boolean;
+    insertedCount: number;
+    stages: PipelineStage[];
+  }> {
+    const externalClient = options.client;
+    const pool = externalClient ? null : this.getClient();
+    const client = externalClient || (await pool!.connect());
+
+    try {
+      if (!externalClient) {
+        await client.query('BEGIN');
+      }
+
+      const existingRes = await client.query(
+        'SELECT id, name, color, display_order FROM pipeline_stages ORDER BY display_order ASC'
+      );
+
+      if (existingRes.rows.length > 0) {
+        const existingStages: PipelineStage[] = existingRes.rows.map((r: any) => ({
+          id: r.id,
+          name: r.name,
+          color: r.color,
+          order: r.display_order,
+        }));
+        if (!externalClient) {
+          await client.query('COMMIT');
+        }
+        return {
+          initialized: false,
+          insertedCount: 0,
+          stages: existingStages,
+        };
+      }
+
+      let insertedCount = 0;
+      for (const stage of DEFAULT_PIPELINE_STAGES) {
+        const insRes = await client.query(
+          `INSERT INTO pipeline_stages (id, name, color, display_order, created_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (id) DO NOTHING`,
+          [stage.id, stage.name, stage.color, stage.order]
+        );
+        insertedCount += typeof insRes.rowCount === 'number' ? insRes.rowCount : 1;
+      }
+
+      const afterRes = await client.query(
+        'SELECT id, name, color, display_order FROM pipeline_stages ORDER BY display_order ASC'
+      );
+      const stages: PipelineStage[] =
+        afterRes.rows.length > 0
+          ? afterRes.rows.map((r: any) => ({
+              id: r.id,
+              name: r.name,
+              color: r.color,
+              order: r.display_order,
+            }))
+          : DEFAULT_PIPELINE_STAGES.map((s) => ({
+              id: s.id,
+              name: s.name,
+              color: s.color,
+              order: s.order,
+            }));
+
+      if (!externalClient) {
+        await client.query('COMMIT');
+      }
+
+      return {
+        initialized: true,
+        insertedCount,
+        stages,
+      };
+    } catch (err) {
+      if (!externalClient) {
+        await client.query('ROLLBACK');
+      }
+      throw err;
+    } finally {
+      if (!externalClient) {
+        client.release();
+      }
+    }
+  }
+
+  /**
+   * Resolves a valid existing pipeline_stages.id inside an active transaction.
+   * When pipeline_stages is empty and autoInitIfEmpty=true, initializes default stages idempotently first.
+   * Never uses hardcoded stage IDs and rejects nonexistent explicit stage references.
+   */
+  private async resolvePipelineStageId(
+    client: pg.PoolClient,
+    requestedStageId?: string | null,
+    autoInitIfEmpty = true
+  ): Promise<string | null> {
+    const existingRes = await client.query(
+      'SELECT id, name, color, display_order FROM pipeline_stages ORDER BY display_order ASC'
+    );
+    let stages: PipelineStage[] = existingRes.rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      color: r.color,
+      order: r.display_order,
+    }));
+
+    if (stages.length === 0) {
+      if (autoInitIfEmpty) {
+        const init = await this.initializeDefaultStages({ client });
+        stages = init.stages;
+      } else {
+        const reqClean = typeof requestedStageId === 'string' ? requestedStageId.trim() : '';
+        if (reqClean) {
+          throw new Error(
+            `Invalid pipelineStageId "${reqClean}": no pipeline stages exist in pipeline_stages.`
+          );
+        }
+        return null;
+      }
+    }
+
+    const reqClean = typeof requestedStageId === 'string' ? requestedStageId.trim() : '';
+    if (!reqClean) {
+      return stages[0]?.id ?? null;
+    }
+
+    if (stages.some((s) => s.id === reqClean)) {
+      return reqClean;
+    }
+
+    throw new Error(
+      `Invalid pipelineStageId "${reqClean}": stage does not exist in pipeline_stages.`
+    );
   }
 
   // ==========================================
@@ -2005,7 +2161,7 @@ export class PostgresStorage {
       sources,
       identifiers,
       status: row.status,
-      pipelineStageId: row.pipeline_stage_id || 'stage-discovered',
+      pipelineStageId: row.pipeline_stage_id || undefined,
       opportunityValue: row.opportunity_value ? parseFloat(row.opportunity_value) : 0,
       currency: row.currency || 'USD',
       winProbability: row.win_probability || 0,
