@@ -25,6 +25,67 @@ const VERIFICATION_RANK: Record<VerificationStatus | 'user_provided' | 'discover
   offline_reference: 0,
 };
 
+export function normalizeLegalCompanyStatus(
+  rawStatus?: string | null,
+  flags?: { bankrupt?: boolean; underLiquidation?: boolean; cancelled?: boolean }
+): 'active' | 'inactive' | 'dissolved' | 'unknown' {
+  if (flags?.bankrupt || flags?.underLiquidation || flags?.cancelled) {
+    return 'dissolved';
+  }
+  const s = (rawStatus || '').trim().toLowerCase();
+  if (!s) return 'unknown';
+
+  if (
+    s === 'active' ||
+    s === 'a' ||
+    s === 'open' ||
+    s === 'registered' ||
+    s === 'live' ||
+    s === '0000000001' ||
+    s.includes('active') ||
+    s.includes('registered') ||
+    s === 'live'
+  ) {
+    return 'active';
+  }
+
+  if (
+    s === 'dissolved' ||
+    s === 'c' ||
+    s === 'closed' ||
+    s === 'ceased' ||
+    s === 'cancelled' ||
+    s === 'canceled' ||
+    s === 'deregistered' ||
+    s === 'struck off' ||
+    s === 'converted-closed' ||
+    s.includes('dissolv') ||
+    s.includes('deregister') ||
+    s.includes('cancel') ||
+    s.includes('liquidation') ||
+    s.includes('insolvency') ||
+    s.includes('struck')
+  ) {
+    return 'dissolved';
+  }
+
+  if (
+    s === 'inactive' ||
+    s === 'dormant' ||
+    s === 'suspended' ||
+    s === 'administration' ||
+    s === 'receivership' ||
+    s === 'voluntary-arrangement' ||
+    s.includes('inactive') ||
+    s.includes('suspend') ||
+    s.includes('receivership')
+  ) {
+    return 'inactive';
+  }
+
+  return 'unknown';
+}
+
 function getIdentifierStatusRank(status?: LeadIdentifier['status'], verified?: boolean): number {
   if (verified || status === 'officially_verified') return 4;
   if (status === 'syntax_validated') return 3;
@@ -261,6 +322,10 @@ function buildDeterministicLeadId(providerId: string, externalSourceId: string):
   if (providerId === 'conn-brreg') return `brreg-${cleanExt}`;
   if (providerId === 'conn-companies-house') return `uk-crn-${cleanExt}`;
   if (providerId === 'conn-abn') return `abn-${cleanExt}`;
+  if (providerId === 'conn-us-sec') return `us-cik-${cleanExt}`;
+  if (providerId === 'conn-fr-sirene') return `fr-siren-${cleanExt}`;
+  if (providerId === 'conn-jp-nta') return `jp-cn-${cleanExt}`;
+  if (providerId === 'conn-sg-acra') return `sg-uen-${cleanExt}`;
   if (providerId === 'conn-osm') {
     const osmNumeric = cleanExt.replace(/^osm-(?:node|way|relation)-/, '');
     return `osm-${osmNumeric}`;
@@ -290,7 +355,7 @@ export function normalizeConnectorResults(results: StandardizedConnectorResult[]
   };
 }
 
-function inferLeadTrustRank(lead: CanonicalLead): number {
+export function inferLeadTrustRank(lead: CanonicalLead): number {
   const customRank = lead.customFields?.lastVerificationStatus as VerificationStatus | undefined;
   if (customRank && customRank in VERIFICATION_RANK) {
     return VERIFICATION_RANK[customRank];
@@ -379,7 +444,23 @@ export function mergeProviderObservationIntoLead(
 
   return {
     ...existing,
-    companyName: incomingIsStronger ? incoming.companyName : existing.companyName,
+    // Always preserve canonical CRM pipeline state, notes, and deal telemetry
+    id: existing.id,
+    createdAt: existing.createdAt,
+    status: existing.status,
+    pipelineStageId: existing.pipelineStageId,
+    opportunityValue: existing.opportunityValue ?? incoming.opportunityValue,
+    winProbability: existing.winProbability ?? incoming.winProbability,
+    lostReason: existing.lostReason,
+    currency: existing.currency || incoming.currency || 'USD',
+    notes: existing.notes || [],
+    activities: [
+      ...(existing.activities || []),
+      ...(incoming.activities || []).filter(
+        (ia) => !(existing.activities || []).some((ea) => ea.id === ia.id)
+      ),
+    ],
+    companyName: incomingIsStronger ? incoming.companyName : existing.companyName || incoming.companyName,
     legalName: pickField(existing.legalName, incoming.legalName),
     registrationNumber: mergedRegNumber,
     registrationType: mergedRegType,
@@ -415,7 +496,7 @@ export function mergeProviderObservationIntoLead(
     sources: combinedSources,
     identifiers: Array.from(identMap.values()),
     webMetadata: incoming.webMetadata || existing.webMetadata,
-    socialLinks: { ...(existing.socialLinks || {}), ...(incoming.socialLinks || {}) },
+    socialLinks: { ...(incoming.socialLinks || {}), ...(existing.socialLinks || {}) },
     tags: Array.from(new Set([...(existing.tags || []), ...(incoming.tags || [])])),
     customFields: {
       ...(existing.customFields || {}),
@@ -425,3 +506,11 @@ export function mergeProviderObservationIntoLead(
     updatedAt: new Date().toISOString(),
   };
 }
+
+export function mergeLeadWithTrustHierarchy(
+  existing: CanonicalLead,
+  incoming: CanonicalLead
+): CanonicalLead {
+  return mergeProviderObservationIntoLead(existing, incoming);
+}
+

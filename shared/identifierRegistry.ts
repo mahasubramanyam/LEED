@@ -9,9 +9,15 @@ export type CanonicalIdentifierType =
   | 'AU_ABN'
   | 'AU_ACN'
   | 'US_EIN'
+  | 'US_CIK'
   | 'FR_SIREN'
   | 'FR_SIRET'
   | 'DE_HANDELSREGISTER'
+  | 'CA_BN'
+  | 'CA_CORP'
+  | 'JP_CN'
+  | 'IN_CIN'
+  | 'SG_UEN'
   | 'EU_VAT'
   | 'LEI'
   | 'TAX_ID'
@@ -85,11 +91,21 @@ export const CANONICAL_IDENTIFIER_TYPES: IdentifierTypeSpec[] = [
     aliases: ['US_EIN', 'EIN'],
   },
   {
+    code: 'US_CIK',
+    label: 'US SEC CIK (10-digit Central Index Key)',
+    shortLabel: 'SEC CIK (US)',
+    countryCode: 'US',
+    issuingAuthority: 'U.S. Securities and Exchange Commission (SEC)',
+    placeholder: 'e.g. 0000320193',
+    selectableInUi: true,
+    aliases: ['US_CIK', 'CIK', 'SEC_CIK'],
+  },
+  {
     code: 'FR_SIREN',
     label: 'FR SIREN (9-digit)',
     shortLabel: 'SIREN (FR)',
     countryCode: 'FR',
-    issuingAuthority: 'INSEE',
+    issuingAuthority: 'INSEE / Annuaire des Entreprises',
     placeholder: 'e.g. 732 829 320',
     selectableInUi: true,
     aliases: ['FR_SIREN', 'SIREN'],
@@ -99,7 +115,7 @@ export const CANONICAL_IDENTIFIER_TYPES: IdentifierTypeSpec[] = [
     label: 'FR SIRET (14-digit)',
     shortLabel: 'SIRET (FR)',
     countryCode: 'FR',
-    issuingAuthority: 'INSEE',
+    issuingAuthority: 'INSEE / Annuaire des Entreprises',
     placeholder: 'e.g. 73282932000074',
     selectableInUi: true,
     aliases: ['FR_SIRET', 'SIRET'],
@@ -113,6 +129,56 @@ export const CANONICAL_IDENTIFIER_TYPES: IdentifierTypeSpec[] = [
     placeholder: 'e.g. HRB 12345',
     selectableInUi: true,
     aliases: ['DE_HANDELSREGISTER', 'HANDELSREGISTER', 'HRA', 'HRB'],
+  },
+  {
+    code: 'CA_BN',
+    label: 'CA Business Number (9-digit CRA BN)',
+    shortLabel: 'BN (CA)',
+    countryCode: 'CA',
+    issuingAuthority: 'Canada Revenue Agency (CRA)',
+    placeholder: 'e.g. 123456789',
+    selectableInUi: true,
+    aliases: ['CA_BN', 'CRA_BN', 'BN'],
+  },
+  {
+    code: 'CA_CORP',
+    label: 'CA Federal Corporation No (ISED)',
+    shortLabel: 'Corp No (CA)',
+    countryCode: 'CA',
+    issuingAuthority: 'Corporations Canada (ISED)',
+    placeholder: 'e.g. 0421562 or 1234567-8',
+    selectableInUi: true,
+    aliases: ['CA_CORP', 'CA_CORP_NO', 'CORP_CAN'],
+  },
+  {
+    code: 'JP_CN',
+    label: 'JP Corporate Number (Houjin Bangou)',
+    shortLabel: 'Corporate No (JP)',
+    countryCode: 'JP',
+    issuingAuthority: 'National Tax Agency of Japan (NTA)',
+    placeholder: 'e.g. 1010001008846',
+    selectableInUi: true,
+    aliases: ['JP_CN', 'HOUJIN_BANGOU', 'JP_HOUJIN', 'CORPORATE_NUMBER'],
+  },
+  {
+    code: 'IN_CIN',
+    label: 'IN CIN (MCA 21-char Corporate ID)',
+    shortLabel: 'CIN (IN)',
+    countryCode: 'IN',
+    issuingAuthority: 'Ministry of Corporate Affairs (MCA)',
+    placeholder: 'e.g. L22210MH1995PLC084781',
+    selectableInUi: true,
+    aliases: ['IN_CIN', 'CIN', 'MCA_CIN'],
+  },
+  {
+    code: 'SG_UEN',
+    label: 'SG UEN (ACRA Unique Entity No)',
+    shortLabel: 'UEN (SG)',
+    countryCode: 'SG',
+    issuingAuthority: 'Accounting and Corporate Regulatory Authority (ACRA)',
+    placeholder: 'e.g. 201201936C or T08LL1234A',
+    selectableInUi: true,
+    aliases: ['SG_UEN', 'UEN', 'ACRA_UEN'],
   },
   {
     code: 'EU_VAT',
@@ -222,6 +288,10 @@ export function canonicalizeIdentifierType(type?: string, countryHint?: string):
     if (c === 'DE') return 'DE_HANDELSREGISTER';
     if (c === 'FR') return 'FR_SIREN';
     if (c === 'US') return 'US_EIN';
+    if (c === 'CA') return 'CA_BN';
+    if (c === 'JP') return 'JP_CN';
+    if (c === 'IN') return 'IN_CIN';
+    if (c === 'SG') return 'SG_UEN';
     return raw || 'TAX_ID';
   }
   return ALIAS_TO_CANONICAL.get(raw) || raw;
@@ -245,6 +315,14 @@ export function getDefaultIdentifierTypeForCountry(countryCode?: string): Canoni
       return 'FR_SIREN';
     case 'DE':
       return 'DE_HANDELSREGISTER';
+    case 'CA':
+      return 'CA_BN';
+    case 'JP':
+      return 'JP_CN';
+    case 'IN':
+      return 'IN_CIN';
+    case 'SG':
+      return 'SG_UEN';
     default:
       return 'TAX_ID';
   }

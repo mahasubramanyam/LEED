@@ -340,6 +340,13 @@ export default function App() {
     }
   };
 
+  const handleLeadSynced = (updated: CanonicalLead) => {
+    setLeads((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+    if (selectedLeadForDetail?.id === updated.id) {
+      setSelectedLeadForDetail(updated);
+    }
+  };
+
   const handleDeleteLead = async (leadId: string) => {
     try {
       const res = await apiFetch(`/api/leads/${leadId}`, { method: 'DELETE' });
@@ -730,6 +737,7 @@ export default function App() {
         stages={stages}
         onClose={() => setSelectedLeadForDetail(null)}
         onUpdateLead={handleUpdateLead}
+        onLeadVerified={handleLeadSynced}
         onAddNote={handleAddNote}
         onAddActivity={handleAddActivity}
         onInspectUrl={handleInspectUrl}

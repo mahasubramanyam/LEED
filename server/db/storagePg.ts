@@ -2,7 +2,8 @@ import pg from 'pg';
 import { dbManager } from './pool.js';
 import { canonicalizeIdentifierType, getIdentifierAliases } from '../../shared/identifierRegistry.js';
 import { DEFAULT_PIPELINE_STAGES } from '../../shared/defaultStages.js';
-import { normalizeIdentifierValue } from '../identifiers/identifierEngine.js';
+import { normalizeIdentifierValue, normalizeUkCrn, normalizeUsCik } from '../identifiers/identifierEngine.js';
+import { mergeLeadWithTrustHierarchy } from '../connectors/core/normalizer.js';
 import {
   ConnectorConfigRecord,
   ConnectorErrorCategory,
@@ -435,6 +436,9 @@ export class PostgresStorage {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (id) DO UPDATE SET
                source_name = EXCLUDED.source_name,
+               provider_id = EXCLUDED.provider_id,
+               url = EXCLUDED.url,
+               license = EXCLUDED.license,
                attribution = EXCLUDED.attribution,
                retrieved_at = EXCLUDED.retrieved_at`,
             [sId, lead.id, s.sourceName, s.providerId || null, s.url || null, s.retrievedAt || now, s.license || null, s.attribution || null]
@@ -581,24 +585,25 @@ export class PostgresStorage {
     const byIdent = new Map<string, CanonicalLead>();
     const byPhone = new Map<string, CanonicalLead>();
 
-    const identRank = (ident: LeadIdentifier): number => {
-      if (ident.verified || ident.status === 'officially_verified') return 4;
-      if (ident.status === 'syntax_validated') return 3;
-      if (ident.status === 'discovered') return 2;
-      return 1;
+    const normByType = (val?: string, t?: string, cCode?: string): string => {
+      if (!val) return '';
+      const ct = t ? canonicalizeIdentifierType(t, cCode) : '';
+      if (ct === 'UK_CRN') return normalizeUkCrn(val);
+      if (ct === 'US_CIK') return normalizeUsCik(val);
+      return normalizeIdentifierValue(val);
     };
 
     const indexLead = (l: CanonicalLead) => {
       byId.set(l.id, l);
       if (l.domain) byDomain.set(l.domain.toLowerCase().trim(), l);
       if (l.registrationNumber) {
-        const cleanReg = normalizeIdentifierValue(l.registrationNumber);
+        const cleanReg = normByType(l.registrationNumber, l.registrationType, l.address?.countryCode);
         if (cleanReg.length >= 4) byReg.set(cleanReg, l);
       }
       for (const ident of l.identifiers || []) {
-        const cleanVal = normalizeIdentifierValue(ident.normalizedValue || ident.value);
+        const canonType = canonicalizeIdentifierType(ident.type, l.address?.countryCode);
+        const cleanVal = normByType(ident.normalizedValue || ident.value, canonType, ident.countryCode || l.address?.countryCode);
         if (cleanVal.length >= 4) {
-          const canonType = canonicalizeIdentifierType(ident.type, l.address?.countryCode);
           byIdent.set(`${canonType}:${cleanVal}`, l);
         }
       }
@@ -633,12 +638,12 @@ export class PostgresStorage {
         let match: CanonicalLead | undefined = byId.get(lead.id);
         if (!match && lead.domain) match = byDomain.get(lead.domain.toLowerCase().trim());
         if (!match && lead.registrationNumber) {
-          const cleanReg = normalizeIdentifierValue(lead.registrationNumber);
+          const cleanReg = normByType(lead.registrationNumber, lead.registrationType, lead.address?.countryCode);
           if (cleanReg.length >= 4) match = byReg.get(cleanReg);
         }
         if (!match) {
           for (const ident of lead.identifiers || []) {
-            const cleanVal = normalizeIdentifierValue(ident.normalizedValue || ident.value);
+            const cleanVal = normByType(ident.normalizedValue || ident.value, ident.type, ident.countryCode || lead.address?.countryCode);
             if (cleanVal.length >= 4 && ident.type !== 'DOMAIN' && ident.type !== 'PHONE' && ident.type !== 'EMAIL') {
               match = byIdent.get(`${ident.type}:${cleanVal}`);
               if (match) break;
@@ -655,92 +660,7 @@ export class PostgresStorage {
             skipped++;
             continue;
           }
-          const identKey = (i: LeadIdentifier) =>
-            `${canonicalizeIdentifierType(i.type, i.countryCode || match!.address?.countryCode)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`;
-          const mergedIdentsMap = new Map<string, LeadIdentifier>();
-          for (const i of match.identifiers || []) mergedIdentsMap.set(identKey(i), i);
-          for (const i of lead.identifiers || []) {
-            const k = identKey(i);
-            const prev = mergedIdentsMap.get(k);
-            if (!prev || identRank(i) > identRank(prev)) {
-              mergedIdentsMap.set(k, i);
-            }
-          }
-
-          const sourceKey = (s: { sourceName: string; providerId?: string; url?: string }) =>
-            `${s.sourceName}:${s.providerId || s.url || ''}`;
-          const existingSourceKeys = new Set((match.sources || []).map(sourceKey));
-          const combinedSources = [...(match.sources || [])];
-          for (const s of lead.sources || []) {
-            const sk = sourceKey(s);
-            if (!existingSourceKeys.has(sk)) {
-              existingSourceKeys.add(sk);
-              combinedSources.push(s);
-            }
-          }
-
-          const existingActIds = new Set((match.activities || []).map((a) => a.id));
-          const mergedActivities = [
-            ...(match.activities || []),
-            ...(lead.activities || []).filter((a) => !existingActIds.has(a.id)),
-          ];
-
-          const merged: CanonicalLead = {
-            ...match,
-            id: match.id,
-            createdAt: match.createdAt,
-            updatedAt: new Date().toISOString(),
-            companyName: match.companyName || lead.companyName,
-            legalName: match.legalName || lead.legalName,
-            registrationNumber: match.registrationNumber || lead.registrationNumber,
-            registrationType: match.registrationType || lead.registrationType,
-            companyStatus:
-              match.companyStatus && match.companyStatus !== 'unknown'
-                ? match.companyStatus
-                : lead.companyStatus || match.companyStatus,
-            website: match.website || lead.website,
-            domain: match.domain || lead.domain,
-            email: match.email || lead.email,
-            emailStatus: match.email ? match.emailStatus : lead.emailStatus || match.emailStatus,
-            phone: match.phone || lead.phone,
-            phoneNormalized: match.phoneNormalized || lead.phoneNormalized,
-            address: {
-              street: match.address?.street || lead.address?.street,
-              city: match.address?.city || lead.address?.city,
-              region: match.address?.region || lead.address?.region,
-              postalCode: match.address?.postalCode || lead.address?.postalCode,
-              country: match.address?.country || lead.address?.country || 'International',
-              countryCode: match.address?.countryCode || lead.address?.countryCode || 'US',
-              formattedAddress: match.address?.formattedAddress || lead.address?.formattedAddress,
-            },
-            coordinates: match.coordinates || lead.coordinates,
-            industry:
-              match.industry && match.industry !== 'General Commerce & Services'
-                ? match.industry
-                : lead.industry || match.industry,
-            category:
-              match.category && match.category !== 'General'
-                ? match.category
-                : lead.category || match.category,
-            employeeRange: match.employeeRange || lead.employeeRange,
-            foundedYear: match.foundedYear || lead.foundedYear,
-            status: match.status,
-            pipelineStageId: match.pipelineStageId,
-            opportunityValue: match.opportunityValue ?? lead.opportunityValue ?? 0,
-            currency: match.currency || lead.currency || 'USD',
-            winProbability: match.winProbability ?? lead.winProbability ?? 0,
-            lostReason: match.lostReason,
-            confidenceScore: Math.max(match.confidenceScore || 0, lead.confidenceScore || 0),
-            confidenceSignals: Array.from(new Set([...(match.confidenceSignals || []), ...(lead.confidenceSignals || [])])),
-            tags: Array.from(new Set([...(match.tags || []), ...(lead.tags || [])])),
-            identifiers: Array.from(mergedIdentsMap.values()),
-            sources: combinedSources,
-            socialLinks: { ...(lead.socialLinks || {}), ...(match.socialLinks || {}) },
-            webMetadata: match.webMetadata || lead.webMetadata,
-            notes: match.notes || [],
-            activities: mergedActivities,
-            customFields: { ...(lead.customFields || {}), ...(match.customFields || {}) },
-          };
+          const merged = mergeLeadWithTrustHierarchy(match, lead);
           const saved = await this.upsertLead(merged, {
             autoInitStagesIfEmpty: options.autoInitStagesIfEmpty ?? true,
           });

@@ -237,14 +237,17 @@ describe('LEED Phase 4 Unified Connector Architecture Verification Suite', () =>
         .map((c) => c.id)
         .sort();
 
-      assert.deepStrictEqual(ids, [
+      const expectedBaseIds = [
         'conn-abn',
         'conn-brreg',
         'conn-companies-house',
         'conn-gemini',
         'conn-osm',
         'conn-web-inspector',
-      ]);
+      ];
+      for (const expectedId of expectedBaseIds) {
+        assert.ok(ids.includes(expectedId), `Expected base Phase 4 connector ${expectedId} to be preserved`);
+      }
     });
 
     it('honestly classifies conn-abn as offline_reference and not a live API', () => {

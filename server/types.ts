@@ -378,3 +378,83 @@ export interface BatchUpsertResult {
   savedLeadIds?: string[];
 }
 
+export type SevenStateRegistryStatus =
+  | 'live_and_operational'
+  | 'live_auth_required'
+  | 'configuration_required'
+  | 'offline_reference_only'
+  | 'public_access_unavailable'
+  | 'not_implemented'
+  | 'temporarily_unavailable';
+
+export interface RegistryAuditCriteria {
+  officialApiExists: boolean;
+  officialApiSummary: string;
+  publicAccessPermitted: boolean;
+  publicAccessSummary: string;
+  authenticationAndCredentials: string;
+  documentationUrl: string;
+  accessRestrictions: string;
+  availableBusinessFields: string[];
+  searchAndVerificationCapabilities: string[];
+  rateLimitsAndPagination: string;
+  commercialUseAndRedistribution: string;
+}
+
+export type RegistryVerificationState =
+  | 'officially_verified'
+  | 'probable_match'
+  | 'conflict_detected'
+  | 'not_found'
+  | 'offline_reference'
+  | 'unavailable';
+
+export type RegistryMatchType =
+  | 'exact_official_identifier'
+  | 'exact_name_jurisdiction'
+  | 'probable_name_address'
+  | 'conflict'
+  | 'none';
+
+export interface VerificationConflict {
+  field: 'registrationNumber' | 'legalName' | 'companyStatus' | 'address' | 'countryCode';
+  severity: 'high' | 'medium' | 'low';
+  crmValue: string;
+  officialValue: string;
+  message: string;
+}
+
+export interface VerificationHistoryEntry {
+  verifiedAt: string;
+  connectorId: string;
+  sourceName: string;
+  sourceUrl?: string;
+  state: RegistryVerificationState;
+  matchType: RegistryMatchType;
+  matchedRegistrationNumber?: string;
+  matchedLegalName?: string;
+  matchedCompanyStatus?: string;
+  isLiveApi: boolean;
+  conflictCount: number;
+  summary: string;
+}
+
+export interface RegistryVerificationReport {
+  leadId: string;
+  state: RegistryVerificationState;
+  matchType: RegistryMatchType;
+  confidence: number;
+  isLiveApi: boolean;
+  connectorId?: string;
+  sourceName: string;
+  sourceUrl?: string;
+  verifiedAt: string;
+  matchedRecord?: CanonicalLead;
+  conflicts: VerificationConflict[];
+  nameSimilarity: number;
+  addressSimilarity: number;
+  identifierMatched: boolean;
+  preservesHigherTrust: boolean;
+  summary: string;
+  notes: string[];
+}

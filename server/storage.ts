@@ -15,7 +15,8 @@ import { migrator } from './db/migrator.js';
 import { jsonMigrator, MigrationSummary } from './db/migrateJsonToSql.js';
 import { canonicalizeIdentifierType } from '../shared/identifierRegistry.js';
 import { DEFAULT_PIPELINE_STAGES } from '../shared/defaultStages.js';
-import { normalizeIdentifierValue } from './identifiers/identifierEngine.js';
+import { normalizeIdentifierValue, normalizeUkCrn, normalizeUsCik } from './identifiers/identifierEngine.js';
+import { mergeLeadWithTrustHierarchy } from './connectors/core/normalizer.js';
 import { ConnectorConfigRecord, ConnectorRunRecord } from './connectors/core/types.js';
 import {
   aggregateRunsByConnector,
@@ -624,21 +625,32 @@ class StorageManager {
         updatedAt: now,
       };
 
-      const cleanReg = lead.registrationNumber ? normalizeIdentifierValue(lead.registrationNumber) : '';
+      const normByType = (val?: string, t?: string, cCode?: string): string => {
+        if (!val) return '';
+        const ct = t ? canonicalizeIdentifierType(t, cCode) : '';
+        if (ct === 'UK_CRN') return normalizeUkCrn(val);
+        if (ct === 'US_CIK') return normalizeUsCik(val);
+        return normalizeIdentifierValue(val);
+      };
+
+      const cleanReg = normByType(lead.registrationNumber, lead.registrationType, lead.address?.countryCode);
       const pDigits = (lead.phoneNormalized || lead.phone || '').replace(/[^0-9]/g, '');
 
       const idx = this.db.leads.findIndex((existing) => {
         if (existing.id === lead.id) return true;
         if (lead.domain && existing.domain && existing.domain.toLowerCase() === lead.domain.toLowerCase()) return true;
-        if (cleanReg.length >= 4 && existing.registrationNumber && normalizeIdentifierValue(existing.registrationNumber) === cleanReg) return true;
+        if (cleanReg.length >= 4 && existing.registrationNumber) {
+          const exReg = normByType(existing.registrationNumber, existing.registrationType, existing.address?.countryCode);
+          if (exReg === cleanReg) return true;
+        }
         if (lead.identifiers && existing.identifiers) {
           for (const idA of lead.identifiers) {
             if (idA.type === 'DOMAIN' || idA.type === 'PHONE' || idA.type === 'EMAIL') continue;
-            const normA = normalizeIdentifierValue(idA.normalizedValue || idA.value);
+            const normA = normByType(idA.normalizedValue || idA.value, idA.type, idA.countryCode || lead.address?.countryCode);
             if (normA.length < 4) continue;
             for (const idB of existing.identifiers) {
-              const normB = normalizeIdentifierValue(idB.normalizedValue || idB.value);
               const tB = canonicalizeIdentifierType(idB.type, idB.countryCode || existing.address?.countryCode);
+              const normB = normByType(idB.normalizedValue || idB.value, tB, idB.countryCode || existing.address?.countryCode);
               if (normA === normB && idA.type === tB) return true;
             }
           }
@@ -655,71 +667,9 @@ class StorageManager {
           }
           const existing = this.db.leads[idx];
           const resolvedStageId = this.resolveStageId(existing.pipelineStageId);
-          const mergedIdentsMap = new Map<string, any>();
-          for (const i of existing.identifiers || []) {
-            mergedIdentsMap.set(`${canonicalizeIdentifierType(i.type)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`, i);
-          }
-          for (const i of lead.identifiers || []) {
-            const k = `${canonicalizeIdentifierType(i.type)}:${normalizeIdentifierValue(i.normalizedValue || i.value)}`;
-            if (!mergedIdentsMap.has(k)) mergedIdentsMap.set(k, i);
-          }
-
-          const sourceKey = (s: { sourceName: string; providerId?: string; url?: string }) =>
-            `${s.sourceName}:${s.providerId || s.url || ''}`;
-          const existingSourceKeys = new Set((existing.sources || []).map(sourceKey));
-          const combinedSources = [...(existing.sources || [])];
-          for (const s of lead.sources || []) {
-            const sk = sourceKey(s);
-            if (!existingSourceKeys.has(sk)) {
-              existingSourceKeys.add(sk);
-              combinedSources.push(s);
-            }
-          }
-
-          const existingActIds = new Set((existing.activities || []).map((a) => a.id));
-          const combinedActivities = [
-            ...(existing.activities || []),
-            ...(lead.activities || []).filter((a) => !existingActIds.has(a.id)),
-          ];
-
-          const mergedLead: CanonicalLead = {
-            ...existing,
-            id: existing.id,
-            createdAt: existing.createdAt,
-            updatedAt: now,
-            companyName: existing.companyName || lead.companyName,
-            legalName: existing.legalName || lead.legalName,
-            registrationNumber: existing.registrationNumber || lead.registrationNumber,
-            registrationType: existing.registrationType || lead.registrationType,
-            website: existing.website || lead.website,
-            domain: existing.domain || lead.domain,
-            email: existing.email || lead.email,
-            phone: existing.phone || lead.phone,
-            phoneNormalized: existing.phoneNormalized || lead.phoneNormalized,
-            address: {
-              street: existing.address?.street || lead.address?.street,
-              city: existing.address?.city || lead.address?.city,
-              region: existing.address?.region || lead.address?.region,
-              postalCode: existing.address?.postalCode || lead.address?.postalCode,
-              country: existing.address?.country || lead.address?.country || 'International',
-              countryCode: existing.address?.countryCode || lead.address?.countryCode || 'US',
-              formattedAddress: existing.address?.formattedAddress || lead.address?.formattedAddress,
-            },
-            coordinates: existing.coordinates || lead.coordinates,
-            status: existing.status,
-            pipelineStageId: resolvedStageId,
-            opportunityValue: existing.opportunityValue ?? lead.opportunityValue,
-            winProbability: existing.winProbability ?? lead.winProbability,
-            lostReason: existing.lostReason,
-            currency: existing.currency || lead.currency || 'USD',
-            confidenceScore: Math.max(existing.confidenceScore || 0, lead.confidenceScore || 0),
-            confidenceSignals: Array.from(new Set([...(existing.confidenceSignals || []), ...(lead.confidenceSignals || [])])),
-            identifiers: Array.from(mergedIdentsMap.values()),
-            sources: combinedSources,
-            notes: existing.notes || [],
-            activities: combinedActivities,
-            tags: Array.from(new Set([...(existing.tags || []), ...(lead.tags || [])])),
-          };
+          const mergedLead = mergeLeadWithTrustHierarchy(existing, lead);
+          mergedLead.pipelineStageId = resolvedStageId;
+          mergedLead.updatedAt = now;
           this.db.leads[idx] = mergedLead;
           savedLeadIds.push(mergedLead.id);
           updated++;

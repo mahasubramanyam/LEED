@@ -1,8 +1,12 @@
 import { AbnConnector } from './adapters/abnAdapter.js';
 import { BrregConnector } from './adapters/brregAdapter.js';
 import { CompaniesHouseConnector } from './adapters/companiesHouseAdapter.js';
+import { FrSireneConnector } from './adapters/frSireneAdapter.js';
 import { GeminiConnector } from './adapters/geminiAdapter.js';
+import { JpNtaConnector } from './adapters/jpNtaAdapter.js';
 import { OsmConnector } from './adapters/osmAdapter.js';
+import { SgAcraConnector } from './adapters/sgAcraAdapter.js';
+import { UsSecEdgarConnector } from './adapters/usSecEdgarAdapter.js';
 import { WebInspectorConnector } from './adapters/webInspectorAdapter.js';
 import { credentialManager, CredentialManager } from './core/credentialManager.js';
 import { connectorExecutionEngine, ConnectorExecutionEngine } from './core/executionEngine.js';
@@ -24,8 +28,12 @@ export function ensureConnectorsRegistered(registry: ConnectorRegistry = connect
   const defaults: IConnector[] = [
     new BrregConnector(),
     new CompaniesHouseConnector(),
-    new OsmConnector(),
     new AbnConnector(),
+    new FrSireneConnector(),
+    new UsSecEdgarConnector(),
+    new SgAcraConnector(),
+    new JpNtaConnector(),
+    new OsmConnector(),
     new WebInspectorConnector(),
     new GeminiConnector(),
   ];
@@ -234,6 +242,10 @@ export {
   BrregConnector,
   CompaniesHouseConnector,
   AbnConnector,
+  FrSireneConnector,
+  UsSecEdgarConnector,
+  SgAcraConnector,
+  JpNtaConnector,
   OsmConnector,
   WebInspectorConnector,
   GeminiConnector,

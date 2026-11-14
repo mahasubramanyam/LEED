@@ -1,5 +1,7 @@
 import { classifyConnectorError, classifyHttpStatus, ConnectorError } from '../core/errors.js';
+import { normalizeLegalCompanyStatus } from '../core/normalizer.js';
 import { connectorRegistry } from '../core/registry.js';
+import { normalizeUkCrn } from '../../identifiers/identifierEngine.js';
 import {
   ClassifiedConnectorError,
   ConnectionValidationResult,
@@ -416,8 +418,8 @@ export class CompaniesHouseConnector implements IConnector {
     request: ConnectorLookupRequest,
     context: ConnectorExecutionContext
   ): Promise<ConnectorLookupResponse> {
-    const crn = request.externalId.trim().toUpperCase().replace(/\s+/g, '');
-    if (!/^[A-Z0-9]{6,8}$/.test(crn)) {
+    const crn = normalizeUkCrn(request.externalId);
+    if (!/^([A-Z]{2}[0-9]{6}|[0-9]{8})$/.test(crn)) {
       throw new ConnectorError({
         category: 'invalid_request',
         providerId: this.id,
@@ -525,14 +527,7 @@ export class CompaniesHouseConnector implements IConnector {
     }
 
     const foundedYear = item.date_of_creation ? parseInt(item.date_of_creation.slice(0, 4), 10) : undefined;
-    const companyStatus: 'active' | 'dissolved' | 'inactive' | 'unknown' =
-      item.company_status === 'active'
-        ? 'active'
-        : item.company_status === 'dissolved'
-        ? 'dissolved'
-        : item.company_status
-        ? 'inactive'
-        : 'unknown';
+    const companyStatus = normalizeLegalCompanyStatus(item.company_status);
 
     return {
       providerId: this.id,
@@ -598,6 +593,7 @@ export class CompaniesHouseConnector implements IConnector {
       providerMetadata: {
         isLiveApi: isLive,
         companyType: item.company_type,
+        companyStatusLabel: item.company_status,
         sicCodes: item.sic_codes,
       },
     };

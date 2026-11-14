@@ -17,6 +17,9 @@ import {
   Trash2,
   Lock,
   Filter,
+  BookOpen,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   ConnectorStatus,
@@ -179,6 +182,7 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
   const [savingCred, setSavingCred] = useState(false);
 
   const [openConfigId, setOpenConfigId] = useState<string | null>(null);
+  const [openDocsId, setOpenDocsId] = useState<string | null>(null);
   const [configDraft, setConfigDraft] = useState<{
     timeoutMs: number;
     maxRetries: number;
@@ -281,6 +285,7 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
       return;
     }
     setOpenConfigId(null);
+    setOpenDocsId(null);
     setOpenCredId(c.id);
     setCredInputs({});
   };
@@ -340,6 +345,7 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
       return;
     }
     setOpenCredId(null);
+    setOpenDocsId(null);
     setOpenConfigId(c.id);
     setConfigDraft({
       timeoutMs: c.config?.timeoutMs ?? 10000,
@@ -611,6 +617,13 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
               <option value="NO">Norway (NO)</option>
               <option value="GB">United Kingdom (GB)</option>
               <option value="AU">Australia (AU)</option>
+              <option value="US">United States (US)</option>
+              <option value="FR">France (FR)</option>
+              <option value="JP">Japan (JP)</option>
+              <option value="SG">Singapore (SG)</option>
+              <option value="DE">Germany (DE)</option>
+              <option value="CA">Canada (CA)</option>
+              <option value="IN">India (IN)</option>
               <option value="GLOBAL">Global Providers</option>
             </select>
 
@@ -746,6 +759,13 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
                       </div>
                     )}
 
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="text-slate-500 dark:text-slate-400">Last Verified Success</span>
+                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200">
+                        {c.lastSuccessAt ? new Date(c.lastSuccessAt).toLocaleString() : 'Never verified'}
+                      </span>
+                    </div>
+
                     {c.lastRunAt && (
                       <div className="flex items-center justify-between gap-2 text-[11px]">
                         <span className="text-slate-500 dark:text-slate-400">Last Executed</span>
@@ -843,6 +863,24 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
 
                     <button
                       type="button"
+                      onClick={() => {
+                        setOpenCredId(null);
+                        setOpenConfigId(null);
+                        setOpenDocsId(openDocsId === c.id ? null : c.id);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg border border-slate-200 dark:border-slate-700 transition"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Docs &amp; Provenance</span>
+                      {openDocsId === c.id ? (
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => handleOpenConfig(c)}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg border border-slate-200 dark:border-slate-700 transition ml-auto"
                     >
@@ -850,6 +888,110 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
                       <span>Policy</span>
                     </button>
                   </div>
+
+                  {/* Inline Documentation & Provenance Drawer */}
+                  {openDocsId === c.id && (
+                    <div className="p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-3 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <BookOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                          <span>Documentation, License &amp; Provenance</span>
+                        </span>
+                        {c.version && (
+                          <span className="font-mono text-[10px] text-slate-500">v{c.version}</span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+                        <div>
+                          <span className="font-semibold text-slate-600 dark:text-slate-400 block">
+                            License &amp; Terms:
+                          </span>
+                          <span className="text-slate-800 dark:text-slate-200">
+                            {c.license || c.attribution}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-600 dark:text-slate-400 block">
+                            Credential Requirement:
+                          </span>
+                          <span className="text-slate-800 dark:text-slate-200">
+                            {c.credentialRequirements?.setupInstructions || 'No credentials required'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {c.supportedIdentifierTypes && c.supportedIdentifierTypes.length > 0 && (
+                        <div className="flex items-center flex-wrap gap-1.5">
+                          <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                            Identifiers:
+                          </span>
+                          {c.supportedIdentifierTypes.map((idType) => (
+                            <span
+                              key={idType}
+                              className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-mono text-[10px] text-slate-700 dark:text-slate-300"
+                            >
+                              {idType}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex items-center flex-wrap gap-3 pt-1">
+                        {c.homepageUrl && (
+                          <a
+                            href={c.homepageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium text-[11px]"
+                          >
+                            <span>Official API Docs</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                        {c.credentialRequirements?.obtainKeyUrl && (
+                          <a
+                            href={c.credentialRequirements.obtainKeyUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium text-[11px]"
+                          >
+                            <span>Obtain API Credentials</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
+
+                      {/* Recent Execution Runs for this Connector */}
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+                        <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                          Recent Provenance Runs
+                        </div>
+                        {runs.filter((r) => r.connectorId === c.id).slice(0, 3).length === 0 ? (
+                          <div className="text-[11px] text-slate-400">
+                            No executions recorded yet for this connector.
+                          </div>
+                        ) : (
+                          runs
+                            .filter((r) => r.connectorId === c.id)
+                            .slice(0, 3)
+                            .map((r) => (
+                              <div
+                                key={r.id}
+                                className="flex items-center justify-between gap-2 text-[11px] bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded border border-slate-200/80 dark:border-slate-800"
+                              >
+                                <span className="font-mono text-slate-700 dark:text-slate-300">
+                                  {r.operation} · {r.status} ({r.recordsNormalized} norm)
+                                </span>
+                                <span className="font-mono tabular-nums text-slate-400">
+                                  {new Date(r.startedAt).toLocaleString()}
+                                </span>
+                              </div>
+                            ))
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Inline Credential Rotation Drawer */}
                   {openCredId === c.id && c.credentialRequirements && (

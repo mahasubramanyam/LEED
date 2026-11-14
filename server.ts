@@ -44,6 +44,11 @@ import { normalizePhoneNumber } from './server/geo/phoneUtils.js';
 import { formatInternationalAddress, validatePostalCode } from './server/geo/addressUtils.js';
 import { validateIdentifier, normalizeIdentifierValue } from './server/identifiers/identifierEngine.js';
 import { buildCountryCapabilityMatrix } from './server/geo/capabilityMatrix.js';
+import { resolveSevenStateRegistryStatus, TEN_COUNTRY_REGISTRY_AUDIT } from './server/geo/registryAudit.js';
+import {
+  applyOfficialVerificationToLead,
+  verifyLeadWithOfficialRegistry,
+} from './server/verification/registryVerificationService.js';
 import { buildCsvDocument } from './shared/csvUtils.js';
 import { canonicalizeIdentifierType, getIdentifierAliases } from './shared/identifierRegistry.js';
 import {
@@ -818,6 +823,7 @@ protectedApi.post('/identifiers/validate', (req: Request, res: Response) => {
 // Country and Source Capability Matrix
 protectedApi.get('/geo/capability-matrix', async (req: Request, res: Response) => {
   try {
+    ensureConnectorsRegistered();
     const { isPg } = checkStorageEngine();
     const [connectors, settings, overrides] = await Promise.all([
       isPg ? postgresStorage.getConnectors() : storage.getConnectorsUnified(),
@@ -826,8 +832,23 @@ protectedApi.get('/geo/capability-matrix', async (req: Request, res: Response) =
     ]);
     const hasChKey = Boolean(process.env.COMPANIES_HOUSE_API_KEY || settings.companiesHouseApiKey);
     const matrix = buildCountryCapabilityMatrix(connectors, { hasChKey, overrides });
+    const stateSummary: Record<string, number> = {
+      live_and_operational: 0,
+      live_auth_required: 0,
+      configuration_required: 0,
+      offline_reference_only: 0,
+      public_access_unavailable: 0,
+      not_implemented: 0,
+      temporarily_unavailable: 0,
+    };
+    for (const entry of matrix) {
+      if (entry.registryState && entry.registryState in stateSummary) {
+        stateSummary[entry.registryState]++;
+      }
+    }
     res.json({
       matrix,
+      stateSummary,
       totalSources: matrix.length,
       sovereignStatesCount: 195,
       timestamp: new Date().toISOString(),
@@ -835,6 +856,70 @@ protectedApi.get('/geo/capability-matrix', async (req: Request, res: Response) =
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
+  }
+});
+
+// Phase 6: 10-Country Official Government Registry Coverage & 7-State Audit Matrix
+protectedApi.get('/registries/coverage', async (req: Request, res: Response) => {
+  try {
+    ensureConnectorsRegistered();
+    const { isPg } = checkStorageEngine();
+    const [connectors, settings, overrides] = await Promise.all([
+      isPg ? postgresStorage.getConnectors() : storage.getConnectorsUnified(),
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+      isPg ? postgresStorage.getCapabilityOverrides() : Promise.resolve(undefined),
+    ]);
+
+    const connectorMap = new Map(connectors.map((c) => [c.id, c]));
+    const hasChKey = Boolean(process.env.COMPANIES_HOUSE_API_KEY || settings.companiesHouseApiKey);
+    const matrix = buildCountryCapabilityMatrix(connectors, { hasChKey, overrides });
+
+    const registries = Object.values(TEN_COUNTRY_REGISTRY_AUDIT).map((audit) => {
+      const conn = audit.connectorId ? connectorMap.get(audit.connectorId) : undefined;
+      let effectiveConn = conn;
+      if (audit.countryCode === 'GB' && hasChKey && conn && !conn.isConfigured) {
+        effectiveConn = { ...conn, isConfigured: true, healthState: 'operational', operational: true };
+      }
+      const registryState = resolveSevenStateRegistryStatus(audit, effectiveConn);
+      const lastVerifiedAt = overrides?.get(audit.countryCode)?.lastCheckedAt || conn?.lastSuccessAt || undefined;
+
+      return {
+        countryCode: audit.countryCode,
+        countryName: audit.countryName,
+        flag: audit.flag,
+        authorityName: audit.authorityName,
+        connectorId: audit.connectorId,
+        primaryIdentifierType: audit.primaryIdentifierType,
+        registryState,
+        lastVerifiedAt,
+        connectorHealthState: conn?.healthState,
+        isConfigured: conn ? conn.isConfigured : false,
+        auditDetails: audit.auditDetails,
+      };
+    });
+
+    const stateCounts: Record<string, number> = {
+      live_and_operational: 0,
+      live_auth_required: 0,
+      configuration_required: 0,
+      offline_reference_only: 0,
+      public_access_unavailable: 0,
+      not_implemented: 0,
+      temporarily_unavailable: 0,
+    };
+    for (const r of registries) {
+      stateCounts[r.registryState] = (stateCounts[r.registryState] || 0) + 1;
+    }
+
+    res.json({
+      registries,
+      stateCounts,
+      matrixCount: matrix.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
   }
 });
 
@@ -1281,6 +1366,76 @@ protectedApi.post('/leads/:id/activities', async (req: Request, res: Response) =
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+  }
+});
+
+// Phase 6: Verify & Match Lead Against Official Government Business Registry
+protectedApi.post('/leads/:id/verify-registry', async (req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  try {
+    const { isPg } = checkStorageEngine();
+    const existingLead = isPg
+      ? await postgresStorage.getLead(req.params.id)
+      : storage.getLead(req.params.id);
+
+    if (!existingLead) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+
+    const [settings, configs] = await Promise.all([
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+      isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+    ]);
+
+    for (const [id, cfg] of Object.entries(configs)) {
+      if (typeof cfg?.enabled === 'boolean') {
+        connectorRegistry.setEnabledOverride(id, cfg.enabled);
+      }
+    }
+
+    const report = await verifyLeadWithOfficialRegistry(existingLead, {
+      registry: connectorRegistry,
+      executionEngine: connectorExecutionEngine,
+      configs,
+      userAgent: settings.userAgent,
+      onRecordRun: async (run) => {
+        if (isPg) await postgresStorage.recordConnectorRun(run);
+        else storage.recordConnectorRun(run);
+      },
+    });
+
+    const updatedLead = applyOfficialVerificationToLead(existingLead, report);
+    const savedLead = isPg
+      ? await postgresStorage.upsertLead(updatedLead)
+      : storage.upsertLead(updatedLead);
+
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'LEAD_REGISTRY_VERIFIED',
+        req.owner.email,
+        'lead',
+        savedLead.id,
+        {
+          state: report.state,
+          matchType: report.matchType,
+          connectorId: report.connectorId,
+          isLiveApi: report.isLiveApi,
+          conflictCount: report.conflicts.length,
+        },
+        normalizeClientIp(req)
+      );
+    }
+
+    res.json({
+      verified: report.state === 'officially_verified',
+      lead: savedLead,
+      report,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const status = msg.includes('Database connection unavailable') ? 503 : 500;
+    res.status(status).json({ error: redactSecrets(msg) });
   }
 });
 

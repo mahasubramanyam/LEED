@@ -1,4 +1,5 @@
 import { classifyConnectorError, classifyHttpStatus, ConnectorError } from '../core/errors.js';
+import { normalizeLegalCompanyStatus } from '../core/normalizer.js';
 import { connectorRegistry } from '../core/registry.js';
 import {
   ClassifiedConnectorError,
@@ -42,6 +43,7 @@ interface BrregEnhet {
   registreringsdatoEnhetsregisteret?: string;
   konkurs?: boolean;
   underAvvikling?: boolean;
+  slettedato?: string;
 }
 
 const BRREG_BASE = 'https://data.brreg.no/enhetsregisteret/api';
@@ -356,13 +358,22 @@ export class BrregConnector implements IConnector {
       }
     }
 
-    const isDissolved = Boolean(e.konkurs || e.underAvvikling);
+    const companyStatus = normalizeLegalCompanyStatus(undefined, {
+      bankrupt: e.konkurs,
+      underLiquidation: e.underAvvikling,
+      cancelled: Boolean(e.slettedato),
+    });
     const foundedYear = e.registreringsdatoEnhetsregisteret
       ? parseInt(e.registreringsdatoEnhetsregisteret.slice(0, 4), 10)
       : undefined;
 
     const signals: string[] = ['Official Government Registry Record (Brreg Verified)'];
     let score = 65;
+    if (companyStatus === 'active') {
+      signals.push('Active Norwegian Entity Status');
+    } else if (companyStatus === 'dissolved') {
+      signals.push('Entity Marked Dissolved / Bankrupt / Struck Off in Brreg');
+    }
     if (website) {
       score += 15;
       signals.push('Official Registered Website Present');
@@ -419,7 +430,7 @@ export class BrregConnector implements IConnector {
         legalName: e.navn,
         registrationNumber: e.organisasjonsnummer,
         registrationType: 'NO_ORG',
-        companyStatus: isDissolved ? 'dissolved' : 'active',
+        companyStatus,
         website,
         domain,
         address: {
@@ -461,6 +472,7 @@ export class BrregConnector implements IConnector {
         naceCode: e.naeringskode1?.kode,
         konkurs: Boolean(e.konkurs),
         underAvvikling: Boolean(e.underAvvikling),
+        slettedato: e.slettedato,
       },
     };
   }

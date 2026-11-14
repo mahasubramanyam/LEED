@@ -1,10 +1,44 @@
 import { CountrySourceCapability, IntegrationStatus } from './types.js';
 import { getAllCountries } from './countries.js';
-import { ConnectorStatus } from '../types.js';
+import { ConnectorStatus, SevenStateRegistryStatus } from '../types.js';
+import { resolveSevenStateRegistryStatus, TEN_COUNTRY_REGISTRY_AUDIT } from './registryAudit.js';
 
 export interface CapabilityMatrixOptions {
   hasChKey?: boolean;
   overrides?: Map<string, { lastCheckedAt?: string; notes?: string }>;
+}
+
+const LEGACY_CAPABILITY_IDS: Record<string, string> = {
+  NO: 'cap-no-brreg',
+  GB: 'cap-gb-ch',
+  AU: 'cap-au-abn',
+  US: 'cap-us-sec',
+  DE: 'cap-de-handelsregister',
+  FR: 'cap-fr-sirene',
+  SG: 'cap-sg-acra',
+  JP: 'cap-jp-nta',
+  CA: 'cap-ca-corp',
+  IN: 'cap-in-mca',
+};
+
+function mapSevenStateToLegacyIntegration(
+  state: SevenStateRegistryStatus,
+  authRequirement?: string
+): IntegrationStatus {
+  switch (state) {
+    case 'live_and_operational':
+      return authRequirement === 'api_key' ? 'configured_api_key' : 'live_open_api';
+    case 'live_auth_required':
+      return 'requires_api_key';
+    case 'configuration_required':
+    case 'not_implemented':
+    case 'temporarily_unavailable':
+      return 'unavailable';
+    case 'offline_reference_only':
+      return 'public_directory_permit';
+    case 'public_access_unavailable':
+      return 'restricted_manual_only';
+  }
 }
 
 export function buildCountryCapabilityMatrix(
@@ -17,92 +51,85 @@ export function buildCountryCapabilityMatrix(
     connectorMap.set(c.id, c);
   }
   const overrides = options.overrides;
-
   const matrix: CountrySourceCapability[] = [];
 
-  // 1. Official Open Registry: Norway Brreg
-  const brregConn = connectorMap.get('conn-brreg');
-  matrix.push({
-    id: 'cap-no-brreg',
-    countryCode: 'NO',
-    countryName: 'Norway',
-    flag: '🇳🇴',
-    providerName: 'Brønnøysund Register Centre (Brreg)',
-    sourceType: 'official_open_registry',
-    integrationStatus: brregConn?.healthState === 'disabled' ? 'unavailable' : 'live_open_api',
-    authRequirement: 'none_open',
-    sourceUrl: 'https://data.brreg.no/enhetsregisteret/api',
-    lastCheckedAt: overrides?.get('NO')?.lastCheckedAt || brregConn?.lastRunAt || undefined,
-    notes:
-      overrides?.get('NO')?.notes ||
-      'Official open government API. Real-time querying of 9-digit Norwegian organisation numbers (NO_ORG), legal status, NACE codes, and registered postal addresses.',
-    licensingInfo: 'Norwegian Licence for Open Government Data (NLOD 2.0)',
-    coverageFeatures: ['Company Search', 'Official OrgNr (NO_ORG)', 'NACE Classification', 'Registered Address', 'Legal Status Verification'],
-  });
+  // 1. Audited 10 Priority Countries
+  const priorityOrder = ['NO', 'GB', 'AU', 'US', 'FR', 'SG', 'JP', 'CA', 'DE', 'IN'];
+  for (const code of priorityOrder) {
+    const audit = TEN_COUNTRY_REGISTRY_AUDIT[code];
+    if (!audit) continue;
+    const conn = audit.connectorId ? connectorMap.get(audit.connectorId) : undefined;
+    const override = overrides?.get(code);
 
-  // 2. Official Registry Integration: UK Companies House
-  const chConn = connectorMap.get('conn-companies-house');
-  const hasChKey = Boolean(
-    options.hasChKey ||
-      process.env.COMPANIES_HOUSE_API_KEY ||
-      chConn?.isConfigured ||
-      chConn?.status === 'configured' ||
-      chConn?.status === 'healthy' ||
-      chConn?.healthState === 'operational'
-  );
-  matrix.push({
-    id: 'cap-gb-ch',
-    countryCode: 'GB',
-    countryName: 'United Kingdom',
-    flag: '🇬🇧',
-    providerName: 'UK Companies House Registry API',
-    sourceType: 'official_api_credentials',
-    integrationStatus:
-      chConn?.healthState === 'disabled'
-        ? 'unavailable'
-        : hasChKey
-        ? 'configured_api_key'
-        : 'requires_api_key',
-    authRequirement: 'api_key',
-    sourceUrl: 'https://developer.company-information.service.gov.uk',
-    lastCheckedAt: overrides?.get('GB')?.lastCheckedAt || chConn?.lastRunAt || undefined,
-    notes:
-      overrides?.get('GB')?.notes ||
-      (hasChKey
-        ? 'API key configured. Official live REST lookup active for UK Companies House (England, Wales, Scotland, Northern Ireland; 600 calls/5 min).'
-        : 'Official Crown registry for England, Wales, Scotland, and Northern Ireland. Free API key required in Settings/Owner Control Centre; currently only offline sample fallback is available without a key.'),
-    licensingInfo: 'Crown Copyright, Open Government Licence (OGL v3.0)',
-    coverageFeatures: ['Company Search', 'Verified CRN (UK_CRN)', 'Filing History', 'Registered Office', 'Incorporation Date', 'SIC Codes'],
-  });
+    let effectiveConn = conn;
+    if (code === 'GB' && options.hasChKey) {
+      if (conn && !conn.isConfigured) {
+        effectiveConn = { ...conn, isConfigured: true, healthState: 'operational', operational: true };
+      } else if (!conn) {
+        effectiveConn = {
+          id: 'conn-companies-house',
+          name: audit.authorityName,
+          category: 'government_registry',
+          countryCoverage: ['GB'],
+          status: 'configured',
+          healthState: 'operational',
+          operational: true,
+          authType: 'api_key',
+          isConfigured: true,
+          rateLimitNote: audit.auditDetails.rateLimitsAndPagination,
+          attribution: audit.authorityName,
+          totalCalls: 0,
+        };
+      }
+    }
 
-  // 3. Credentialed Registry: Australia ABR / ABN Lookup (Live ABR API requires GUID; offline checksum utility only)
-  const abnConn = connectorMap.get('conn-abn');
-  const hasAbrGuid = Boolean(process.env.ABR_GUID || abnConn?.isConfigured);
-  matrix.push({
-    id: 'cap-au-abn',
-    countryCode: 'AU',
-    countryName: 'Australia',
-    flag: '🇦🇺',
-    providerName: 'Australian Business Register (ABR / ABN Lookup)',
-    sourceType: 'official_api_credentials',
-    integrationStatus:
-      abnConn?.healthState === 'disabled'
-        ? 'unavailable'
-        : hasAbrGuid
-        ? 'configured_api_key'
-        : 'requires_api_key',
-    authRequirement: 'api_key',
-    sourceUrl: 'https://abr.business.gov.au/Documentation/WebServiceMethods',
-    lastCheckedAt: overrides?.get('AU')?.lastCheckedAt || abnConn?.lastRunAt || undefined,
-    notes:
-      overrides?.get('AU')?.notes ||
-      'Live Australian Business Register XML/JSON lookups require an official ABR Web Services GUID. Currently provides local ATO Modulo-89 checksum validation and a 5-record offline reference sample only.',
-    licensingInfo: 'Commonwealth of Australia Open Data (ABR Terms of Access)',
-    coverageFeatures: ['Offline ABN Modulo-89 Checksum', '5-Record Sample Reference', 'Live Registry Requires ABR GUID'],
-  });
+    const registryState = resolveSevenStateRegistryStatus(audit, effectiveConn);
+    // Strict honesty: lastVerifiedAt comes ONLY from real successful connector execution (lastSuccessAt) or explicit verified override
+    const lastVerifiedAt = override?.lastCheckedAt || conn?.lastSuccessAt || undefined;
 
-  // 4. Multi-Jurisdiction Geospatial Directory: OpenStreetMap Overpass & Nominatim
+    const authRequirement =
+      audit.defaultState === 'live_auth_required' || (audit.connectorId && effectiveConn?.authType === 'api_key')
+        ? 'api_key'
+        : audit.auditDetails.publicAccessPermitted
+        ? 'none_open'
+        : 'manual_portal';
+
+    const sourceType =
+      registryState === 'live_and_operational' && authRequirement === 'none_open'
+        ? 'official_open_registry'
+        : audit.connectorId
+        ? 'official_api_credentials'
+        : 'manual_registry_portal';
+
+    matrix.push({
+      id: LEGACY_CAPABILITY_IDS[code] || `cap-${code.toLowerCase()}-official`,
+      countryCode: audit.countryCode,
+      countryName: audit.countryName,
+      flag: audit.flag,
+      providerName: audit.authorityName,
+      sourceType,
+      integrationStatus: mapSevenStateToLegacyIntegration(registryState, authRequirement),
+      registryState,
+      connectorId: audit.connectorId,
+      authRequirement,
+      sourceUrl: audit.auditDetails.documentationUrl,
+      lastCheckedAt: lastVerifiedAt,
+      lastVerifiedAt,
+      notes: override?.notes || `${audit.auditDetails.officialApiSummary} ${audit.auditDetails.accessRestrictions}`,
+      licensingInfo: audit.auditDetails.commercialUseAndRedistribution,
+      coverageFeatures: audit.auditDetails.searchAndVerificationCapabilities,
+      auditDetails: audit.auditDetails,
+    });
+  }
+
+  // 2. Multi-Jurisdiction Geospatial Directory: OpenStreetMap Overpass & Nominatim
   const osmConn = connectorMap.get('conn-osm');
+  const osmState: SevenStateRegistryStatus =
+    osmConn?.healthState === 'disabled'
+      ? 'configuration_required'
+      : osmConn?.healthState === 'temporarily_unavailable' || osmConn?.healthState === 'rate_limited'
+      ? 'temporarily_unavailable'
+      : 'live_and_operational';
   matrix.push({
     id: 'cap-global-osm',
     countryCode: 'GLOBAL',
@@ -110,10 +137,13 @@ export function buildCountryCapabilityMatrix(
     flag: '🌐',
     providerName: 'OpenStreetMap Nominatim & Overpass Commercial POI',
     sourceType: 'public_geo_directory',
-    integrationStatus: osmConn?.healthState === 'disabled' ? 'unavailable' : 'live_open_api',
+    integrationStatus: mapSevenStateToLegacyIntegration(osmState),
+    registryState: osmState,
+    connectorId: 'conn-osm',
     authRequirement: 'none_open',
     sourceUrl: 'https://nominatim.openstreetmap.org',
-    lastCheckedAt: overrides?.get('GLOBAL')?.lastCheckedAt || osmConn?.lastRunAt || undefined,
+    lastCheckedAt: overrides?.get('GLOBAL')?.lastCheckedAt || osmConn?.lastSuccessAt || undefined,
+    lastVerifiedAt: overrides?.get('GLOBAL')?.lastCheckedAt || osmConn?.lastSuccessAt || undefined,
     notes:
       overrides?.get('GLOBAL')?.notes ||
       'Global crowdsourced business, retail, and commercial point-of-interest directory (NOT an official corporate registry). Throttled to 1 req/sec per Nominatim Usage Policy.',
@@ -121,8 +151,14 @@ export function buildCountryCapabilityMatrix(
     coverageFeatures: ['Commercial POI Search', 'Global Coordinates', 'Street Addresses', 'Website & Phone discovery'],
   });
 
-  // 5. Public Website Sources Requiring Permitted Access: Safe Web Inspector
+  // 3. Public Website Sources Requiring Permitted Access: Safe Web Inspector
   const webConn = connectorMap.get('conn-web-inspector');
+  const webState: SevenStateRegistryStatus =
+    webConn?.healthState === 'disabled'
+      ? 'configuration_required'
+      : webConn?.healthState === 'temporarily_unavailable'
+      ? 'temporarily_unavailable'
+      : 'live_and_operational';
   matrix.push({
     id: 'cap-global-inspector',
     countryCode: 'GLOBAL',
@@ -130,111 +166,41 @@ export function buildCountryCapabilityMatrix(
     flag: '🛡️',
     providerName: 'SSRF-Protected Autonomous Web Inspector',
     sourceType: 'web_inspector',
-    integrationStatus: webConn?.healthState === 'disabled' ? 'unavailable' : 'live_open_api',
+    integrationStatus: mapSevenStateToLegacyIntegration(webState),
+    registryState: webState,
+    connectorId: 'conn-web-inspector',
     authRequirement: 'none',
     sourceUrl: 'https://internal.leed/inspection',
-    lastCheckedAt: webConn?.lastRunAt || undefined,
-    notes: 'Direct HTTP inspection of candidate domain homepages. Enforces DNS rebinding protection, RFC 1918 private IP blocking, 300KB streaming caps, and robots.txt compliance.',
+    lastCheckedAt: webConn?.lastSuccessAt || undefined,
+    lastVerifiedAt: webConn?.lastSuccessAt || undefined,
+    notes:
+      'Direct HTTP inspection of candidate domain homepages. Enforces DNS rebinding protection, RFC 1918 private IP blocking, 300KB streaming caps, and robots.txt compliance.',
     licensingInfo: 'Direct Target Web Inspection (Owner User-Agent Disclosed)',
     coverageFeatures: ['Email Extraction', 'SSL Validation', 'Social Profiles', 'Server Latency', 'Homepage Metadata'],
   });
 
-  // 6. Paid / Credentialed API Integrations
+  // 4. Switzerland Portal Note (Non-priority explicit portal entry)
   matrix.push({
-    id: 'cap-us-sec',
-    countryCode: 'US',
-    countryName: 'United States',
-    flag: '🇺🇸',
-    providerName: 'SEC EDGAR / Commercial Data Provider (D&B / ZoomInfo)',
-    sourceType: 'official_api_credentials',
-    integrationStatus: 'requires_api_key',
-    authRequirement: 'api_key',
-    sourceUrl: 'https://www.sec.gov/edgar/searchedgar/companysearch',
-    lastCheckedAt: overrides?.get('US')?.lastCheckedAt || undefined,
+    id: 'cap-ch-reg',
+    countryCode: 'CH',
+    countryName: 'Switzerland',
+    flag: '🇨🇭',
+    providerName: 'ZEFix (Central Business Name Index)',
+    sourceType: 'manual_registry_portal',
+    integrationStatus: 'restricted_manual_only',
+    registryState: 'public_access_unavailable',
+    authRequirement: 'manual_portal',
+    sourceUrl: 'https://www.zefix.ch',
+    lastCheckedAt: overrides?.get('CH')?.lastCheckedAt || undefined,
+    lastVerifiedAt: overrides?.get('CH')?.lastCheckedAt || undefined,
     notes:
-      overrides?.get('US')?.notes ||
-      'SEC EDGAR covers US publicly traded/reporting filings only (not a complete US state corporate registration database). Private US business enrichment requires state SOS or external provider credentials.',
-    licensingInfo: 'Commercial Provider License / SEC Public Domain',
-    coverageFeatures: ['Public SEC Filings Only', '10-K / 10-Q Reports', 'CIK Identifier', 'State-by-State Registry External'],
+      overrides?.get('CH')?.notes ||
+      'Cantonal commercial registers index. Web portal search available; bulk queries or automated API access require formal permit.',
+    licensingInfo: 'Jurisdictional Portal Terms of Use',
+    coverageFeatures: ['Company Name', 'UID Registration Number', 'Legal Status'],
   });
 
-  // 7. Restricted, Manual or Portal-Only Jurisdictions
-  const restrictedJurisdictions = [
-    {
-      countryCode: 'DE',
-      countryName: 'Germany',
-      flag: '🇩🇪',
-      providerName: 'Gemeinsames Registerportal der Länder (Handelsregister)',
-      sourceUrl: 'https://www.handelsregister.de',
-      notes: 'No free open REST API. Search interface accessible via manual web portal; bulk retrieval requires judicial subscription agreement.',
-      status: 'restricted_manual_only' as IntegrationStatus,
-    },
-    {
-      countryCode: 'FR',
-      countryName: 'France',
-      flag: '🇫🇷',
-      providerName: 'INPI Registre National des Entreprises (RNE / SIRENE)',
-      sourceUrl: 'https://data.inpi.fr',
-      notes: 'Official French commercial register. Open data available via SIRENE database downloads; API access requires authenticated INPI account credentials.',
-      status: 'public_directory_permit' as IntegrationStatus,
-    },
-    {
-      countryCode: 'CH',
-      countryName: 'Switzerland',
-      flag: '🇨🇭',
-      providerName: 'ZEFix (Central Business Name Index)',
-      sourceUrl: 'https://www.zefix.ch',
-      notes: 'Cantonal commercial registers index. Web portal search available; bulk queries or automated harvesting prohibited without permit.',
-      status: 'restricted_manual_only' as IntegrationStatus,
-    },
-    {
-      countryCode: 'JP',
-      countryName: 'Japan',
-      flag: '🇯🇵',
-      providerName: 'National Tax Agency Corporate Number Publication Site',
-      sourceUrl: 'https://www.houjin-bangou.nta.go.jp',
-      notes: '13-digit Corporate Number registry. Public web search and bulk CSV downloads available; automated direct API requires registered application token.',
-      status: 'restricted_manual_only' as IntegrationStatus,
-    },
-    {
-      countryCode: 'SG',
-      countryName: 'Singapore',
-      flag: '🇸🇬',
-      providerName: 'ACRA BizFile (Accounting and Corporate Regulatory Authority)',
-      sourceUrl: 'https://www.bizfile.gov.sg',
-      notes: 'Official registry for Singapore companies (UEN). Basic search is public; detailed company profiles require paid SingPass portal access.',
-      status: 'restricted_manual_only' as IntegrationStatus,
-    },
-    {
-      countryCode: 'IN',
-      countryName: 'India',
-      flag: '🇮🇳',
-      providerName: 'Ministry of Corporate Affairs (MCA21 / GST Portal)',
-      sourceUrl: 'https://www.mca.gov.in',
-      notes: 'Company Identification Number (CIN) and GSTIN search. Portal protected by CAPTCHA; automated API access restricted to authorized GSP partners.',
-      status: 'restricted_manual_only' as IntegrationStatus,
-    },
-  ];
-
-  for (const item of restrictedJurisdictions) {
-    matrix.push({
-      id: `cap-${item.countryCode.toLowerCase()}-reg`,
-      countryCode: item.countryCode,
-      countryName: item.countryName,
-      flag: item.flag,
-      providerName: item.providerName,
-      sourceType: 'manual_registry_portal',
-      integrationStatus: item.status,
-      authRequirement: 'manual_portal',
-      sourceUrl: item.sourceUrl,
-      lastCheckedAt: overrides?.get(item.countryCode)?.lastCheckedAt || undefined,
-      notes: overrides?.get(item.countryCode)?.notes || item.notes,
-      licensingInfo: 'Jurisdictional Portal Terms of Use',
-      coverageFeatures: ['Company Name', 'Registration Number', 'Legal Status'],
-    });
-  }
-
-  // 8. Add general geographic reference coverage indicator for all remaining sovereign states & territories
+  // 5. Offline geographic & identifier reference coverage for all remaining sovereign states
   const documentedCodes = new Set(matrix.map((m) => m.countryCode));
   for (const country of countries) {
     if (!documentedCodes.has(country.code)) {
@@ -246,12 +212,14 @@ export function buildCountryCapabilityMatrix(
         providerName: `${country.name} Geographic & Address Reference`,
         sourceType: 'geographic_reference_only',
         integrationStatus: 'unavailable',
+        registryState: 'offline_reference_only',
         authRequirement: 'none',
         sourceUrl: `https://en.wikipedia.org/wiki/ISO_3166-2:${country.code}`,
         lastCheckedAt: overrides?.get(country.code)?.lastCheckedAt || undefined,
+        lastVerifiedAt: overrides?.get(country.code)?.lastCheckedAt || undefined,
         notes:
           overrides?.get(country.code)?.notes ||
-          `Geographic reference only: ISO codes, postal rules, telephone dialing (+${country.callingCode.replace(/[^0-9]/g, '')}), currency (${country.currency}), and timezone specs verified. No official national business registry connector integrated.`,
+          `Offline reference only: ISO codes, postal rules, telephone dialing (+${country.callingCode.replace(/[^0-9]/g, '')}), currency (${country.currency}), and timezone specs verified. No official national business registry API connector integrated.`,
         licensingInfo: 'ISO 3166 / ISO 4217 Open Reference Standards',
         coverageFeatures: ['ISO Alpha-2 / Alpha-3', 'Calling Code Normalization', 'Address Formatting Rules', 'Currency / Timezone Specs'],
       });

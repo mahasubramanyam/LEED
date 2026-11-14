@@ -67,6 +67,8 @@ export type IntegrationStatus =
 
 export type AuthRequirement = 'none_open' | 'api_key' | 'environment' | 'manual_portal' | 'none';
 
+import type { RegistryAuditCriteria, SevenStateRegistryStatus } from '../types.js';
+
 export interface CountrySourceCapability {
   id: string;
   countryCode: string;
@@ -75,10 +77,14 @@ export interface CountrySourceCapability {
   providerName: string;
   sourceType: SourceType;
   integrationStatus: IntegrationStatus;
+  registryState?: SevenStateRegistryStatus;
+  connectorId?: string;
   authRequirement: AuthRequirement;
   sourceUrl: string;
   lastCheckedAt?: string;
+  lastVerifiedAt?: string;
   notes: string;
   licensingInfo: string;
   coverageFeatures: string[];
+  auditDetails?: RegistryAuditCriteria;
 }

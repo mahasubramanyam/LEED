@@ -23,8 +23,19 @@ import {
   Radio,
   Edit3,
   Save,
+  AlertTriangle,
+  RefreshCw,
+  Scale,
 } from 'lucide-react';
-import { CanonicalLead, PipelineStage, LeadIdentifier } from '../types.js';
+import {
+  CanonicalLead,
+  PipelineStage,
+  LeadIdentifier,
+  RegistryVerificationReport,
+  VerificationConflict,
+  VerificationHistoryEntry,
+  RegistryVerificationState,
+} from '../types.js';
 import { GeoSelector } from './GeoSelector.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
 import {
@@ -82,11 +93,114 @@ function getStatusBadge(status?: string, verified?: boolean) {
   );
 }
 
+function parseVerificationConflicts(customFields?: Record<string, string>): VerificationConflict[] {
+  if (!customFields?.verificationConflicts) return [];
+  try {
+    const parsed = JSON.parse(customFields.verificationConflicts);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseVerificationHistory(customFields?: Record<string, string>): VerificationHistoryEntry[] {
+  if (!customFields?.verificationHistory) return [];
+  try {
+    const parsed = JSON.parse(customFields.verificationHistory);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function renderRegistryStateBadge(state?: string) {
+  switch (state as RegistryVerificationState) {
+    case 'officially_verified':
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+          <CheckCircle2 className="w-3 h-3" />
+          <span>Officially Verified</span>
+        </span>
+      );
+    case 'probable_match':
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/40">
+          <ShieldCheck className="w-3 h-3" />
+          <span>Probable Match</span>
+        </span>
+      );
+    case 'conflict_detected':
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+          <AlertTriangle className="w-3 h-3" />
+          <span>Conflict Detected</span>
+        </span>
+      );
+    case 'offline_reference':
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+          <AlertCircle className="w-3 h-3" />
+          <span>Offline Reference Only</span>
+        </span>
+      );
+    case 'not_found':
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+          <AlertCircle className="w-3 h-3" />
+          <span>Not Found in Registry</span>
+        </span>
+      );
+    case 'unavailable':
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+          <AlertCircle className="w-3 h-3" />
+          <span>Registry Unavailable</span>
+        </span>
+      );
+    default:
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+          <span>Not Verified Yet</span>
+        </span>
+      );
+  }
+}
+
+function renderLegalCompanyStatusBadge(status?: CanonicalLead['companyStatus']) {
+  switch (status) {
+    case 'active':
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 uppercase">
+          Active
+        </span>
+      );
+    case 'inactive':
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30 uppercase">
+          Inactive
+        </span>
+      );
+    case 'dissolved':
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/30 uppercase">
+          Dissolved
+        </span>
+      );
+    default:
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 uppercase">
+          Unknown
+        </span>
+      );
+  }
+}
+
 interface LeadDetailModalProps {
   lead: CanonicalLead | null;
   stages: PipelineStage[];
   onClose: () => void;
   onUpdateLead: (lead: CanonicalLead) => void;
+  onLeadVerified?: (lead: CanonicalLead) => void;
   onAddNote: (leadId: string, content: string) => void;
   onAddActivity: (leadId: string, activity: any) => void;
   onInspectUrl: (url: string, leadId: string) => Promise<any>;
@@ -97,6 +211,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   stages,
   onClose,
   onUpdateLead,
+  onLeadVerified,
   onAddNote,
   onAddActivity,
   onInspectUrl,
@@ -140,6 +255,11 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   const [editWebsite, setEditWebsite] = useState(lead?.website || '');
   const [editProfileError, setEditProfileError] = useState<string | null>(null);
 
+  // Official Registry Verification state
+  const [isVerifyingRegistry, setIsVerifyingRegistry] = useState(false);
+  const [verificationReport, setVerificationReport] = useState<RegistryVerificationReport | null>(null);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+
   // AI Quick Actions state
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [aiPitch, setAiPitch] = useState<any>(null);
@@ -170,9 +290,46 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
     setAiPitch(null);
     setAiError(null);
     setInspectionResult(null);
+    setVerificationReport(null);
+    setVerificationError(null);
   }, [lead?.id]);
 
   if (!lead) return null;
+
+  const storedConflicts = parseVerificationConflicts(lead.customFields);
+  const activeConflicts = verificationReport?.conflicts ?? storedConflicts;
+  const verificationHistory = parseVerificationHistory(lead.customFields);
+  const lastVerifiedAt = lead.customFields?.lastVerifiedAt;
+  const lastVerificationSource = lead.customFields?.lastVerificationSource;
+  const lastVerificationSourceUrl = lead.customFields?.lastVerificationSourceUrl;
+  const lastRegistryState = lead.customFields?.lastRegistryState;
+  const lastVerificationMatchType = lead.customFields?.lastVerificationMatchType;
+
+  const handleVerifyWithOfficialRegistry = async () => {
+    setIsVerifyingRegistry(true);
+    setVerificationError(null);
+    try {
+      const res = await apiFetch(`/api/leads/${lead.id}/verify-registry`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Official registry verification failed');
+      }
+      if (data.report) setVerificationReport(data.report);
+      if (data.lead) {
+        if (onLeadVerified) {
+          onLeadVerified(data.lead);
+        } else {
+          onUpdateLead(data.lead);
+        }
+      }
+    } catch (err: unknown) {
+      setVerificationError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsVerifyingRegistry(false);
+    }
+  };
 
   const uiIdentifierOptions = getUiIdentifierOptions();
   const leadLocale = getLocaleForCountry(lead.address?.countryCode, lead.currency);
@@ -783,6 +940,169 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </div>
               )}
 
+              {/* Official Government Registry Verification & Legal Identity */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div>
+                    <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
+                      <Scale className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Official Government Registry &amp; Legal Identity</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Higher-trust registry verification preserves CRM pipeline stages, notes, and deal history while detecting legal identity conflicts.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleVerifyWithOfficialRegistry}
+                    disabled={isVerifyingRegistry}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded text-xs transition shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingRegistry ? 'animate-spin' : ''}`} />
+                    <span>{isVerifyingRegistry ? 'Verifying Registry...' : 'Verify with Official Registry'}</span>
+                  </button>
+                </div>
+
+                {verificationError && (
+                  <div className="p-2.5 bg-rose-950/40 border border-rose-800 rounded text-rose-300 text-xs">
+                    {verificationError}
+                  </div>
+                )}
+
+                {verificationReport && (
+                  <div className="p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-[11px] text-slate-200 space-y-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-semibold text-white">Latest Verification Run</span>
+                      {renderRegistryStateBadge(verificationReport.state)}
+                    </div>
+                    <p className="text-slate-300">{verificationReport.summary}</p>
+                    {verificationReport.notes && verificationReport.notes.length > 0 && (
+                      <ul className="list-disc list-inside text-[10px] text-slate-400 space-y-0.5">
+                        {verificationReport.notes.map((n, idx) => (
+                          <li key={idx}>{n}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
+                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Legal Business Name</div>
+                    <div className="text-xs font-semibold text-white mt-0.5 truncate" title={lead.legalName || lead.companyName}>
+                      {lead.legalName || lead.companyName}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
+                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Official Registration No.</div>
+                    <div className="text-xs font-mono text-cyan-300 mt-0.5">
+                      {lead.registrationNumber
+                        ? `${lead.registrationType || 'REG'}: ${lead.registrationNumber}`
+                        : 'Not registered'}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
+                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Jurisdiction &amp; Legal Status</div>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="text-xs text-slate-200 font-mono">
+                        {lead.address?.countryCode || '—'} · {lead.address?.country || 'Unknown'}
+                      </span>
+                      {renderLegalCompanyStatusBadge(lead.companyStatus)}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
+                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Official Registry Source</div>
+                    <div className="text-xs text-slate-200 mt-0.5 flex items-center gap-1.5">
+                      <span className="truncate">
+                        {lastVerificationSource || lead.sources[0]?.sourceName || 'Not verified with registry'}
+                      </span>
+                      {(lastVerificationSourceUrl || lead.sources[0]?.url) && (
+                        <a
+                          href={lastVerificationSourceUrl || lead.sources[0]?.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-400 hover:text-indigo-300 shrink-0"
+                          title="Open Official Registry Record"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
+                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Verification Status</div>
+                    <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                      {renderRegistryStateBadge(lastRegistryState)}
+                      {lastVerificationMatchType && lastVerificationMatchType !== 'none' && (
+                        <span className="text-[10px] font-mono text-slate-400">
+                          ({lastVerificationMatchType.replace(/_/g, ' ')})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
+                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Last Verified Timestamp</div>
+                    <div className="text-xs font-mono tabular-nums text-slate-200 mt-0.5">
+                      {lastVerifiedAt
+                        ? formatDateLocale(lastVerifiedAt, leadLocale, leadTimezone)
+                        : 'Not verified yet'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Conflicts / Outdated Information Alert Panel */}
+                {activeConflicts.length > 0 && (
+                  <div className="p-3 bg-rose-950/35 border border-rose-800/70 rounded-lg space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-rose-300">
+                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                      <span>
+                        Conflicting or Outdated Information Detected ({activeConflicts.length})
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {activeConflicts.map((conflict, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2 bg-slate-950/80 border border-rose-900/60 rounded text-[11px] space-y-1"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono font-semibold text-rose-200 uppercase">
+                              {conflict.field}
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                                conflict.severity === 'high'
+                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                                  : conflict.severity === 'medium'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                  : 'bg-slate-800 text-slate-300 border border-slate-700'
+                              }`}
+                            >
+                              {conflict.severity}
+                            </span>
+                          </div>
+                          <p className="text-slate-300">{conflict.message}</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-[10px] pt-0.5">
+                            <div className="text-slate-400">
+                              CRM: <span className="text-slate-200">{conflict.crmValue}</span>
+                            </div>
+                            <div className="text-emerald-300">
+                              Official: <span>{conflict.officialValue}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Confidence Signals Audit */}
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
                 <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
@@ -977,7 +1297,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
-                      <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                      <Radio className="w-3.5 h-3.5 text-cyan-400" />
                       Live Website Crawler & SSRF Boundary Shield
                     </h4>
                     <p className="text-slate-400 text-[11px] mt-0.5">
@@ -1123,13 +1443,62 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
           {/* 4. PROVENANCE TIMELINE TAB */}
           {activeTab === 'timeline' && (
             <div className="space-y-4 text-xs">
+              {/* Official Registry Verification History */}
               <div className="space-y-3">
+                <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
+                  <Scale className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Official Registry Verification History ({verificationHistory.length})</span>
+                </h4>
+                {verificationHistory.length === 0 ? (
+                  <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-500 text-xs">
+                    No official registry verification runs recorded yet. Use &ldquo;Verify with Official Registry&rdquo; in Lead Facts to run a live check.
+                  </div>
+                ) : (
+                  verificationHistory.map((entry, idx) => (
+                    <div key={idx} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-white">{entry.sourceName}</span>
+                          {renderRegistryStateBadge(entry.state)}
+                        </div>
+                        <span className="text-slate-400 font-mono tabular-nums text-[10px]">
+                          {formatDateLocale(entry.verifiedAt, leadLocale, leadTimezone)}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300">{entry.summary}</p>
+                      <div className="flex items-center flex-wrap gap-3 text-[10px] font-mono text-slate-400">
+                        <span>Match: {entry.matchType}</span>
+                        <span>Mode: {entry.isLiveApi ? 'Live API' : 'Offline / Unavailable'}</span>
+                        {entry.matchedRegistrationNumber && (
+                          <span>Reg: {entry.matchedRegistrationNumber}</span>
+                        )}
+                        {entry.conflictCount > 0 && (
+                          <span className="text-rose-400">Conflicts: {entry.conflictCount}</span>
+                        )}
+                        {entry.sourceUrl && (
+                          <a
+                            href={entry.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-indigo-400 hover:underline inline-flex items-center gap-1"
+                          >
+                            <span>Registry Record</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="space-y-3 pt-3 border-t border-slate-800">
                 <h4 className="font-bold text-white text-xs">Source Observation Evidence</h4>
                 {lead.sources.map((src, i) => (
                   <div key={i} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-white">{src.sourceName}</span>
-                      <span className="text-slate-500 font-mono text-[10px]">
+                      <span className="text-slate-500 font-mono tabular-nums text-[10px]">
                         Retrieved: {formatDateLocale(src.retrievedAt, leadLocale, leadTimezone)}
                       </span>
                     </div>

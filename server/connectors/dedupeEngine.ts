@@ -1,5 +1,14 @@
 import { CanonicalLead, DiscoveryDuplicateInfo, MergeHistoryRecord } from '../types.js';
 import { canonicalizeIdentifierType } from '../../shared/identifierRegistry.js';
+import { normalizeIdentifierValue, normalizeUkCrn, normalizeUsCik } from '../identifiers/identifierEngine.js';
+
+function normalizeRegKey(value?: string, regType?: string, countryCode?: string): string {
+  if (!value) return '';
+  const canon = regType ? canonicalizeIdentifierType(regType, countryCode) : '';
+  if (canon === 'UK_CRN') return normalizeUkCrn(value);
+  if (canon === 'US_CIK') return normalizeUsCik(value);
+  return normalizeIdentifierValue(value);
+}
 
 export interface DuplicateMatch {
   leadA: CanonicalLead;
@@ -110,8 +119,8 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
       }
 
       // 2. Exact or Normalized Registration Number Match
-      const cleanRegA = (a.registrationNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-      const cleanRegB = (b.registrationNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const cleanRegA = normalizeRegKey(a.registrationNumber, a.registrationType, a.address?.countryCode);
+      const cleanRegB = normalizeRegKey(b.registrationNumber, b.registrationType, b.address?.countryCode);
       if (cleanRegA && cleanRegB && cleanRegA === cleanRegB) {
         matches.push({
           leadA: a,
@@ -126,16 +135,16 @@ export function detectDuplicates(leads: CanonicalLead[]): DuplicateMatch[] {
         continue;
       }
 
-      // 2b. Match across multiple normalized identifiers (e.g. matching LEI, VAT, OrgNr, CRN) using canonical aliases
+      // 2b. Match across multiple normalized identifiers (e.g. matching LEI, VAT, OrgNr, CRN, CIK, SIREN, UEN) using canonical aliases
       let matchedIdent: string | null = null;
       if (a.identifiers && b.identifiers) {
         for (const idA of a.identifiers) {
-          const normA = (idA.normalizedValue || idA.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const typeA = canonicalizeIdentifierType(idA.type, idA.countryCode || a.address?.countryCode);
+          const normA = normalizeRegKey(idA.normalizedValue || idA.value, typeA, idA.countryCode || a.address?.countryCode);
           if (!normA || normA.length < 5) continue;
-          const typeA = canonicalizeIdentifierType(idA.type, a.address?.countryCode);
           for (const idB of b.identifiers) {
-            const normB = (idB.normalizedValue || idB.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-            const typeB = canonicalizeIdentifierType(idB.type, b.address?.countryCode);
+            const typeB = canonicalizeIdentifierType(idB.type, idB.countryCode || b.address?.countryCode);
+            const normB = normalizeRegKey(idB.normalizedValue || idB.value, typeB, idB.countryCode || b.address?.countryCode);
             if (normA === normB && typeA === typeB) {
               matchedIdent = `${typeA}: ${idA.value}`;
               break;
@@ -241,8 +250,8 @@ function compareLeadPair(candidate: CanonicalLead, target: CanonicalLead): PairC
   }
 
   // 1. Registration number
-  const regA = (candidate.registrationNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const regB = (target.registrationNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const regA = normalizeRegKey(candidate.registrationNumber, candidate.registrationType, candidate.address?.countryCode);
+  const regB = normalizeRegKey(target.registrationNumber, target.registrationType, target.address?.countryCode);
   if (regA.length >= 4 && regB.length >= 4 && regA === regB) {
     return {
       classification: 'exact',
@@ -253,15 +262,15 @@ function compareLeadPair(candidate: CanonicalLead, target: CanonicalLead): PairC
     };
   }
 
-  // 2. Canonical identifiers (VAT, LEI, ORG, CRN, etc.)
+  // 2. Canonical identifiers (VAT, LEI, ORG, CRN, CIK, SIREN, UEN, etc.)
   for (const idA of candidate.identifiers || []) {
-    const normA = (idA.normalizedValue || idA.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (normA.length < 5) continue;
     const typeA = canonicalizeIdentifierType(idA.type, idA.countryCode || candidate.address?.countryCode);
     if (typeA === 'DOMAIN' || typeA === 'PHONE' || typeA === 'EMAIL') continue;
+    const normA = normalizeRegKey(idA.normalizedValue || idA.value, typeA, idA.countryCode || candidate.address?.countryCode);
+    if (normA.length < 5) continue;
     for (const idB of target.identifiers || []) {
-      const normB = (idB.normalizedValue || idB.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       const typeB = canonicalizeIdentifierType(idB.type, idB.countryCode || target.address?.countryCode);
+      const normB = normalizeRegKey(idB.normalizedValue || idB.value, typeB, idB.countryCode || target.address?.countryCode);
       if (normA === normB && typeA === typeB) {
         return {
           classification: 'exact',

@@ -123,6 +123,73 @@ export function validateLei(value: string): boolean {
 }
 
 /**
+ * Japanese Corporate Number (Houjin Bangou) Checksum (NTA 13-digit Modulo-9)
+ * 1st digit = check digit (9 - (sum of base digits * weight(1 or 2) mod 9)).
+ */
+export function validateJapaneseCorporateNumber(value: string): boolean {
+  const clean = value.replace(/[^0-9]/g, '');
+  if (clean.length !== 13) return false;
+  const givenCheckDigit = parseInt(clean[0], 10);
+  const baseNumber = clean.slice(1);
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const digitVal = parseInt(baseNumber[11 - i], 10);
+    const n = i + 1;
+    const weight = n % 2 === 0 ? 2 : 1;
+    sum += digitVal * weight;
+  }
+  const calculatedCheckDigit = 9 - (sum % 9);
+  return calculatedCheckDigit === givenCheckDigit;
+}
+
+/**
+ * US SEC Central Index Key (CIK): 1-10 digits (normalized to 10 zero-padded digits).
+ */
+export function validateUsCik(value: string): boolean {
+  const clean = value.replace(/[^0-9]/g, '');
+  return clean.length >= 1 && clean.length <= 10 && Number(clean) > 0;
+}
+
+export function normalizeUsCik(value: string): string {
+  const digits = value.replace(/[^0-9]/g, '');
+  return digits ? digits.padStart(10, '0').slice(-10) : '';
+}
+
+/**
+ * Singapore Unique Entity Number (UEN):
+ * - Businesses: 8 digits + 1 letter (e.g. 53012345A)
+ * - Local companies: 4-digit year + 5 digits + 1 letter (e.g. 201201936C)
+ * - Other entities: T/S/R + 2 digits + 2 letters + 4 digits + 1 letter (e.g. T08LL1234A)
+ */
+export function validateSingaporeUen(value: string): boolean {
+  const clean = normalizeIdentifierValue(value);
+  return /^(\d{8}[A-Z]|\d{9}[A-Z]|[TSR]\d{2}[A-Z]{2}\d{4}[A-Z])$/.test(clean);
+}
+
+/**
+ * India Ministry of Corporate Affairs Corporate Identification Number (CIN): 21 chars
+ * [L|U][5 digits NIC][2 letters state][4 digits year][3 letters ownership][6 digits ROC]
+ */
+export function validateIndiaCin(value: string): boolean {
+  const clean = normalizeIdentifierValue(value);
+  return /^[LU]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$/.test(clean);
+}
+
+/**
+ * Normalizes UK Company Registration Numbers (zero-pads pure numeric CRNs to 8 digits).
+ */
+export function normalizeUkCrn(value: string): string {
+  const clean = normalizeIdentifierValue(value);
+  if (/^\d{1,8}$/.test(clean)) {
+    return clean.padStart(8, '0');
+  }
+  if (/^[A-Z]{2}\d{1,6}$/.test(clean)) {
+    return clean.slice(0, 2) + clean.slice(2).padStart(6, '0');
+  }
+  return clean;
+}
+
+/**
  * Comprehensive business identifier validation and provenance tagging
  */
 export function validateIdentifier(
@@ -134,7 +201,7 @@ export function validateIdentifier(
   const normType = canonicalizeIdentifierType(type || 'TAX_ID', countryHint);
   const spec = getIdentifierSpec(normType);
   const rawValue = (value || '').trim();
-  const normalized = normalizeIdentifierValue(rawValue);
+  let normalized = normalizeIdentifierValue(rawValue);
 
   let valid = false;
   let error: string | undefined;
@@ -145,6 +212,7 @@ export function validateIdentifier(
     case 'UK_CRN': {
       countryCode = 'GB';
       issuingAuthority = 'UK Companies House';
+      normalized = normalizeUkCrn(rawValue);
       // 8 characters: 8 digits, or 2 letters (SC, NI, OC, SO, LP) followed by 6 digits
       const crnPattern = /^([A-Z]{2}[0-9]{6}|[0-9]{8})$/i;
       valid = crnPattern.test(normalized);
@@ -185,9 +253,18 @@ export function validateIdentifier(
       break;
     }
 
+    case 'US_CIK': {
+      countryCode = 'US';
+      issuingAuthority = 'U.S. Securities and Exchange Commission (SEC)';
+      normalized = normalizeUsCik(rawValue);
+      valid = validateUsCik(rawValue);
+      if (!valid) error = 'US SEC CIK must be 1 to 10 digits (e.g. 0000320193)';
+      break;
+    }
+
     case 'FR_SIREN': {
       countryCode = 'FR';
-      issuingAuthority = 'Institut National de la Statistique et des Études Économiques (INSEE)';
+      issuingAuthority = 'INSEE / Annuaire des Entreprises';
       valid = /^[0-9]{9}$/.test(normalized) && validateLuhn(normalized);
       if (!valid) error = 'French SIREN must be 9 digits with valid Luhn checksum';
       break;
@@ -195,9 +272,49 @@ export function validateIdentifier(
 
     case 'FR_SIRET': {
       countryCode = 'FR';
-      issuingAuthority = 'INSEE';
+      issuingAuthority = 'INSEE / Annuaire des Entreprises';
       valid = /^[0-9]{14}$/.test(normalized) && validateLuhn(normalized);
       if (!valid) error = 'French SIRET must be 14 digits with valid Luhn checksum';
+      break;
+    }
+
+    case 'CA_BN': {
+      countryCode = 'CA';
+      issuingAuthority = 'Canada Revenue Agency (CRA)';
+      valid = /^[0-9]{9}$/.test(normalized) && validateLuhn(normalized);
+      if (!valid) error = 'Canadian Business Number (BN) must be 9 digits with valid Luhn checksum';
+      break;
+    }
+
+    case 'CA_CORP': {
+      countryCode = 'CA';
+      issuingAuthority = 'Corporations Canada (ISED)';
+      valid = /^[0-9]{6,8}$/.test(normalized);
+      if (!valid) error = 'Canadian Federal Corporation Number must be 6 to 8 digits';
+      break;
+    }
+
+    case 'JP_CN': {
+      countryCode = 'JP';
+      issuingAuthority = 'National Tax Agency of Japan (NTA)';
+      valid = validateJapaneseCorporateNumber(normalized);
+      if (!valid) error = 'Japanese Corporate Number (Houjin Bangou) must be 13 digits with valid Modulo-9 checksum';
+      break;
+    }
+
+    case 'IN_CIN': {
+      countryCode = 'IN';
+      issuingAuthority = 'Ministry of Corporate Affairs (MCA)';
+      valid = validateIndiaCin(normalized);
+      if (!valid) error = 'Indian CIN must be 21 characters matching MCA format (e.g. L22210MH1995PLC084781)';
+      break;
+    }
+
+    case 'SG_UEN': {
+      countryCode = 'SG';
+      issuingAuthority = 'Accounting and Corporate Regulatory Authority (ACRA)';
+      valid = validateSingaporeUen(normalized);
+      if (!valid) error = 'Singapore UEN must be 9 or 10 characters matching ACRA issuance format';
       break;
     }
 
