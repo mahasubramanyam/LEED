@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { sanitizeExternalUrl } from '../utils/safeUrl.ts';
 import {
   X,
   Building2,
@@ -981,9 +982,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   <div className="space-y-2 text-slate-300">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Website:</span>
-                      {lead.website ? (
+                      {sanitizeExternalUrl(lead.website) ? (
                         <a
-                          href={lead.website}
+                          href={sanitizeExternalUrl(lead.website)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-indigo-400 hover:underline flex items-center gap-1 font-mono"
@@ -1114,9 +1115,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       <span className="truncate">
                         {lastVerificationSource || lead.sources[0]?.sourceName || 'Not verified with registry'}
                       </span>
-                      {(lastVerificationSourceUrl || lead.sources[0]?.url) && (
+                      {sanitizeExternalUrl(lastVerificationSourceUrl || lead.sources[0]?.url) && (
                         <a
-                          href={lastVerificationSourceUrl || lead.sources[0]?.url}
+                          href={sanitizeExternalUrl(lastVerificationSourceUrl || lead.sources[0]?.url)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-indigo-400 hover:text-indigo-300 shrink-0"
@@ -1600,9 +1601,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                               {person.phoneNormalized || person.phone}
                             </span>
                           )}
-                          {person.linkedinUrl && (
+                          {sanitizeExternalUrl(person.linkedinUrl) && (
                             <a
-                              href={person.linkedinUrl}
+                              href={sanitizeExternalUrl(person.linkedinUrl)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-1 text-blue-400 hover:underline"
@@ -1819,9 +1820,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                         {entry.conflictCount > 0 && (
                           <span className="text-rose-400">Conflicts: {entry.conflictCount}</span>
                         )}
-                        {entry.sourceUrl && (
+                        {sanitizeExternalUrl(entry.sourceUrl) && (
                           <a
-                            href={entry.sourceUrl}
+                            href={sanitizeExternalUrl(entry.sourceUrl)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-indigo-400 hover:underline inline-flex items-center gap-1"

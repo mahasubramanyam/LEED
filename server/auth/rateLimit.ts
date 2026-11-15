@@ -13,11 +13,14 @@ export function normalizeClientIp(req: Request): string {
   return rawIp.replace(/^::ffff:/, '').trim();
 }
 
+const MAX_LOGIN_ENTRIES = 2000;
+
 export class LoginRateLimiter {
   private attemptsMap: Map<string, RateLimitEntry> = new Map();
   private maxAttempts: number;
   private windowMs: number;
   private lockoutMs: number;
+  private blockedEvents = 0;
 
   constructor(maxAttempts = 5, windowMs = 15 * 60 * 1000, lockoutMs = 15 * 60 * 1000) {
     this.maxAttempts = maxAttempts;
@@ -25,9 +28,29 @@ export class LoginRateLimiter {
     this.lockoutMs = lockoutMs;
   }
 
+  private prune(now: number): void {
+    for (const [k, entry] of this.attemptsMap.entries()) {
+      const expiredWindow = now - entry.firstAttemptAt > this.windowMs;
+      const expiredLock = !entry.blockedUntil || entry.blockedUntil <= now;
+      if (expiredWindow && expiredLock) {
+        this.attemptsMap.delete(k);
+      }
+    }
+    if (this.attemptsMap.size > MAX_LOGIN_ENTRIES) {
+      const oldest = Array.from(this.attemptsMap.entries()).sort(
+        (a, b) => a[1].firstAttemptAt - b[1].firstAttemptAt
+      );
+      const dropCount = oldest.length - MAX_LOGIN_ENTRIES;
+      for (let i = 0; i < dropCount; i++) {
+        this.attemptsMap.delete(oldest[i][0]);
+      }
+    }
+  }
+
   public check(ip: string): { allowed: boolean; remainingAttempts: number; retryAfterSeconds?: number } {
     const cleanIp = ip.replace(/^::ffff:/, '').trim();
     const now = Date.now();
+    this.prune(now);
     const entry = this.attemptsMap.get(cleanIp);
 
     if (!entry) {
@@ -56,6 +79,7 @@ export class LoginRateLimiter {
   public recordFailure(ip: string): { remainingAttempts: number; retryAfterSeconds?: number } {
     const cleanIp = ip.replace(/^::ffff:/, '').trim();
     const now = Date.now();
+    this.prune(now);
     let entry = this.attemptsMap.get(cleanIp);
 
     if (!entry || now - entry.firstAttemptAt > this.windowMs) {
@@ -66,6 +90,7 @@ export class LoginRateLimiter {
 
     if (entry.attempts >= this.maxAttempts) {
       entry.blockedUntil = now + this.lockoutMs;
+      this.blockedEvents += 1;
       this.attemptsMap.set(cleanIp, entry);
       return {
         remainingAttempts: 0,
@@ -86,6 +111,16 @@ export class LoginRateLimiter {
 
   public clear(): void {
     this.attemptsMap.clear();
+    this.blockedEvents = 0;
+  }
+
+  public getStats(): { activeTrackedIps: number; blockedEvents: number; maxAttempts: number } {
+    this.prune(Date.now());
+    return {
+      activeTrackedIps: this.attemptsMap.size,
+      blockedEvents: this.blockedEvents,
+      maxAttempts: this.maxAttempts,
+    };
   }
 }
 

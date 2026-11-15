@@ -1983,6 +1983,62 @@ export class PostgresStorage {
     }
   }
 
+  public async getDatabaseSecurityStatus(): Promise<{
+    tlsEncrypted: boolean;
+    sslSetting: string;
+    auditUpdateDeleteTrigger: boolean;
+    auditTruncateTrigger: boolean;
+    activeSessionCount: number;
+    totalSessionCount: number;
+    encryptedCredentialCount: number;
+  }> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const [sslSettingRes, sslUsedRes, trigRes, sessRes, credRes] = await Promise.all([
+        client.query(`SHOW ssl`).catch(() => ({ rows: [{ ssl: 'unknown' }] })),
+        client
+          .query(`SELECT ssl_is_used() as used`)
+          .catch(() => ({ rows: [{ used: null }] })),
+        client.query(
+          `SELECT tgname FROM pg_trigger t
+           JOIN pg_class c ON c.oid = t.tgrelid
+           WHERE c.relname = 'audit_events' AND NOT t.tgisinternal`
+        ),
+        client
+          .query(
+            `SELECT COUNT(*) FILTER (WHERE is_active = TRUE AND revoked_at IS NULL AND expires_at > NOW()) AS active_cnt,
+                    COUNT(*) AS total_cnt
+             FROM owner_sessions`
+          )
+          .catch(() => ({ rows: [{ active_cnt: '0', total_cnt: '0' }] })),
+        client
+          .query(
+            `SELECT COUNT(*) AS cnt FROM connector_credentials WHERE encrypted_secret IS NOT NULL AND encrypted_secret <> ''`
+          )
+          .catch(() => ({ rows: [{ cnt: '0' }] })),
+      ]);
+
+      const sslSetting = String(sslSettingRes.rows[0]?.ssl || 'unknown');
+      const sslUsedVal = sslUsedRes.rows[0]?.used;
+      const tlsEncrypted = sslUsedVal === true || sslSetting.toLowerCase() === 'on';
+      const trigNames = new Set((trigRes.rows || []).map((r: any) => String(r.tgname)));
+
+      return {
+        tlsEncrypted,
+        sslSetting,
+        auditUpdateDeleteTrigger: trigNames.has('trg_audit_events_prevent_update_delete'),
+        auditTruncateTrigger: trigNames.has('trg_audit_events_prevent_truncate'),
+        activeSessionCount: parseInt(sessRes.rows[0]?.active_cnt || '0', 10) || 0,
+        totalSessionCount: parseInt(sessRes.rows[0]?.total_cnt || '0', 10) || 0,
+        encryptedCredentialCount: parseInt(credRes.rows[0]?.cnt || '0', 10) || 0,
+      };
+    } finally {
+      if (client) client.release();
+    }
+  }
+
   public async getDetailedDiagnostics(): Promise<{
     version: string;
     currentDatabase: string;

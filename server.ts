@@ -78,6 +78,32 @@ import {
 import { MAX_IMPORT_FILE_BYTES } from './server/import/fileParser.js';
 import { normalizeAndValidateMappedRow } from './server/import/normalizerValidator.js';
 import type { ImportMappingTemplate } from './server/types.js';
+import { securityHeadersMiddleware } from './server/security/headers.js';
+import { sanitizeApiError, sanitizeExportFilenamePart } from './server/security/errorHandler.js';
+import { buildSecurityPostureReport } from './server/security/posture.js';
+import { recordSecurityEvent } from './server/security/securityEvents.js';
+import {
+  aiRateLimiter,
+  createRateLimitMiddleware,
+  discoveryRateLimiter,
+  exportRateLimiter,
+  importRateLimiter,
+  inspectionRateLimiter,
+  migrationRateLimiter,
+  passwordChangeRateLimiter,
+  setupRateLimiter,
+} from './server/security/rateLimiter.js';
+import {
+  MAX_BATCH_IMPORT_ROWS,
+  validateCampaignCreateBody,
+  validateCampaignMessageAction,
+  validateDiscoverySaveBody,
+  validateLeadCreateOrUpdate,
+  validatePipelineMoveBody,
+  validateSettingsUpdateBody,
+  validateTaskCreateBody,
+  validateTaskUpdateBody,
+} from './server/security/validators.js';
 
 const importUploadMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -117,6 +143,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const IS_PROD = process.env.NODE_ENV === 'production';
+
+// Hide framework fingerprint and enforce AI Studio iframe-compatible CSP & security headers
+app.disable('x-powered-by');
+app.use(securityHeadersMiddleware(IS_PROD));
 
 // Support reverse proxy (Cloud Run, Nginx, ALB) for accurate client IP resolution
 app.set('trust proxy', 1);
@@ -244,38 +274,67 @@ app.get('/api/auth/setup-status', async (req: Request, res: Response) => {
 });
 
 // Owner Setup (One-time, locked forever after)
-app.post('/api/auth/setup', async (req: Request, res: Response) => {
-  const { fullName, email, password, setupSecret } = req.body;
-  const ip = normalizeClientIp(req);
+app.post(
+  '/api/auth/setup',
+  createRateLimitMiddleware(setupRateLimiter, 'Too many owner setup attempts. Try again later.'),
+  async (req: Request, res: Response) => {
+    const { fullName, email, password, setupSecret } = req.body || {};
+    const ip = normalizeClientIp(req);
 
-  try {
-    const owner = await ownerService.setupOwner(fullName, email, password, setupSecret);
-    const loginResult = await ownerService.login(email, password, ip, req.headers['user-agent']);
+    try {
+      const owner = await ownerService.setupOwner(fullName, email, password, setupSecret);
+      const loginResult = await ownerService.login(email, password, ip, req.headers['user-agent']);
 
-    // Set secure partitioned cookie and return token for resilient iframe authorization
-    setSessionCookie(res, loginResult.rawToken);
+      // Set secure partitioned cookie and return token for resilient iframe authorization
+      setSessionCookie(res, loginResult.rawToken);
 
-    res.status(201).json({
-      success: true,
-      token: loginResult.rawToken,
-      owner: loginResult.owner,
-      message: 'Owner initialized successfully. Platform locked to single-owner mode.',
-    });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(400).json({ error: msg });
+      if (dbManager.isDbConnected()) {
+        await postgresStorage
+          .recordAuditEvent(
+            'OWNER_SETUP_COMPLETED',
+            owner.email,
+            'owner_user',
+            owner.id,
+            { ip },
+            ip
+          )
+          .catch(() => {});
+      }
+
+      res.status(201).json({
+        success: true,
+        token: loginResult.rawToken,
+        owner: loginResult.owner,
+        message: 'Owner initialized successfully. Platform locked to single-owner mode.',
+      });
+    } catch (err: unknown) {
+      res.status(400).json({ error: sanitizeApiError(err, 'Owner setup failed.') });
+    }
   }
-});
+);
 
 // Owner Login (Sets partitioned cookie and returns token for resilient iframe authorization)
 app.post('/api/auth/login', async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+  const { email, password } = req.body || {};
   const ip = normalizeClientIp(req);
 
   try {
     const result = await ownerService.login(email, password, ip, req.headers['user-agent']);
     // Set secure partitioned cookie
     setSessionCookie(res, result.rawToken);
+
+    if (dbManager.isDbConnected()) {
+      await postgresStorage
+        .recordAuditEvent(
+          'OWNER_LOGIN_SUCCEEDED',
+          result.owner.email,
+          'owner_session',
+          result.owner.id,
+          { ip },
+          ip
+        )
+        .catch(() => {});
+    }
 
     // Return owner identity with session token
     res.json({
@@ -284,8 +343,28 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       owner: result.owner,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = sanitizeApiError(err, 'Authentication failed.');
     const isLocked = msg.includes('locked') || msg.includes('Too many failed');
+    recordSecurityEvent({
+      category: isLocked ? 'auth_lockout' : 'auth_failure',
+      severity: isLocked ? 'high' : 'warning',
+      path: req.originalUrl || req.path,
+      method: req.method,
+      ip,
+      summary: isLocked ? 'Owner login temporarily locked out after failed attempts' : 'Owner login attempt failed',
+    });
+    if (dbManager.isDbConnected()) {
+      await postgresStorage
+        .recordAuditEvent(
+          isLocked ? 'OWNER_LOGIN_LOCKED' : 'OWNER_LOGIN_FAILED',
+          typeof email === 'string' && email.trim() ? email.trim().slice(0, 120) : 'unknown',
+          'owner_auth',
+          ip,
+          { locked: isLocked },
+          ip
+        )
+        .catch(() => {});
+    }
     res.status(isLocked ? 429 : 401).json({ error: msg });
   }
 });
@@ -293,8 +372,14 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 // Owner Logout
 app.post('/api/auth/logout', async (req: Request, res: Response) => {
   const rawToken = req.cookies?.[SESSION_COOKIE_NAME] || req.headers['authorization']?.replace('Bearer ', '');
+  const ip = normalizeClientIp(req);
   if (rawToken) {
     await ownerService.logout(rawToken);
+    if (dbManager.isDbConnected()) {
+      await postgresStorage
+        .recordAuditEvent('OWNER_LOGOUT', 'owner', 'owner_session', undefined, { ip }, ip)
+        .catch(() => {});
+    }
   }
   clearSessionCookie(res);
   res.json({ success: true, message: 'Logged out successfully' });
@@ -320,13 +405,13 @@ protectedApi.get('/auth/me', (req: Request, res: Response) => {
 
 // Update Owner Profile (Display Name)
 protectedApi.put('/owner/profile', async (req: Request, res: Response) => {
-  const { fullName } = req.body;
+  const { fullName } = req.body || {};
   if (!req.owner) {
     res.status(401).json({ error: 'Unauthenticated' });
     return;
   }
-  if (!fullName || typeof fullName !== 'string' || !fullName.trim()) {
-    res.status(400).json({ error: 'Valid full name is required' });
+  if (!fullName || typeof fullName !== 'string' || !fullName.trim() || fullName.trim().length > 120) {
+    res.status(400).json({ error: 'Valid full name (1-120 characters) is required' });
     return;
   }
 
@@ -345,6 +430,9 @@ protectedApi.put('/owner/profile', async (req: Request, res: Response) => {
         { fullName: fullName.trim() },
         normalizeClientIp(req)
       );
+    } else if (IS_PROD) {
+      res.status(503).json({ error: 'Database connection unavailable in production.' });
+      return;
     }
     res.json({
       success: true,
@@ -354,42 +442,44 @@ protectedApi.put('/owner/profile', async (req: Request, res: Response) => {
       },
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update owner profile.') });
   }
 });
 
 // Change Owner Password
-protectedApi.post('/auth/change-password', async (req: Request, res: Response) => {
-  const { currentPassword, newPassword } = req.body;
-  if (!req.owner) {
-    res.status(401).json({ error: 'Unauthenticated' });
-    return;
-  }
+protectedApi.post(
+  '/auth/change-password',
+  createRateLimitMiddleware(passwordChangeRateLimiter, 'Too many password change attempts. Try again later.'),
+  async (req: Request, res: Response) => {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!req.owner) {
+      res.status(401).json({ error: 'Unauthenticated' });
+      return;
+    }
 
-  try {
-    const ip = normalizeClientIp(req);
-    await ownerService.changePassword(req.owner.id, currentPassword, newPassword, req.sessionToken);
-    const freshLogin = await ownerService.login(req.owner.email, newPassword, ip, req.headers['user-agent']);
-    setSessionCookie(res, freshLogin.rawToken);
-    await postgresStorage.recordAuditEvent(
-      'PASSWORD_CHANGED',
-      req.owner.email,
-      'owner_user',
-      req.owner.id,
-      { ip },
-      ip
-    );
-    res.json({
-      success: true,
-      token: freshLogin.rawToken,
-      message: 'Password changed successfully. Prior sessions revoked.',
-    });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(400).json({ error: msg });
+    try {
+      const ip = normalizeClientIp(req);
+      await ownerService.changePassword(req.owner.id, currentPassword, newPassword, req.sessionToken);
+      const freshLogin = await ownerService.login(req.owner.email, newPassword, ip, req.headers['user-agent']);
+      setSessionCookie(res, freshLogin.rawToken);
+      await postgresStorage.recordAuditEvent(
+        'PASSWORD_CHANGED',
+        req.owner.email,
+        'owner_user',
+        req.owner.id,
+        { ip },
+        ip
+      );
+      res.json({
+        success: true,
+        token: freshLogin.rawToken,
+        message: 'Password changed successfully. Prior sessions revoked.',
+      });
+    } catch (err: unknown) {
+      res.status(400).json({ error: sanitizeApiError(err, 'Password change failed.') });
+    }
   }
-});
+);
 
 // List Active Sessions for Owner
 protectedApi.get('/owner/sessions', async (req: Request, res: Response) => {
@@ -551,11 +641,33 @@ protectedApi.get('/owner/diagnostics', async (req: Request, res: Response) => {
       },
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch diagnostics.') });
   }
 });
 
+// Phase 8: Live Security Posture & Data Protection Diagnostics (Zero Secrets Returned)
+protectedApi.get('/owner/security-posture', async (req: Request, res: Response) => {
+  try {
+    const report = await buildSecurityPostureReport({
+      isProd: IS_PROD,
+      isDbConnected: () => dbManager.isDbConnected(),
+      getEncryptionStatus: () => credentialManager.getEncryptionStatus(),
+      getDatabaseSecurityStatus: () => postgresStorage.getDatabaseSecurityStatus(),
+      verifyAuditChain: async () => {
+        const check = await postgresStorage.verifyAuditLogIntegrity();
+        return { valid: check.valid, totalEvents: check.totalEvents };
+      },
+      inspectMigrations: async () => {
+        const status = await migrator.inspectMigrationStatus();
+        return { migration005Recorded: status.migration005Recorded };
+      },
+      ownerInitialized: () => ownerService.isOwnerInitialized(),
+    });
+    res.json(report);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to compile security posture diagnostics.') });
+  }
+});
 
 // Database Diagnostics & Health
 protectedApi.get('/database/status', async (req: Request, res: Response) => {
@@ -602,13 +714,20 @@ protectedApi.get('/database/status', async (req: Request, res: Response) => {
       },
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `Failed to fetch diagnostics: ${msg}` });
+    res.status(500).json({ error: `Failed to fetch diagnostics: ${sanitizeApiError(err, 'Database query error.')}` });
   }
 });
 
 // Legacy Bulk Migration Route — Locked down to prevent bypassing version-specific owner approval
-protectedApi.post('/database/run-migrations', async (req: Request, res: Response) => {
+protectedApi.post('/database/run-migrations', createRateLimitMiddleware(migrationRateLimiter), async (req: Request, res: Response) => {
+  recordSecurityEvent({
+    category: 'migration_blocked',
+    severity: 'warning',
+    path: req.originalUrl || req.path,
+    method: req.method,
+    ip: normalizeClientIp(req),
+    summary: 'Blocked legacy /database/run-migrations call without version approval',
+  });
   const outcome = await handleLegacyRunMigrationsBlocked(
     {
       owner: req.owner,
@@ -624,7 +743,7 @@ protectedApi.post('/database/run-migrations', async (req: Request, res: Response
 });
 
 // Dedicated Owner-Only Approval Action for Migration 004 Only
-protectedApi.post('/database/migrations/004/approve', async (req: Request, res: Response) => {
+protectedApi.post('/database/migrations/004/approve', createRateLimitMiddleware(migrationRateLimiter), async (req: Request, res: Response) => {
   if (!req.owner || req.owner.role !== 'owner') {
     res.status(403).json({
       error: 'Owner authorization required to approve and execute Migration 004.',
@@ -745,7 +864,7 @@ protectedApi.post('/database/migrations/004/approve', async (req: Request, res: 
 });
 
 // Dedicated Owner-Only Approval Action for Migration 005 Only
-protectedApi.post('/database/migrations/005/approve', async (req: Request, res: Response) => {
+protectedApi.post('/database/migrations/005/approve', createRateLimitMiddleware(migrationRateLimiter), async (req: Request, res: Response) => {
   const outcome = await executeMigration005ApprovalWorkflow(
     {
       owner: req.owner,
@@ -764,14 +883,25 @@ protectedApi.post('/database/migrations/005/approve', async (req: Request, res: 
 });
 
 // Migrate JSON Store into PostgreSQL (Supports Dry-Run)
-protectedApi.post('/database/migrate-json', async (req: Request, res: Response) => {
+protectedApi.post('/database/migrate-json', createRateLimitMiddleware(migrationRateLimiter), async (req: Request, res: Response) => {
   const dryRun = req.body?.dryRun === true;
   try {
     const summary = await jsonMigrator.migrate({ dryRun });
+    if (dbManager.isDbConnected() && req.owner) {
+      await postgresStorage
+        .recordAuditEvent(
+          dryRun ? 'JSON_STORE_MIGRATION_DRY_RUN' : 'JSON_STORE_MIGRATED',
+          req.owner.email,
+          'database',
+          'json_to_pg',
+          { dryRun },
+          normalizeClientIp(req)
+        )
+        .catch(() => {});
+    }
     res.json(summary);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `JSON migration failed: ${msg}` });
+    res.status(500).json({ error: `JSON migration failed: ${sanitizeApiError(err, 'Migration failed.')}` });
   }
 });
 
@@ -1139,21 +1269,40 @@ protectedApi.get('/leads/:id', async (req: Request, res: Response) => {
 protectedApi.post('/leads', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
-    const newLead: CanonicalLead = req.body;
-    if (!newLead.companyName) {
-      res.status(400).json({ error: 'Company name is required' });
+    const validation = validateLeadCreateOrUpdate(req.body, 'create');
+    if (!validation.ok || !validation.data) {
+      res.status(400).json({ error: validation.error || 'Invalid lead payload.' });
       return;
     }
-    if (!newLead.id) {
-      newLead.id = `lead-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    }
-    newLead.createdAt = new Date().toISOString();
-    newLead.updatedAt = newLead.createdAt;
+
+    const now = new Date().toISOString();
+    const rawId = typeof req.body?.id === 'string' && req.body.id.trim().length > 0 && req.body.id.trim().length <= 120
+      ? req.body.id.trim()
+      : `lead-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    const newLead: CanonicalLead = {
+      sources: [],
+      identifiers: [],
+      confidenceSignals: [],
+      confidenceScore: 50,
+      tags: [],
+      notes: [],
+      activities: [],
+      status: 'new',
+      industry: 'B2B Services',
+      category: 'General',
+      currency: 'USD',
+      ...validation.data,
+      id: rawId,
+      companyName: validation.data.companyName,
+      createdAt: now,
+      updatedAt: now,
+    };
 
     const saved = isPg ? await postgresStorage.upsertLead(newLead) : storage.upsertLead(newLead);
     res.status(201).json(saved);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = sanitizeApiError(err, 'Failed to create lead.');
     const status = msg.includes('Database connection unavailable')
       ? 503
       : msg.includes('Invalid pipelineStageId') || msg.includes('does not exist in pipeline_stages')
@@ -1166,17 +1315,30 @@ protectedApi.post('/leads', async (req: Request, res: Response) => {
 protectedApi.put('/leads/:id', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
+    const validation = validateLeadCreateOrUpdate(req.body, 'update');
+    if (!validation.ok || !validation.data) {
+      res.status(400).json({ error: validation.error || 'Invalid lead update payload.' });
+      return;
+    }
+
     const existing = isPg ? await postgresStorage.getLead(req.params.id) : storage.getLead(req.params.id);
     if (!existing) {
       res.status(404).json({ error: 'Lead not found' });
       return;
     }
-    const updated = isPg
-      ? await postgresStorage.upsertLead({ ...existing, ...req.body, id: req.params.id })
-      : storage.upsertLead({ ...existing, ...req.body, id: req.params.id });
+
+    const merged: CanonicalLead = {
+      ...existing,
+      ...validation.data,
+      id: req.params.id,
+      createdAt: existing.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updated = isPg ? await postgresStorage.upsertLead(merged) : storage.upsertLead(merged);
     res.json(updated);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = sanitizeApiError(err, 'Failed to update lead.');
     const status = msg.includes('Database connection unavailable')
       ? 503
       : msg.includes('Invalid pipelineStageId') || msg.includes('does not exist in pipeline_stages')
@@ -1194,18 +1356,34 @@ protectedApi.delete('/leads/:id', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Lead not found' });
       return;
     }
+    if (isPg && req.owner) {
+      await postgresStorage
+        .recordAuditEvent(
+          'LEAD_DELETED',
+          req.owner.email,
+          'lead',
+          req.params.id,
+          { deletedId: req.params.id },
+          normalizeClientIp(req)
+        )
+        .catch(() => {});
+    }
     res.json({ success: true, deletedId: req.params.id });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = sanitizeApiError(err, 'Failed to delete lead.');
     res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
   }
 });
 
 // Batch Import from CSV / JSON with row validation and deduplication
-protectedApi.post('/leads/batch-import', async (req: Request, res: Response) => {
-  const { leads, mode } = req.body;
+protectedApi.post('/leads/batch-import', createRateLimitMiddleware(importRateLimiter), async (req: Request, res: Response) => {
+  const { leads, mode } = req.body || {};
   if (!Array.isArray(leads) || leads.length === 0) {
     res.status(400).json({ error: 'Array of leads is required' });
+    return;
+  }
+  if (leads.length > MAX_BATCH_IMPORT_ROWS) {
+    res.status(400).json({ error: `Batch import exceeds maximum limit of ${MAX_BATCH_IMPORT_ROWS} rows per request.` });
     return;
   }
 
@@ -1475,8 +1653,12 @@ protectedApi.post('/leads/:id/verify-registry', async (req: Request, res: Respon
 });
 
 // Phase 5 Global Business Discovery Engine (Unified Connector Execution Engine)
-protectedApi.post('/discovery/search', async (req: Request, res: Response) => {
+protectedApi.post('/discovery/search', createRateLimitMiddleware(discoveryRateLimiter), async (req: Request, res: Response) => {
   const payload = (req.body || {}) as DiscoverySearchRequest;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    res.status(400).json({ error: 'Discovery search payload must be an object.' });
+    return;
+  }
 
   ensureConnectorsRegistered();
 
@@ -1635,7 +1817,7 @@ protectedApi.get('/discovery/history', async (req: Request, res: Response) => {
 });
 
 // Enrich a discovered business candidate via Web Inspector &/or Gemini AI
-protectedApi.post('/discovery/enrich', async (req: Request, res: Response) => {
+protectedApi.post('/discovery/enrich', createRateLimitMiddleware(discoveryRateLimiter), async (req: Request, res: Response) => {
   const { searchId, leadId, lead, runWebInspector = true, runAi = true } = req.body || {};
 
   let targetLead: CanonicalLead | undefined = lead;
@@ -1673,14 +1855,18 @@ protectedApi.post('/discovery/enrich', async (req: Request, res: Response) => {
 
     res.json(enriched);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `Enrichment failed: ${redactSecrets(msg)}` });
+    res.status(500).json({ error: `Enrichment failed: ${sanitizeApiError(err, 'Enrichment error.')}` });
   }
 });
 
 // Duplicate-aware transactional save from Discovery results into CRM
 protectedApi.post('/discovery/save', async (req: Request, res: Response) => {
-  const { searchId, leadIds, leads: inlineLeads, duplicatePolicy = 'merge_preserve_crm' } = req.body || {};
+  const validated = validateDiscoverySaveBody(req.body);
+  if (!validated.ok || !validated.data) {
+    res.status(400).json({ error: validated.error || 'Invalid discovery save payload.' });
+    return;
+  }
+  const { searchId, leadIds, leads: inlineLeads, duplicatePolicy } = validated.data;
 
   let candidateLeads: CanonicalLead[] = [];
   const session = searchId ? discoveryService.getSession(String(searchId)) : undefined;
@@ -1752,13 +1938,13 @@ protectedApi.post('/discovery/save', async (req: Request, res: Response) => {
       ambiguousMatches: ambiguousMatches.length > 0 ? ambiguousMatches : undefined,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = sanitizeApiError(err, 'Failed to save discovered leads.');
     res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
   }
 });
 
 // Export genuine discovery results as RFC 4180 CSV
-protectedApi.get('/discovery/export/:searchId', (req: Request, res: Response) => {
+protectedApi.get('/discovery/export/:searchId', createRateLimitMiddleware(exportRateLimiter), async (req: Request, res: Response) => {
   const { searchId } = req.params;
   const idsParam = typeof req.query.ids === 'string' ? req.query.ids : undefined;
   const selectedIds = idsParam
@@ -1771,16 +1957,30 @@ protectedApi.get('/discovery/export/:searchId', (req: Request, res: Response) =>
     return;
   }
 
+  if (dbManager.isDbConnected() && req.owner) {
+    await postgresStorage
+      .recordAuditEvent(
+        'DISCOVERY_CSV_EXPORTED',
+        req.owner.email,
+        'discovery_search',
+        searchId,
+        { selectedCount: selectedIds?.length ?? 'all' },
+        normalizeClientIp(req)
+      )
+      .catch(() => {});
+  }
+
+  const safeSearchId = sanitizeExportFilenamePart(searchId, 'session');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename=leed_discovery_${searchId}_${Date.now()}.csv`);
+  res.setHeader('Content-Disposition', `attachment; filename="leed_discovery_${safeSearchId}_${Date.now()}.csv"`);
   res.send(csv);
 });
 
 // SSRF-Safe Web Inspector
-protectedApi.post('/inspection/inspect-url', async (req: Request, res: Response) => {
-  const { url, leadId } = req.body;
-  if (!url) {
-    res.status(400).json({ error: 'URL is required' });
+protectedApi.post('/inspection/inspect-url', createRateLimitMiddleware(inspectionRateLimiter), async (req: Request, res: Response) => {
+  const { url, leadId } = req.body || {};
+  if (!url || typeof url !== 'string' || url.trim().length > 2048) {
+    res.status(400).json({ error: 'Valid URL string (max 2048 chars) is required' });
     return;
   }
 
@@ -1906,9 +2106,15 @@ protectedApi.get('/dedupe/candidates', async (req: Request, res: Response) => {
 });
 
 protectedApi.post('/dedupe/merge', async (req: Request, res: Response) => {
-  const { survivorId, absorbedId, reason } = req.body;
-  if (!survivorId || !absorbedId) {
-    res.status(400).json({ error: 'Both survivorId and absorbedId are required' });
+  const { survivorId, absorbedId, reason } = req.body || {};
+  if (
+    !survivorId ||
+    typeof survivorId !== 'string' ||
+    !absorbedId ||
+    typeof absorbedId !== 'string' ||
+    survivorId === absorbedId
+  ) {
+    res.status(400).json({ error: 'Distinct valid survivorId and absorbedId strings are required' });
     return;
   }
 
@@ -1922,12 +2128,25 @@ protectedApi.post('/dedupe/merge', async (req: Request, res: Response) => {
       return;
     }
 
-    const { updatedSurvivor, historyRecord } = mergeLeads(survivor, absorbed, reason || 'Manual Owner Merge');
+    const cleanReason = typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 200) : 'Manual Owner Merge';
+    const { updatedSurvivor, historyRecord } = mergeLeads(survivor, absorbed, cleanReason);
 
     if (isPg) {
       await postgresStorage.upsertLead(updatedSurvivor);
       await postgresStorage.deleteLead(absorbedId);
       await postgresStorage.recordMerge(historyRecord);
+      if (req.owner) {
+        await postgresStorage
+          .recordAuditEvent(
+            'LEADS_MERGED',
+            req.owner.email,
+            'lead_merge_history',
+            historyRecord.id,
+            { survivorId, absorbedId, reason: cleanReason },
+            normalizeClientIp(req)
+          )
+          .catch(() => {});
+      }
     } else {
       storage.upsertLead(updatedSurvivor);
       storage.deleteLead(absorbedId);
@@ -1940,8 +2159,7 @@ protectedApi.post('/dedupe/merge', async (req: Request, res: Response) => {
       mergeHistoryId: historyRecord.id,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to merge leads.') });
   }
 });
 
@@ -1953,10 +2171,21 @@ protectedApi.post('/dedupe/undo/:historyId', async (req: Request, res: Response)
       res.status(404).json({ error: 'Merge history snapshot not found or already undone' });
       return;
     }
+    if (isPg && req.owner) {
+      await postgresStorage
+        .recordAuditEvent(
+          'LEAD_MERGE_UNDONE',
+          req.owner.email,
+          'lead_merge_history',
+          req.params.historyId,
+          { historyId: req.params.historyId },
+          normalizeClientIp(req)
+        )
+        .catch(() => {});
+    }
     res.json({ success: true, message: 'Merge successfully reversed. Absorbed lead restored.' });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to undo merge.') });
   }
 });
 
@@ -2022,13 +2251,13 @@ protectedApi.post('/pipeline/stages/initialize', async (req: Request, res: Respo
 });
 
 protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
-  const { leadId, stageId, lostReason } = req.body;
-  const author = req.owner?.fullName || 'Lead Intelligence Operator';
-
-  if (!leadId || typeof leadId !== 'string' || !stageId || typeof stageId !== 'string') {
-    res.status(400).json({ error: 'Both leadId and stageId are required.' });
+  const validated = validatePipelineMoveBody(req.body);
+  if (!validated.ok || !validated.data) {
+    res.status(400).json({ error: validated.error || 'Both leadId and stageId are required.' });
     return;
   }
+  const { leadId, stageId, lostReason } = validated.data;
+  const author = req.owner?.fullName || 'Lead Intelligence Operator';
 
   try {
     const { isPg } = checkStorageEngine();
@@ -2077,7 +2306,7 @@ protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
       res.json(updated);
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = sanitizeApiError(err, 'Failed to move pipeline stage.');
     const status = msg.includes('Database connection unavailable')
       ? 503
       : msg.includes('Invalid pipelineStageId') || msg.includes('does not exist in pipeline_stages')
@@ -2094,37 +2323,45 @@ protectedApi.get('/tasks', async (req: Request, res: Response) => {
     const tasks = isPg ? await postgresStorage.getTasks() : storage.getTasks();
     res.json(tasks);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch tasks.') });
   }
 });
 
 protectedApi.post('/tasks', async (req: Request, res: Response) => {
+  const validated = validateTaskCreateBody(req.body);
+  if (!validated.ok || !validated.data) {
+    res.status(400).json({ error: validated.error || 'Invalid task payload.' });
+    return;
+  }
   const author = req.owner?.fullName || 'Lead Intelligence Operator';
   try {
     const { isPg } = checkStorageEngine();
-    const task = isPg
-      ? await postgresStorage.createTask({ ...req.body, assignedTo: req.body.assignedTo || author })
-      : storage.createTask({ ...req.body, assignedTo: req.body.assignedTo || author });
+    const payload = { ...validated.data, assignedTo: validated.data.assignedTo || author };
+    const task = isPg ? await postgresStorage.createTask(payload) : storage.createTask(payload);
     res.status(201).json(task);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to create task.') });
   }
 });
 
 protectedApi.put('/tasks/:id', async (req: Request, res: Response) => {
+  const validated = validateTaskUpdateBody(req.body);
+  if (!validated.ok || !validated.data) {
+    res.status(400).json({ error: validated.error || 'Invalid task update payload.' });
+    return;
+  }
   try {
     const { isPg } = checkStorageEngine();
-    const updated = isPg ? await postgresStorage.updateTask(req.params.id, req.body) : storage.updateTask(req.params.id, req.body);
+    const updated = isPg
+      ? await postgresStorage.updateTask(req.params.id, validated.data)
+      : storage.updateTask(req.params.id, validated.data);
     if (!updated) {
       res.status(404).json({ error: 'Task not found' });
       return;
     }
     res.json(updated);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update task.') });
   }
 });
 
@@ -2134,8 +2371,7 @@ protectedApi.delete('/tasks/:id', async (req: Request, res: Response) => {
     const success = isPg ? await postgresStorage.deleteTask(req.params.id) : storage.deleteTask(req.params.id);
     res.json({ success });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to delete task.') });
   }
 });
 
@@ -2146,19 +2382,24 @@ protectedApi.get('/campaigns', async (req: Request, res: Response) => {
     const campaigns = isPg ? await postgresStorage.getCampaigns() : storage.getCampaigns();
     res.json(campaigns);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch campaigns.') });
   }
 });
 
 protectedApi.post('/campaigns', async (req: Request, res: Response) => {
+  const validated = validateCampaignCreateBody(req.body);
+  if (!validated.ok || !validated.data) {
+    res.status(400).json({ error: validated.error || 'Invalid campaign payload.' });
+    return;
+  }
   try {
     const { isPg } = checkStorageEngine();
-    const campaign = isPg ? await postgresStorage.createCampaign(req.body) : storage.createCampaign(req.body);
+    const campaign = isPg
+      ? await postgresStorage.createCampaign(validated.data)
+      : storage.createCampaign(validated.data);
     res.status(201).json(campaign);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to create campaign.') });
   }
 });
 
@@ -2172,7 +2413,11 @@ protectedApi.post('/campaigns/:id/generate-messages', async (req: Request, res: 
       return;
     }
 
-    const { targetLeadIds } = req.body;
+    const { targetLeadIds } = req.body || {};
+    if (targetLeadIds !== undefined && !Array.isArray(targetLeadIds)) {
+      res.status(400).json({ error: 'targetLeadIds must be an array.' });
+      return;
+    }
     const leads = isPg ? await postgresStorage.getLeads() : storage.getLeads();
     const filteredLeads = leads.filter((l) => (targetLeadIds ? targetLeadIds.includes(l.id) : true));
     const settings = isPg ? await postgresStorage.getSettings() : storage.getSettings();
@@ -2218,15 +2463,19 @@ protectedApi.post('/campaigns/:id/generate-messages', async (req: Request, res: 
 
     res.json(campaign);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to generate campaign messages.') });
   }
 });
 
 protectedApi.post('/campaigns/:id/messages/:messageId/action', async (req: Request, res: Response) => {
-  const { action } = req.body;
+  const validated = validateCampaignMessageAction(req.body);
+  if (!validated.ok || !validated.data) {
+    res.status(400).json({ error: validated.error || 'Invalid message action.' });
+    return;
+  }
+  const { action } = validated.data;
   const newStatus =
-    action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : action === 'send' ? 'sent' : 'pending_approval';
+    action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'sent';
   const author = req.owner?.fullName || 'Lead Intelligence Operator';
 
   try {
@@ -2271,14 +2520,17 @@ protectedApi.post('/campaigns/:id/messages/:messageId/action', async (req: Reque
 
     res.json({ success: true, newStatus });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to execute message action.') });
   }
 });
 
 // AI Sales Intelligence
-protectedApi.post('/ai/analyze-lead', async (req: Request, res: Response) => {
-  const { leadId } = req.body;
+protectedApi.post('/ai/analyze-lead', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const { leadId } = req.body || {};
+  if (!leadId || typeof leadId !== 'string') {
+    res.status(400).json({ error: 'leadId string is required.' });
+    return;
+  }
   try {
     const { isPg } = checkStorageEngine();
     const lead = isPg ? await postgresStorage.getLead(leadId) : storage.getLead(leadId);
@@ -2292,13 +2544,20 @@ protectedApi.post('/ai/analyze-lead', async (req: Request, res: Response) => {
     else storage.recordConnectorActivity('conn-gemini', true);
     res.json(analysis);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `AI analysis failed: ${msg}` });
+    res.status(500).json({ error: `AI analysis failed: ${sanitizeApiError(err, 'AI provider error.')}` });
   }
 });
 
-protectedApi.post('/ai/generate-pitch', async (req: Request, res: Response) => {
-  const { leadId, valueProposition } = req.body;
+protectedApi.post('/ai/generate-pitch', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const { leadId, valueProposition } = req.body || {};
+  if (!leadId || typeof leadId !== 'string') {
+    res.status(400).json({ error: 'leadId string is required.' });
+    return;
+  }
+  if (valueProposition !== undefined && (typeof valueProposition !== 'string' || valueProposition.length > 2000)) {
+    res.status(400).json({ error: 'valueProposition must be a string up to 2000 characters.' });
+    return;
+  }
   try {
     const { isPg } = checkStorageEngine();
     const lead = isPg ? await postgresStorage.getLead(leadId) : storage.getLead(leadId);
@@ -2312,13 +2571,16 @@ protectedApi.post('/ai/generate-pitch', async (req: Request, res: Response) => {
     else storage.recordConnectorActivity('conn-gemini', true);
     res.json(pitch);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `AI pitch drafting failed: ${msg}` });
+    res.status(500).json({ error: `AI pitch drafting failed: ${sanitizeApiError(err, 'AI provider error.')}` });
   }
 });
 
-protectedApi.post('/ai/meeting-brief', async (req: Request, res: Response) => {
-  const { leadId } = req.body;
+protectedApi.post('/ai/meeting-brief', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const { leadId } = req.body || {};
+  if (!leadId || typeof leadId !== 'string') {
+    res.status(400).json({ error: 'leadId string is required.' });
+    return;
+  }
   try {
     const { isPg } = checkStorageEngine();
     const lead = isPg ? await postgresStorage.getLead(leadId) : storage.getLead(leadId);
@@ -2332,13 +2594,20 @@ protectedApi.post('/ai/meeting-brief', async (req: Request, res: Response) => {
     else storage.recordConnectorActivity('conn-gemini', true);
     res.json(brief);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `Meeting brief generation failed: ${msg}` });
+    res.status(500).json({ error: `Meeting brief generation failed: ${sanitizeApiError(err, 'AI provider error.')}` });
   }
 });
 
-protectedApi.post('/ai/market-report', async (req: Request, res: Response) => {
-  const { country, industry } = req.body;
+protectedApi.post('/ai/market-report', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const { country, industry } = req.body || {};
+  if (country !== undefined && (typeof country !== 'string' || country.length > 80)) {
+    res.status(400).json({ error: 'Invalid country filter.' });
+    return;
+  }
+  if (industry !== undefined && (typeof industry !== 'string' || industry.length > 120)) {
+    res.status(400).json({ error: 'Invalid industry filter.' });
+    return;
+  }
   try {
     const { isPg } = checkStorageEngine();
     const allLeads = isPg ? await postgresStorage.getLeads() : storage.getLeads();
@@ -2351,8 +2620,7 @@ protectedApi.post('/ai/market-report', async (req: Request, res: Response) => {
     else storage.recordConnectorActivity('conn-gemini', true);
     res.json(report);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `Market report failed: ${msg}` });
+    res.status(500).json({ error: `Market report failed: ${sanitizeApiError(err, 'AI provider error.')}` });
   }
 });
 
@@ -2811,9 +3079,30 @@ protectedApi.get('/settings', async (req: Request, res: Response) => {
 });
 
 protectedApi.put('/settings', async (req: Request, res: Response) => {
+  const validated = validateSettingsUpdateBody(req.body);
+  if (!validated.ok || !validated.data) {
+    res.status(400).json({ error: validated.error || 'Invalid settings payload.' });
+    return;
+  }
   try {
     const { isPg } = checkStorageEngine();
-    const updated = isPg ? await postgresStorage.updateSettings(req.body) : storage.updateSettings(req.body);
+    const updated = isPg
+      ? await postgresStorage.updateSettings(validated.data)
+      : storage.updateSettings(validated.data);
+    if (isPg && req.owner) {
+      await postgresStorage
+        .recordAuditEvent(
+          'SETTINGS_UPDATED',
+          req.owner.email,
+          'app_settings',
+          'default',
+          {
+            updatedKeys: Object.keys(validated.data).filter((k) => k !== 'companiesHouseApiKey'),
+          },
+          normalizeClientIp(req)
+        )
+        .catch(() => {});
+    }
     const hasChKey = !!(process.env.COMPANIES_HOUSE_API_KEY || updated.companiesHouseApiKey);
     res.json({
       ...updated,
@@ -2829,13 +3118,12 @@ protectedApi.put('/settings', async (req: Request, res: Response) => {
       });
       return;
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update settings.') });
   }
 });
 
 // Data Export (RFC 4180 compliant with full international & identifier coverage)
-protectedApi.get('/export/csv', async (req: Request, res: Response) => {
+protectedApi.get('/export/csv', createRateLimitMiddleware(exportRateLimiter), async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
     const leads = isPg ? await postgresStorage.getLeads() : storage.getLeads();
@@ -2905,25 +3193,47 @@ protectedApi.get('/export/csv', async (req: Request, res: Response) => {
     });
 
     const csv = buildCsvDocument(headers, rows, true);
+    if (isPg && req.owner) {
+      await postgresStorage
+        .recordAuditEvent(
+          'CRM_EXPORT_CSV',
+          req.owner.email,
+          'leads',
+          'all',
+          { exportedRowCount: leads.length },
+          normalizeClientIp(req)
+        )
+        .catch(() => {});
+    }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename=leads_export_${Date.now()}.csv`);
+    res.setHeader('Content-Disposition', `attachment; filename="leads_export_${Date.now()}.csv"`);
     res.send(csv);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to export CSV.') });
   }
 });
 
-protectedApi.get('/export/json', async (req: Request, res: Response) => {
+protectedApi.get('/export/json', createRateLimitMiddleware(exportRateLimiter), async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
     const leads = isPg ? await postgresStorage.getLeads() : storage.getLeads();
+    if (isPg && req.owner) {
+      await postgresStorage
+        .recordAuditEvent(
+          'CRM_EXPORT_JSON',
+          req.owner.email,
+          'leads',
+          'all',
+          { exportedRowCount: leads.length },
+          normalizeClientIp(req)
+        )
+        .catch(() => {});
+    }
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename=leads_export_${Date.now()}.json`);
+    res.setHeader('Content-Disposition', `attachment; filename="leads_export_${Date.now()}.json"`);
     res.send(JSON.stringify(leads, null, 2));
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to export JSON.') });
   }
 });
 
@@ -2934,6 +3244,7 @@ protectedApi.get('/export/json', async (req: Request, res: Response) => {
 // Upload CSV or Excel (.xlsx) file to create an in-memory staged import session (zero DB writes)
 protectedApi.post(
   '/import/upload',
+  createRateLimitMiddleware(importRateLimiter),
   (req: Request, res: Response, next: NextFunction) => {
     const contentType = String(req.headers['content-type'] || '').toLowerCase();
     if (contentType.includes('multipart/form-data')) {
@@ -3091,7 +3402,7 @@ protectedApi.post('/import/sessions/:sessionId/preview', async (req: Request, re
 });
 
 // Explicit confirmation to execute staged import transaction into CRM database
-protectedApi.post('/import/sessions/:sessionId/confirm', async (req: Request, res: Response) => {
+protectedApi.post('/import/sessions/:sessionId/confirm', createRateLimitMiddleware(importRateLimiter), async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
     const {
@@ -3119,7 +3430,7 @@ protectedApi.post('/import/sessions/:sessionId/confirm', async (req: Request, re
       atomicRollbackOnError:
         typeof atomicRollbackOnError === 'boolean' ? atomicRollbackOnError : undefined,
       simulateFailureAtRow:
-        simulateFailureAtRow !== undefined ? Number(simulateFailureAtRow) : undefined,
+        !IS_PROD && simulateFailureAtRow !== undefined ? Number(simulateFailureAtRow) : undefined,
       storageAdapter: isPg ? postgresStorage : storage,
       existingLeads,
       existingPersons,
@@ -3279,7 +3590,7 @@ protectedApi.get('/import/batches/:batchId', async (req: Request, res: Response)
   }
 });
 
-protectedApi.get('/import/batches/:batchId/export', async (req: Request, res: Response) => {
+protectedApi.get('/import/batches/:batchId/export', createRateLimitMiddleware(exportRateLimiter), async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
     const exportType = String(req.query.type || 'failed');
@@ -3305,15 +3616,28 @@ protectedApi.get('/import/batches/:batchId/export', async (req: Request, res: Re
       suffix = 'failed_rows';
     }
 
+    if (isPg && req.owner) {
+      await postgresStorage
+        .recordAuditEvent(
+          'IMPORT_BATCH_EXPORTED',
+          req.owner.email,
+          'import_batch',
+          req.params.batchId,
+          { exportType: suffix, rowCount: detail.rows.length },
+          normalizeClientIp(req)
+        )
+        .catch(() => {});
+    }
+
+    const safeBatchId = sanitizeExportFilenamePart(req.params.batchId, 'batch');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename=import_${req.params.batchId}_${suffix}.csv`
+      `attachment; filename="import_${safeBatchId}_${suffix}.csv"`
     );
     res.send(csv);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to export import batch report.') });
   }
 });
 
@@ -3503,9 +3827,8 @@ app.use('/api', (err: any, _req: Request, res: Response, _next: NextFunction) =>
       : err?.type === 'entity.parse.failed'
         ? 400
         : 500;
-  const rawMsg = err instanceof Error ? err.message : String(err || 'Internal API error');
   res.status(status).json({
-    error: redactSecrets(rawMsg),
+    error: sanitizeApiError(err, status === 400 ? 'Invalid request payload.' : 'Internal API error.'),
     code: status === 400 ? 'BAD_REQUEST' : 'INTERNAL_ERROR',
   });
 });

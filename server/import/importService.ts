@@ -227,7 +227,8 @@ export class ImportService {
       id,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      buffer: input.buffer,
+      // CSVs do not switch worksheets; release raw file buffer immediately to minimize PII residency in RAM
+      buffer: parsed.summary.format === 'xlsx' ? input.buffer : Buffer.alloc(0),
       filename: parsed.summary.filename,
       mimeType: input.mimeType,
       parsed,
@@ -653,6 +654,7 @@ export class ImportService {
       const result = await input.storageAdapter.executeImportTransaction(plan);
       if (result.batch.status !== 'rolled_back') {
         sess.committedBatchId = result.batch.id;
+        sess.buffer = Buffer.alloc(0);
       }
       sess.updatedAt = Date.now();
       return result;

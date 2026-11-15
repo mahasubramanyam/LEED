@@ -1,4 +1,9 @@
-import dns from 'dns/promises';
+import {
+  DnsLookupAllFn,
+  fetchWithSsrfProtection,
+  SsrfBlockedError,
+  validateOutboundUrl,
+} from '../security/ssrf.js';
 
 export interface WebInspectionResult {
   url: string;
@@ -25,30 +30,10 @@ export interface WebInspectionResult {
   };
 }
 
-// Check if an IPv4 or IPv6 address is in a reserved/private/loopback range
-function isDisallowedIp(ip: string): boolean {
-  // IPv4 Loopback
-  if (ip.startsWith('127.')) return true;
-  // Private 10.0.0.0/8
-  if (ip.startsWith('10.')) return true;
-  // Private 172.16.0.0/12
-  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) return true;
-  // Private 192.168.0.0/16
-  if (ip.startsWith('192.168.')) return true;
-  // Cloud metadata and link-local 169.254.0.0/16
-  if (ip.startsWith('169.254.')) return true;
-  // Current network / broadcast
-  if (ip === '0.0.0.0' || ip === '255.255.255.255') return true;
-
-  // IPv6 loopback & link-local
-  if (ip === '::1' || ip.toLowerCase().startsWith('fe80:') || ip.toLowerCase().startsWith('fc00:') || ip.toLowerCase().startsWith('fd00:')) {
-    return true;
-  }
-
-  return false;
-}
-
-export async function inspectWebsite(rawUrl: string): Promise<WebInspectionResult> {
+export async function inspectWebsite(
+  rawUrl: string,
+  testHooks?: { dnsLookupAll?: DnsLookupAllFn; fetchFn?: typeof fetch; maxBytes?: number }
+): Promise<WebInspectionResult> {
   const result: WebInspectionResult = {
     url: rawUrl,
     domain: '',
@@ -60,78 +45,54 @@ export async function inspectWebsite(rawUrl: string): Promise<WebInspectionResul
     securityCheck: { passed: false },
   };
 
-  let targetUrl: URL;
-  try {
-    const formatted = rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
-      ? rawUrl
-      : `https://${rawUrl}`;
-    targetUrl = new URL(formatted);
-  } catch {
-    result.securityCheck = { passed: false, reason: 'Malformed URL scheme' };
+  const preCheck = await validateOutboundUrl(rawUrl, {
+    dnsLookupAll: testHooks?.dnsLookupAll,
+    allowStandardPortsOnly: true,
+  });
+
+  if (!preCheck.allowed || !preCheck.url) {
+    result.domain = preCheck.url?.hostname?.replace(/^www\./, '') || '';
+    result.securityCheck = {
+      passed: false,
+      ipResolved: preCheck.resolvedIps?.[0],
+      reason: preCheck.reason || 'Outbound target rejected by SSRF guard',
+    };
     return result;
   }
 
-  // Scheme constraint
-  if (targetUrl.protocol !== 'http:' && targetUrl.protocol !== 'https:') {
-    result.securityCheck = { passed: false, reason: 'Invalid protocol. Only HTTP/HTTPS allowed' };
-    return result;
-  }
+  result.domain = preCheck.url.hostname.replace(/^www\./, '');
+  result.isHttps = preCheck.url.protocol === 'https:';
+  result.securityCheck = { passed: true, ipResolved: preCheck.resolvedIps?.[0] };
 
-  // Reject embedded credentials
-  if (targetUrl.username || targetUrl.password) {
-    result.securityCheck = { passed: false, reason: 'Embedded credentials prohibited' };
-    return result;
-  }
-
-  result.domain = targetUrl.hostname.replace(/^www\./, '');
-  result.isHttps = targetUrl.protocol === 'https:';
-
-  // SSRF Protection: DNS resolution & address validation
-  try {
-    const lookup = await dns.lookup(targetUrl.hostname);
-    if (isDisallowedIp(lookup.address)) {
-      result.securityCheck = {
-        passed: false,
-        ipResolved: lookup.address,
-        reason: `Target IP ${lookup.address} resolved to protected/private network (SSRF blocked)`,
-      };
-      return result;
-    }
-    result.securityCheck = { passed: true, ipResolved: lookup.address };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    result.securityCheck = { passed: false, reason: `DNS lookup failed for hostname: ${msg}` };
-    return result;
-  }
-
-  // Live HTTP check with bounded timeout and safe headers
   const start = Date.now();
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-
-    const response = await fetch(targetUrl.toString(), {
-      method: 'GET',
+    const fetched = await fetchWithSsrfProtection(preCheck.url.toString(), {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; GlobalLeadBot/1.0; +https://internal-pipeline.local)',
-        'Accept': 'text/html,application/xhtml+xml',
+        Accept: 'text/html,application/xhtml+xml',
       },
-      signal: controller.signal,
-      redirect: 'follow',
+      timeoutMs: 6000,
+      maxRedirects: 3,
+      maxBytes: testHooks?.maxBytes ?? 300 * 1024,
+      dnsLookupAll: testHooks?.dnsLookupAll,
+      fetchFn: testHooks?.fetchFn,
     });
 
-    clearTimeout(timeout);
     result.serverLatencyMs = Date.now() - start;
-    result.httpStatus = response.status;
-    result.isOnline = response.ok;
+    result.httpStatus = fetched.response.status;
+    result.isOnline = fetched.response.ok;
+    result.domain = fetched.finalUrl.hostname.replace(/^www\./, '');
+    result.isHttps = fetched.finalUrl.protocol === 'https:';
+    result.securityCheck = {
+      passed: true,
+      ipResolved: fetched.resolvedIps[0] || preCheck.resolvedIps?.[0],
+    };
 
-    if (!response.ok) {
+    if (!fetched.response.ok) {
       return result;
     }
 
-    // Read bounded response content (max 300KB to prevent memory exhaustion)
-    const text = await response.text();
-    const safeHtml = text.slice(0, 300000);
+    const safeHtml = fetched.bodyText.slice(0, 300000);
 
     // Extract Title
     const titleMatch = safeHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
@@ -140,7 +101,8 @@ export async function inspectWebsite(rawUrl: string): Promise<WebInspectionResul
     }
 
     // Extract Meta Description
-    const descMatch = safeHtml.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i) ||
+    const descMatch =
+      safeHtml.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i) ||
       safeHtml.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i);
     if (descMatch && descMatch[1]) {
       result.description = descMatch[1].trim();
@@ -151,7 +113,6 @@ export async function inspectWebsite(rawUrl: string): Promise<WebInspectionResul
     const rawEmails = safeHtml.match(emailRegex) || [];
     const validEmails = Array.from(new Set(rawEmails)).filter((e) => {
       const lower = e.toLowerCase();
-      // Filter out common asset/code false positives
       return (
         !lower.endsWith('.png') &&
         !lower.endsWith('.jpg') &&
@@ -164,7 +125,7 @@ export async function inspectWebsite(rawUrl: string): Promise<WebInspectionResul
     });
     result.emailsFound = validEmails.slice(0, 5);
 
-    // Extract Social Links
+    // Extract Social Links (http/https only)
     const linkedinMatch = safeHtml.match(/https?:\/\/(?:www\.)?linkedin\.com\/(?:company|in)\/[a-zA-Z0-9_-]+/i);
     if (linkedinMatch) result.socialLinks.linkedin = linkedinMatch[0];
 
@@ -184,8 +145,20 @@ export async function inspectWebsite(rawUrl: string): Promise<WebInspectionResul
   } catch (err: unknown) {
     result.serverLatencyMs = Date.now() - start;
     result.isOnline = false;
+    if (err instanceof SsrfBlockedError) {
+      result.securityCheck = {
+        passed: false,
+        ipResolved: err.ipResolved || result.securityCheck.ipResolved,
+        reason: err.message,
+      };
+      return result;
+    }
     const msg = err instanceof Error ? err.message : String(err);
-    result.securityCheck = { passed: true, ipResolved: result.securityCheck.ipResolved, reason: `HTTP request error: ${msg}` };
+    result.securityCheck = {
+      passed: true,
+      ipResolved: result.securityCheck.ipResolved,
+      reason: `HTTP request error: ${msg}`,
+    };
     return result;
   }
 }

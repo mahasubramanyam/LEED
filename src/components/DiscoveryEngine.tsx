@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { sanitizeExternalUrl } from '../utils/safeUrl.ts';
 import {
   Search,
   Globe2,
@@ -1392,9 +1393,9 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                         <div className="font-semibold text-slate-900 dark:text-white">{lead.companyName}</div>
                         <div className="text-[11px] text-slate-500 flex items-center gap-2">
                           <span>{lead.sources?.[0]?.sourceName}</span>
-                          {lead.website && (
+                          {sanitizeExternalUrl(lead.website) && (
                             <a
-                              href={lead.website}
+                              href={sanitizeExternalUrl(lead.website)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5"
@@ -1561,9 +1562,9 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
 
                 <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 dark:border-slate-800">
                   <div className="flex items-center gap-3">
-                    {lead.website && (
+                    {sanitizeExternalUrl(lead.website) && (
                       <a
-                        href={lead.website}
+                        href={sanitizeExternalUrl(lead.website)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"

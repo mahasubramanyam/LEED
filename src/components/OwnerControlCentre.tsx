@@ -134,6 +134,81 @@ interface DiagnosticsData {
   };
 }
 
+interface SecurityPostureData {
+  generatedAt: string;
+  environment: 'production' | 'development';
+  overallPosture: 'hardened' | 'attention_required';
+  authentication: {
+    singleOwnerLocked: boolean;
+    passwordHashing: string;
+    sessionTokenStorage: string;
+    activeSessionCount: number;
+    totalSessionCount: number;
+    csrfProtection: boolean;
+    originValidationFailClosed: boolean;
+  };
+  databaseSecurity: {
+    connected: boolean;
+    engine: string;
+    tlsEncrypted: boolean;
+    sslSetting: string;
+    auditTriggersPresent: boolean;
+    auditHashChainValid: boolean | null;
+    auditEventCount: number;
+    migration005PendingApproval: boolean;
+    startupAutoMigrateMaxVersion: string;
+  };
+  secretsAndEncryption: {
+    algorithm: string;
+    credentialKeyConfigured: boolean;
+    credentialKeySource: string;
+    encryptedConnectorCredentialsCount: number;
+    secretRedactionActive: boolean;
+    neonManagedAtRestEncryption: string;
+  };
+  networkAndHttpHardening: {
+    cspEnabled: boolean;
+    aiStudioIframeCompatible: boolean;
+    xPoweredByDisabled: boolean;
+    ssrfGuardVersion: string;
+    ssrfPrivateIpv4AndIpv6Blocked: boolean;
+    ssrfRedirectRevalidation: boolean;
+    ssrfResponseByteLimitBytes: number;
+    uploadMaxBytes: number;
+    uploadMagicByteAndMacroScan: boolean;
+  };
+  rateLimiting: {
+    loginRateLimiterActive: boolean;
+    routeLimiters: Array<{
+      name: string;
+      maxRequests: number;
+      windowMs: number;
+      activeKeys: number;
+      blockedCount: number;
+    }>;
+  };
+  backups: {
+    localBackupCount: number;
+    latestBackupAt?: string;
+    documentationPath: string;
+  };
+  checks: Array<{
+    id: string;
+    label: string;
+    status: 'pass' | 'warn' | 'fail';
+    detail: string;
+  }>;
+  recentSecurityEvents: Array<{
+    id: string;
+    timestamp: string;
+    category: string;
+    severity: 'info' | 'warning' | 'high';
+    path?: string;
+    summary: string;
+  }>;
+  eventCounters: Record<string, number>;
+}
+
 interface OwnerControlCentreProps {
   owner: OwnerProfile | null;
   settings: AppSettings;
@@ -157,6 +232,7 @@ export function OwnerControlCentre({
 
   // Diagnostics State
   const [diagData, setDiagData] = useState<DiagnosticsData | null>(null);
+  const [securityPosture, setSecurityPosture] = useState<SecurityPostureData | null>(null);
   const [loadingDiag, setLoadingDiag] = useState(false);
 
   // Sessions State
@@ -253,9 +329,10 @@ export function OwnerControlCentre({
   const fetchDiagnostics = useCallback(async () => {
     setLoadingDiag(true);
     try {
-      const [res, encRes] = await Promise.all([
+      const [res, encRes, postureRes] = await Promise.all([
         apiFetch('/api/owner/diagnostics'),
         apiFetch('/api/connectors/encryption-status'),
+        apiFetch('/api/owner/security-posture'),
       ]);
       if (res.ok) {
         const data = await res.json();
@@ -263,6 +340,9 @@ export function OwnerControlCentre({
       }
       if (encRes.ok) {
         setEncryptionStatus(await encRes.json());
+      }
+      if (postureRes.ok) {
+        setSecurityPosture(await postureRes.json());
       }
     } catch (err) {
       console.error('Failed to load diagnostics', err);
@@ -1443,6 +1523,138 @@ export function OwnerControlCentre({
                 {changingPassword ? 'Updating Password...' : 'Save New Password'}
               </button>
             </form>
+          </div>
+
+          {/* Phase 8: Security Posture & Data Protection Diagnostics */}
+          <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                    Security Posture &amp; Data Protection Diagnostics
+                  </h2>
+                  {securityPosture && (
+                    <span
+                      className={`px-2 py-0.5 text-[10px] font-semibold rounded-md border ${
+                        securityPosture.overallPosture === 'hardened'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                          : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
+                      }`}
+                    >
+                      {securityPosture.overallPosture === 'hardened' ? 'Hardened' : 'Attention Required'}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Live verification of Neon TLS, AES-256-GCM vault status, immutable audit triggers, CSP headers, SSRF/upload limits, and per-route rate limiters.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={fetchDiagnostics}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors shrink-0"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingDiag ? 'animate-spin' : ''}`} />
+                Re-verify Posture
+              </button>
+            </div>
+
+            {!securityPosture ? (
+              <div className="text-xs text-slate-400 py-4">Loading live security posture diagnostics...</div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {securityPosture.checks.map((chk) => (
+                    <div
+                      key={chk.id}
+                      className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-slate-900 dark:text-white">{chk.label}</span>
+                        <span
+                          className={`px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase rounded ${
+                            chk.status === 'pass'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                              : chk.status === 'warn'
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                              : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                          }`}
+                        >
+                          {chk.status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">{chk.detail}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                  <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 space-y-1.5">
+                    <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5 text-blue-500" />
+                      Database &amp; Encryption
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 font-mono">
+                      <div>TLS Session: {securityPosture.databaseSecurity.tlsEncrypted ? 'Verified ON' : securityPosture.databaseSecurity.sslSetting}</div>
+                      <div>App Vault: {securityPosture.secretsAndEncryption.algorithm.toUpperCase()} ({securityPosture.secretsAndEncryption.credentialKeyConfigured ? securityPosture.secretsAndEncryption.credentialKeySource : 'unconfigured'})</div>
+                      <div>Encrypted Secrets: {securityPosture.secretsAndEncryption.encryptedConnectorCredentialsCount}</div>
+                      <div>Migration 005 Lock: {securityPosture.databaseSecurity.migration005PendingApproval ? 'Pending Approval' : 'Applied'}</div>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 space-y-1.5">
+                    <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-indigo-500" />
+                      Network, SSRF &amp; Uploads
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 font-mono">
+                      <div>CSP + AI Studio Frame: {securityPosture.networkAndHttpHardening.cspEnabled ? 'Active' : 'Off'}</div>
+                      <div>Redirect Re-validation: {securityPosture.networkAndHttpHardening.ssrfRedirectRevalidation ? 'Enforced' : 'Off'}</div>
+                      <div>Stream Cap: {Math.round(securityPosture.networkAndHttpHardening.ssrfResponseByteLimitBytes / 1024)} KB</div>
+                      <div>Upload Cap: {Math.round(securityPosture.networkAndHttpHardening.uploadMaxBytes / (1024 * 1024))} MB + Macro/Zip Scan</div>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 space-y-1.5">
+                    <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-emerald-500" />
+                      Backups &amp; Rate Limiters
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 font-mono">
+                      <div>Local Snapshots: {securityPosture.backups.localBackupCount} files</div>
+                      <div>Active Route Limiters: {securityPosture.rateLimiting.routeLimiters.length + 1}</div>
+                      <div>Blocked Requests: {securityPosture.rateLimiting.routeLimiters.reduce((acc, r) => acc + r.blockedCount, 0)}</div>
+                      <div>Guide: {securityPosture.backups.documentationPath}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {securityPosture.recentSecurityEvents.length > 0 && (
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                    <div className="text-xs font-semibold text-slate-900 dark:text-white">
+                      Recent Blocked / Security Events ({securityPosture.recentSecurityEvents.length})
+                    </div>
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                      {securityPosture.recentSecurityEvents.slice(0, 8).map((ev) => (
+                        <div
+                          key={ev.id}
+                          className="flex items-center justify-between gap-3 px-3 py-1.5 rounded bg-slate-50 dark:bg-slate-800/60 text-[11px] font-mono"
+                        >
+                          <div className="truncate text-slate-700 dark:text-slate-300">
+                            <span className="font-semibold text-amber-600 dark:text-amber-400 mr-2">[{ev.category}]</span>
+                            {ev.summary}
+                          </div>
+                          <span className="text-[10px] text-slate-400 shrink-0">
+                            {new Date(ev.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

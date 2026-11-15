@@ -1,5 +1,7 @@
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
+import { recordSecurityEvent } from '../security/securityEvents.js';
+import { normalizeClientIp } from './rateLimit.js';
 
 const CSRF_HEADER_NAME = 'x-leed-csrf-token';
 const CSRF_COOKIE_NAME = 'leed_csrf';
@@ -35,7 +37,7 @@ export function validateSameOrigin(req: Request): boolean {
   const referer = req.headers['referer'];
   const host = extractHostHeader(req.headers['host']);
 
-  if (!host) return true;
+  if (!host) return !origin && !referer;
 
   const allowedHosts = new Set<string>([host]);
 
@@ -81,6 +83,14 @@ export function validateCsrf(req: Request, res: Response, next: NextFunction): v
 
   // Cross-origin check
   if (!validateSameOrigin(req)) {
+    recordSecurityEvent({
+      category: 'csrf_blocked',
+      severity: 'high',
+      path: req.originalUrl || req.path,
+      method: req.method,
+      ip: normalizeClientIp(req),
+      summary: 'Blocked cross-origin state-changing request (Origin/Referer mismatch)',
+    });
     res.status(403).json({
       error: 'Cross-origin request blocked.',
       code: 'CSRF_CROSS_ORIGIN',
@@ -103,6 +113,14 @@ export function validateCsrf(req: Request, res: Response, next: NextFunction): v
   const headerToken = (req.headers[CSRF_HEADER_NAME] || req.headers['x-csrf-token']) as string | undefined;
 
   if (!cookieToken || !headerToken) {
+    recordSecurityEvent({
+      category: 'csrf_blocked',
+      severity: 'warning',
+      path: req.originalUrl || req.path,
+      method: req.method,
+      ip: normalizeClientIp(req),
+      summary: 'Blocked request missing CSRF cookie or X-LEED-CSRF-TOKEN header',
+    });
     res.status(403).json({
       error: 'CSRF token missing. Please refresh or provide X-LEED-CSRF-TOKEN header.',
       code: 'CSRF_MISSING',
@@ -115,6 +133,14 @@ export function validateCsrf(req: Request, res: Response, next: NextFunction): v
   const headerBuf = Buffer.from(headerToken);
 
   if (cookieBuf.length !== headerBuf.length || !crypto.timingSafeEqual(cookieBuf, headerBuf)) {
+    recordSecurityEvent({
+      category: 'csrf_blocked',
+      severity: 'high',
+      path: req.originalUrl || req.path,
+      method: req.method,
+      ip: normalizeClientIp(req),
+      summary: 'Blocked request with invalid CSRF token',
+    });
     res.status(403).json({
       error: 'Invalid CSRF token.',
       code: 'CSRF_INVALID',

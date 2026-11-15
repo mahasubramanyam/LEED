@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { sanitizeExternalUrl } from '../utils/safeUrl.ts';
 import {
   FileSpreadsheet,
   History,
@@ -475,9 +476,9 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                         {p.phoneNormalized || p.phone}
                       </span>
                     )}
-                    {p.linkedinUrl && (
+                    {sanitizeExternalUrl(p.linkedinUrl) && (
                       <a
-                        href={p.linkedinUrl}
+                        href={sanitizeExternalUrl(p.linkedinUrl)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-blue-500 hover:underline"

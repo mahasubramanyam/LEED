@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { sanitizeExternalUrl } from '../utils/safeUrl.ts';
 import {
   Search,
   Building2,
@@ -802,9 +803,9 @@ export function LeadsView({
                       {/* Contact Channels */}
                       <td className="p-3.5" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
-                          {lead.website ? (
+                          {sanitizeExternalUrl(lead.website) ? (
                             <a
-                              href={lead.website}
+                              href={sanitizeExternalUrl(lead.website)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-600 dark:text-blue-400 hover:underline p-1"
