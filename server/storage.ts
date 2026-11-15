@@ -8,6 +8,12 @@ import {
   MergeHistoryRecord,
   ConnectorStatus,
   AppSettings,
+  PersonRecord,
+  CompanyPersonRelationship,
+  LinkedPersonWithRelationship,
+  ImportMappingTemplate,
+  ImportBatchRecord,
+  ImportBatchRowRecord,
 } from './types.js';
 import { dbManager } from './db/pool.js';
 import { PostgresStorage } from './db/storagePg.js';
@@ -24,6 +30,15 @@ import {
   connectorRegistry,
   ensureConnectorsRegistered,
 } from './connectors/index.js';
+import { ImportExecutionPlan, ImportExecutionResult, ImportStorageAdapter } from './import/importService.js';
+import { findMatchingPerson } from './import/dedupeClassifier.js';
+import {
+  buildCanonicalLeadFromImport,
+  buildPersonRecordFromImport,
+  buildRelationshipRecord,
+  mergeImportedPersonSafely,
+  safelyMergeImportedCompanyIntoLead,
+} from './import/crmMergeHelper.js';
 
 interface DatabaseSchema {
   leads: CanonicalLead[];
@@ -34,6 +49,11 @@ interface DatabaseSchema {
   connectors: ConnectorStatus[];
   connectorConfigs?: Record<string, ConnectorConfigRecord>;
   connectorRuns?: ConnectorRunRecord[];
+  persons?: PersonRecord[];
+  companyPersonRelationships?: CompanyPersonRelationship[];
+  importMappingTemplates?: ImportMappingTemplate[];
+  importBatches?: ImportBatchRecord[];
+  importBatchRows?: ImportBatchRowRecord[];
   settings: AppSettings;
 }
 
@@ -491,27 +511,37 @@ const INITIAL_CAMPAIGNS: OutreachCampaign[] = [
   },
 ];
 
-class StorageManager {
+export class StorageManager implements ImportStorageAdapter {
   private db: DatabaseSchema;
+  private readonly dbFilePath: string;
+  private readonly dataDirPath: string;
 
-  constructor() {
+  constructor(customDbFilePath?: string) {
+    this.dbFilePath = customDbFilePath ? path.resolve(customDbFilePath) : DB_FILE;
+    this.dataDirPath = path.dirname(this.dbFilePath);
     this.ensureDataDir();
     this.db = this.loadDatabase();
   }
 
   private ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(this.dataDirPath)) {
+      fs.mkdirSync(this.dataDirPath, { recursive: true });
     }
   }
 
   private loadDatabase(): DatabaseSchema {
-    if (fs.existsSync(DB_FILE)) {
+    if (fs.existsSync(this.dbFilePath)) {
       try {
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        return JSON.parse(raw);
+        const raw = fs.readFileSync(this.dbFilePath, 'utf-8');
+        const parsed = JSON.parse(raw) as DatabaseSchema;
+        parsed.persons = parsed.persons || [];
+        parsed.companyPersonRelationships = parsed.companyPersonRelationships || [];
+        parsed.importMappingTemplates = parsed.importMappingTemplates || [];
+        parsed.importBatches = parsed.importBatches || [];
+        parsed.importBatchRows = parsed.importBatchRows || [];
+        return parsed;
       } catch (e) {
-        console.error('Failed to read pipeline_store.json, creating fallback', e);
+        console.error('Failed to read pipeline store JSON, creating fallback', e);
       }
     }
 
@@ -522,6 +552,11 @@ class StorageManager {
       campaigns: INITIAL_CAMPAIGNS,
       mergeHistory: [],
       connectors: DEFAULT_CONNECTORS,
+      persons: [],
+      companyPersonRelationships: [],
+      importMappingTemplates: [],
+      importBatches: [],
+      importBatchRows: [],
       settings: DEFAULT_SETTINGS,
     };
 
@@ -531,9 +566,9 @@ class StorageManager {
 
   private saveDatabase(data: DatabaseSchema) {
     try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+      fs.writeFileSync(this.dbFilePath, JSON.stringify(data, null, 2), 'utf-8');
     } catch (e) {
-      console.error('Failed to write pipeline_store.json', e);
+      console.error('Failed to write pipeline store JSON', e);
     }
   }
 
@@ -1052,7 +1087,517 @@ class StorageManager {
   public async runJsonMigration(dryRun = false): Promise<MigrationSummary> {
     return jsonMigrator.migrate({ dryRun });
   }
+
+  // ==========================================
+  // PHASE 7: PERSONS, M:N RELATIONSHIPS & IMPORT ENGINE
+  // ==========================================
+
+  public getPersons(): PersonRecord[] {
+    if (!this.db.persons) this.db.persons = [];
+    return this.db.persons;
+  }
+
+  public getAllRelationships(): CompanyPersonRelationship[] {
+    if (!this.db.companyPersonRelationships) this.db.companyPersonRelationships = [];
+    return this.db.companyPersonRelationships;
+  }
+
+  public getLeadPersons(leadId: string): LinkedPersonWithRelationship[] {
+    const persons = this.getPersons();
+    const rels = this.getAllRelationships();
+    const leadMap = new Map(this.db.leads.map((l) => [l.id, l]));
+
+    const attached = rels.filter((r) => r.leadId === leadId);
+    const out: LinkedPersonWithRelationship[] = [];
+
+    for (const rel of attached) {
+      const person = persons.find((p) => p.id === rel.personId);
+      if (!person) continue;
+      const otherCompanies = rels
+        .filter((other) => other.personId === person.id && other.leadId !== leadId)
+        .map((other) => ({
+          leadId: other.leadId,
+          companyName: leadMap.get(other.leadId)?.companyName || other.leadId,
+          relationshipType: other.relationshipType,
+          jobTitle: other.jobTitle,
+        }));
+
+      out.push({
+        person,
+        relationship: rel,
+        otherCompanies: otherCompanies.length > 0 ? otherCompanies : undefined,
+      });
+    }
+
+    return out;
+  }
+
+  public getImportTemplates(): ImportMappingTemplate[] {
+    if (!this.db.importMappingTemplates) this.db.importMappingTemplates = [];
+    return [...this.db.importMappingTemplates].sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  }
+
+  public saveImportTemplate(
+    tpl: Omit<ImportMappingTemplate, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+  ): ImportMappingTemplate {
+    if (!this.db.importMappingTemplates) this.db.importMappingTemplates = [];
+    const now = new Date().toISOString();
+    const id = tpl.id || `imp-tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const existingIdx = this.db.importMappingTemplates.findIndex((t) => t.id === id);
+
+    const record: ImportMappingTemplate = {
+      id,
+      name: tpl.name.trim(),
+      description: tpl.description?.trim() || undefined,
+      sourceFormat: tpl.sourceFormat,
+      headerSignature: tpl.headerSignature,
+      columnMappings: tpl.columnMappings,
+      mergeRules: tpl.mergeRules || [],
+      normalizationOptions: tpl.normalizationOptions,
+      createdBy: tpl.createdBy || 'Owner',
+      createdAt:
+        existingIdx >= 0 ? this.db.importMappingTemplates[existingIdx].createdAt : now,
+      updatedAt: now,
+    };
+
+    if (existingIdx >= 0) {
+      this.db.importMappingTemplates[existingIdx] = record;
+    } else {
+      this.db.importMappingTemplates.unshift(record);
+    }
+    this.saveDatabase(this.db);
+    return record;
+  }
+
+  public deleteImportTemplate(id: string): boolean {
+    if (!this.db.importMappingTemplates) return false;
+    const prev = this.db.importMappingTemplates.length;
+    this.db.importMappingTemplates = this.db.importMappingTemplates.filter((t) => t.id !== id);
+    if (this.db.importMappingTemplates.length !== prev) {
+      this.saveDatabase(this.db);
+      return true;
+    }
+    return false;
+  }
+
+  public getImportBatches(options: { page?: number; pageSize?: number } = {}): {
+    batches: ImportBatchRecord[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  } {
+    if (!this.db.importBatches) this.db.importBatches = [];
+    const sorted = [...this.db.importBatches].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    const total = sorted.length;
+    const pageSize = Math.max(1, Math.min(100, options.pageSize || 20));
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.max(1, Math.min(totalPages, options.page || 1));
+    const start = (page - 1) * pageSize;
+    return {
+      batches: sorted.slice(start, start + pageSize),
+      total,
+      page,
+      pageSize,
+      totalPages,
+    };
+  }
+
+  public getImportBatchDetail(
+    batchId: string,
+    options: { page?: number; pageSize?: number; outcome?: string } = {}
+  ): {
+    batch: ImportBatchRecord;
+    rows: ImportBatchRowRecord[];
+    totalRows: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  } | null {
+    const batch = (this.db.importBatches || []).find((b) => b.id === batchId);
+    if (!batch) return null;
+
+    let rows = (this.db.importBatchRows || [])
+      .filter((r) => r.batchId === batchId)
+      .sort((a, b) => a.rowNumber - b.rowNumber);
+
+    if (options.outcome && options.outcome !== 'all') {
+      rows = rows.filter((r) => r.outcome === options.outcome);
+    }
+
+    const totalRows = rows.length;
+    const pageSize = Math.max(1, Math.min(500, options.pageSize || 50));
+    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+    const page = Math.max(1, Math.min(totalPages, options.page || 1));
+    const start = (page - 1) * pageSize;
+
+    return {
+      batch,
+      rows: rows.slice(start, start + pageSize),
+      totalRows,
+      page,
+      pageSize,
+      totalPages,
+    };
+  }
+
+  public async executeImportTransaction(plan: ImportExecutionPlan): Promise<ImportExecutionResult> {
+    const startedMs = Date.now();
+    const now = new Date().toISOString();
+
+    if (!this.db.persons) this.db.persons = [];
+    if (!this.db.companyPersonRelationships) this.db.companyPersonRelationships = [];
+    if (!this.db.importBatches) this.db.importBatches = [];
+    if (!this.db.importBatchRows) this.db.importBatchRows = [];
+
+    // Full snapshot for atomic rollback safety
+    const preTransactionSnapshot = JSON.parse(JSON.stringify(this.db)) as DatabaseSchema;
+
+    const batchRowRecords: ImportBatchRowRecord[] = [];
+    const createdLeadByGroupKey = new Map<string, string>();
+    const defaultStageId = this.db.stages[0]?.id;
+
+    let createdCompanies = 0;
+    let updatedCompanies = 0;
+    let createdPersons = 0;
+    let updatedPersons = 0;
+    let createdRelationships = 0;
+    let updatedRelationships = 0;
+    let skippedRows = 0;
+    let duplicateRows = 0;
+    let conflictRows = 0;
+    let failedRows = 0;
+    let validRows = 0;
+    let invalidRows = 0;
+
+    try {
+      for (let i = 0; i < plan.rows.length; i++) {
+        const row = plan.rows[i];
+
+        if (plan.simulateFailureAtRow && row.rowNumber === plan.simulateFailureAtRow) {
+          throw new Error(`Simulated mid-batch transaction failure at row ${row.rowNumber}`);
+        }
+
+        if (row.valid) validRows++;
+        else invalidRows++;
+
+        if (
+          row.dedupe.classification === 'exact_crm_duplicate' ||
+          row.dedupe.classification === 'possible_duplicate'
+        ) {
+          duplicateRows++;
+        }
+        if (row.dedupe.classification === 'conflicting_identity') {
+          conflictRows++;
+        }
+
+        // Invalid or skipped rows
+        if (!row.valid) {
+          failedRows++;
+          batchRowRecords.push({
+            id: `imp-row-${plan.batchId}-${row.rowNumber}`,
+            batchId: plan.batchId,
+            rowNumber: row.rowNumber,
+            dedupeClassification: row.dedupe.classification,
+            actionTaken: 'validation_failed',
+            outcome: 'failed',
+            companyName: row.company?.companyName || row.rawData['Company Name'],
+            personName: row.person?.fullName,
+            matchedLeadId: row.dedupe.matchedCrmLeadId,
+            rawData: row.rawData,
+            normalizedData: { company: row.company, person: row.person },
+            errors: row.errors,
+            warnings: row.warnings,
+            createdAt: now,
+          });
+          if (plan.atomicRollbackOnError) {
+            throw new Error(
+              `Validation error on row ${row.rowNumber}: ${row.errors.map((e) => e.message).join('; ')}`
+            );
+          }
+          continue;
+        }
+
+        if (row.finalAction === 'needs_review') {
+          skippedRows++;
+          batchRowRecords.push({
+            id: `imp-row-${plan.batchId}-${row.rowNumber}`,
+            batchId: plan.batchId,
+            rowNumber: row.rowNumber,
+            dedupeClassification: row.dedupe.classification,
+            actionTaken: 'flagged_for_review',
+            outcome: row.dedupe.classification === 'conflicting_identity' ? 'conflict' : 'skipped',
+            companyName: row.company?.companyName,
+            personName: row.person?.fullName,
+            matchedLeadId: row.dedupe.matchedCrmLeadId,
+            rawData: row.rawData,
+            normalizedData: { company: row.company, person: row.person },
+            errors: row.errors,
+            warnings: row.warnings,
+            createdAt: now,
+          });
+          continue;
+        }
+
+        if (row.finalAction === 'skip') {
+          skippedRows++;
+          batchRowRecords.push({
+            id: `imp-row-${plan.batchId}-${row.rowNumber}`,
+            batchId: plan.batchId,
+            rowNumber: row.rowNumber,
+            dedupeClassification: row.dedupe.classification,
+            actionTaken: 'skipped',
+            outcome: 'skipped',
+            companyName: row.company?.companyName,
+            personName: row.person?.fullName,
+            matchedLeadId: row.dedupe.matchedCrmLeadId,
+            rawData: row.rawData,
+            normalizedData: { company: row.company, person: row.person },
+            errors: row.errors,
+            warnings: row.warnings,
+            createdAt: now,
+          });
+          continue;
+        }
+
+        let targetLeadId: string | undefined = row.resolveToLeadId || row.dedupe.matchedCrmLeadId;
+        let rowOutcome: ImportBatchRowRecord['outcome'] = 'created';
+
+        // 1. Company creation or safe merge
+        if (row.company) {
+          const groupKey = row.dedupe.inFileCompanyGroupKey;
+          if (!targetLeadId && groupKey && createdLeadByGroupKey.has(groupKey)) {
+            targetLeadId = createdLeadByGroupKey.get(groupKey);
+            rowOutcome = 'created';
+          } else if (row.finalAction === 'update_existing' && targetLeadId) {
+            const leadIdx = this.db.leads.findIndex((l) => l.id === targetLeadId);
+            if (leadIdx >= 0) {
+              const { merged, fieldsEnriched } = safelyMergeImportedCompanyIntoLead({
+                existing: this.db.leads[leadIdx],
+                imported: row.company,
+                filename: plan.filename,
+                actorEmail: plan.actorEmail,
+                now,
+              });
+              this.db.leads[leadIdx] = merged;
+              if (fieldsEnriched.length > 0) updatedCompanies++;
+              rowOutcome = 'updated';
+            }
+          } else if (row.finalAction === 'create_new') {
+            const newLead = buildCanonicalLeadFromImport({
+              company: row.company,
+              filename: plan.filename,
+              pipelineStageId: defaultStageId,
+              actorEmail: plan.actorEmail,
+              now,
+            });
+            this.db.leads.unshift(newLead);
+            targetLeadId = newLead.id;
+            if (groupKey) createdLeadByGroupKey.set(groupKey, newLead.id);
+            createdCompanies++;
+            rowOutcome = 'created';
+          }
+        }
+
+        // 2. Person creation / enrichment + M:N Relationship linking
+        let persistedPersonId: string | undefined;
+        let persistedRelationshipId: string | undefined;
+
+        if (row.person) {
+          const pMatch = findMatchingPerson(
+            row.person,
+            targetLeadId,
+            this.db.persons,
+            this.db.companyPersonRelationships
+          );
+
+          if (pMatch.matchedPerson) {
+            const pIdx = this.db.persons.findIndex((p) => p.id === pMatch.matchedPerson!.id);
+            if (pIdx >= 0) {
+              const { person: mergedPerson, updated } = mergeImportedPersonSafely(
+                this.db.persons[pIdx],
+                row.person,
+                plan.filename,
+                now
+              );
+              this.db.persons[pIdx] = mergedPerson;
+              if (updated) updatedPersons++;
+              persistedPersonId = mergedPerson.id;
+            }
+          } else {
+            const createdPerson = buildPersonRecordFromImport({
+              person: row.person,
+              filename: plan.filename,
+              actorEmail: plan.actorEmail,
+              now,
+            });
+            this.db.persons.unshift(createdPerson);
+            persistedPersonId = createdPerson.id;
+            createdPersons++;
+          }
+
+          if (targetLeadId && persistedPersonId) {
+            const existingRelIdx = this.db.companyPersonRelationships.findIndex(
+              (r) =>
+                r.leadId === targetLeadId &&
+                r.personId === persistedPersonId &&
+                r.relationshipType === (row.person!.relationshipType || 'contact')
+            );
+            if (existingRelIdx >= 0) {
+              const cur = this.db.companyPersonRelationships[existingRelIdx];
+              const nextRel: CompanyPersonRelationship = {
+                ...cur,
+                jobTitle: cur.jobTitle || row.person.jobTitle || row.person.relationshipPosition,
+                designation: cur.designation || row.person.designation,
+                department: cur.department || row.person.department,
+                decisionMakerCategory: cur.decisionMakerCategory || row.person.decisionMakerCategory,
+                isPrimaryContact: cur.isPrimaryContact || Boolean(row.person.isPrimaryContact),
+                updatedAt: now,
+              };
+              this.db.companyPersonRelationships[existingRelIdx] = nextRel;
+              persistedRelationshipId = nextRel.id;
+              updatedRelationships++;
+            } else {
+              const newRel = buildRelationshipRecord({
+                leadId: targetLeadId,
+                personId: persistedPersonId,
+                person: row.person,
+                filename: plan.filename,
+                rowNumber: row.rowNumber,
+                now,
+              });
+              this.db.companyPersonRelationships.unshift(newRel);
+              persistedRelationshipId = newRel.id;
+              createdRelationships++;
+            }
+          }
+        }
+
+        batchRowRecords.push({
+          id: `imp-row-${plan.batchId}-${row.rowNumber}`,
+          batchId: plan.batchId,
+          rowNumber: row.rowNumber,
+          dedupeClassification: row.dedupe.classification,
+          actionTaken: row.finalAction,
+          outcome: rowOutcome,
+          companyName: row.company?.companyName || row.person?.associatedCompanyName,
+          personName: row.person?.fullName,
+          matchedLeadId: row.dedupe.matchedCrmLeadId,
+          persistedLeadId: targetLeadId,
+          persistedPersonId,
+          persistedRelationshipId,
+          rawData: row.rawData,
+          normalizedData: { company: row.company, person: row.person },
+          errors: row.errors,
+          warnings: row.warnings,
+          createdAt: now,
+        });
+      }
+
+      const batchRecord: ImportBatchRecord = {
+        id: plan.batchId,
+        filename: plan.filename,
+        fileFormat: plan.fileFormat,
+        fileSizeBytes: plan.fileSizeBytes,
+        fileSha256: plan.fileSha256,
+        worksheetName: plan.worksheetName,
+        encodingDetected: plan.encodingDetected,
+        templateId: plan.templateId,
+        templateName: plan.templateName,
+        duplicatePolicy: plan.options.duplicatePolicy,
+        status: failedRows > 0 ? 'partial_failed' : 'completed',
+        totalRows: plan.rows.length,
+        validRows,
+        invalidRows,
+        createdCompanies,
+        updatedCompanies,
+        createdPersons,
+        updatedPersons,
+        createdRelationships,
+        updatedRelationships,
+        skippedRows,
+        duplicateRows,
+        conflictRows,
+        failedRows,
+        durationMs: Math.max(1, Date.now() - startedMs),
+        actorEmail: plan.actorEmail,
+        createdAt: now,
+        completedAt: new Date().toISOString(),
+      };
+
+      this.db.importBatches.unshift(batchRecord);
+      this.db.importBatchRows.push(...batchRowRecords);
+      this.saveDatabase(this.db);
+
+      return { batch: batchRecord, rows: batchRowRecords };
+    } catch (err: unknown) {
+      // Atomic rollback of entire database state
+      this.db = preTransactionSnapshot;
+      if (!this.db.importBatches) this.db.importBatches = [];
+      if (!this.db.importBatchRows) this.db.importBatchRows = [];
+
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const rolledBackBatch: ImportBatchRecord = {
+        id: plan.batchId,
+        filename: plan.filename,
+        fileFormat: plan.fileFormat,
+        fileSizeBytes: plan.fileSizeBytes,
+        fileSha256: plan.fileSha256,
+        worksheetName: plan.worksheetName,
+        encodingDetected: plan.encodingDetected,
+        templateId: plan.templateId,
+        templateName: plan.templateName,
+        duplicatePolicy: plan.options.duplicatePolicy,
+        status: 'rolled_back',
+        totalRows: plan.rows.length,
+        validRows,
+        invalidRows,
+        createdCompanies: 0,
+        updatedCompanies: 0,
+        createdPersons: 0,
+        updatedPersons: 0,
+        createdRelationships: 0,
+        updatedRelationships: 0,
+        skippedRows: 0,
+        duplicateRows,
+        conflictRows,
+        failedRows: plan.rows.length,
+        durationMs: Math.max(1, Date.now() - startedMs),
+        actorEmail: plan.actorEmail,
+        errorMessage: errMsg,
+        createdAt: now,
+        completedAt: new Date().toISOString(),
+      };
+
+      const rolledBackRows: ImportBatchRowRecord[] = plan.rows.map((r) => ({
+        id: `imp-row-${plan.batchId}-${r.rowNumber}`,
+        batchId: plan.batchId,
+        rowNumber: r.rowNumber,
+        dedupeClassification: r.dedupe.classification,
+        actionTaken: r.finalAction,
+        outcome: 'rolled_back',
+        companyName: r.company?.companyName,
+        personName: r.person?.fullName,
+        rawData: r.rawData,
+        normalizedData: { company: r.company, person: r.person },
+        errors: r.errors,
+        warnings: r.warnings,
+        createdAt: now,
+      }));
+
+      this.db.importBatches.unshift(rolledBackBatch);
+      this.db.importBatchRows.push(...rolledBackRows);
+      this.saveDatabase(this.db);
+
+      return { batch: rolledBackBatch, rows: rolledBackRows };
+    }
+  }
 }
 
 export const storage = new StorageManager();
+
 

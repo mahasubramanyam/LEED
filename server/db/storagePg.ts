@@ -29,7 +29,22 @@ import {
   LeadIdentifier,
   LeadNote,
   LeadActivity,
+  PersonRecord,
+  CompanyPersonRelationship,
+  LinkedPersonWithRelationship,
+  ImportMappingTemplate,
+  ImportBatchRecord,
+  ImportBatchRowRecord,
 } from '../types.js';
+import { ImportExecutionPlan, ImportExecutionResult } from '../import/importService.js';
+import { findMatchingPerson } from '../import/dedupeClassifier.js';
+import {
+  buildCanonicalLeadFromImport,
+  buildPersonRecordFromImport,
+  buildRelationshipRecord,
+  mergeImportedPersonSafely,
+  safelyMergeImportedCompanyIntoLead,
+} from '../import/crmMergeHelper.js';
 
 export const AUDIT_GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
@@ -2006,6 +2021,11 @@ export class PostgresStorage {
         'audit_events',
         'app_settings',
         'country_source_capabilities',
+        'persons',
+        'company_person_relationships',
+        'import_mapping_templates',
+        'import_batches',
+        'import_batch_rows',
       ];
 
       const counts = await Promise.all(
@@ -2039,6 +2059,1173 @@ export class PostgresStorage {
     }
   }
 
+
+  // ==========================================
+  // 8. PHASE 7: PERSONS, M:N RELATIONSHIPS & IMPORT ENGINE
+  // ==========================================
+
+  private async ensureMigration005Tables(client: pg.PoolClient): Promise<void> {
+    const res = await client.query(
+      `SELECT to_regclass('public.persons') as persons,
+              to_regclass('public.company_person_relationships') as rels,
+              to_regclass('public.import_mapping_templates') as templates,
+              to_regclass('public.import_batches') as batches,
+              to_regclass('public.import_batch_rows') as batch_rows`
+    );
+    const row = res.rows[0] || {};
+    if (!row.persons || !row.rels || !row.templates || !row.batches || !row.batch_rows) {
+      throw new Error(
+        'Migration 005 (005_import_and_relationships.sql) must be explicitly approved and applied before executing PostgreSQL import & relationship operations.'
+      );
+    }
+  }
+
+  public async getPersons(): Promise<PersonRecord[]> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const tbl = await client.query(`SELECT to_regclass('public.persons') as tbl`);
+      if (!tbl.rows[0]?.tbl) return [];
+      const { rows } = await client.query('SELECT * FROM persons ORDER BY created_at DESC');
+      return rows.map((r: any) => this.mapRowToPerson(r));
+    } catch {
+      return [];
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async getAllRelationships(): Promise<CompanyPersonRelationship[]> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const tbl = await client.query(`SELECT to_regclass('public.company_person_relationships') as tbl`);
+      if (!tbl.rows[0]?.tbl) return [];
+      const { rows } = await client.query('SELECT * FROM company_person_relationships ORDER BY created_at DESC');
+      return rows.map((r: any) => this.mapRowToRelationship(r));
+    } catch {
+      return [];
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async getLeadPersons(leadId: string): Promise<LinkedPersonWithRelationship[]> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const tbl = await client.query(`SELECT to_regclass('public.company_person_relationships') as tbl`);
+      if (!tbl.rows[0]?.tbl) return [];
+
+      const { rows } = await client.query(
+        `SELECT r.*, p.id as p_id, p.full_name as p_full_name, p.first_name as p_first_name,
+                p.last_name as p_last_name, p.normalized_name as p_normalized_name, p.email as p_email,
+                p.email_status as p_email_status, p.phone as p_phone, p.phone_normalized as p_phone_normalized,
+                p.linkedin_url as p_linkedin_url, p.linkedin_slug as p_linkedin_slug, p.country as p_country,
+                p.country_code as p_country_code, p.city as p_city, p.sources as p_sources,
+                p.confidence_score as p_confidence_score, p.verification_status as p_verification_status,
+                p.custom_fields as p_custom_fields, p.created_at as p_created_at, p.updated_at as p_updated_at
+         FROM company_person_relationships r
+         JOIN persons p ON p.id = r.person_id
+         WHERE r.lead_id = $1
+         ORDER BY r.is_primary_contact DESC, r.created_at DESC`,
+        [leadId]
+      );
+
+      if (rows.length === 0) return [];
+
+      const personIds = Array.from(new Set(rows.map((r: any) => r.person_id)));
+      const otherRes = await client.query(
+        `SELECT r.person_id, r.lead_id, r.relationship_type, r.job_title, l.company_name
+         FROM company_person_relationships r
+         JOIN leads l ON l.id = r.lead_id
+         WHERE r.person_id = ANY($1::text[]) AND r.lead_id <> $2`,
+        [personIds, leadId]
+      );
+
+      const othersByPerson = new Map<
+        string,
+        Array<{ leadId: string; companyName: string; relationshipType: string; jobTitle?: string }>
+      >();
+      for (const or of otherRes.rows) {
+        const list = othersByPerson.get(or.person_id) || [];
+        list.push({
+          leadId: or.lead_id,
+          companyName: or.company_name,
+          relationshipType: or.relationship_type,
+          jobTitle: or.job_title || undefined,
+        });
+        othersByPerson.set(or.person_id, list);
+      }
+
+      return rows.map((r: any) => ({
+        person: this.mapRowToPerson({
+          id: r.p_id,
+          full_name: r.p_full_name,
+          first_name: r.p_first_name,
+          last_name: r.p_last_name,
+          normalized_name: r.p_normalized_name,
+          email: r.p_email,
+          email_status: r.p_email_status,
+          phone: r.p_phone,
+          phone_normalized: r.p_phone_normalized,
+          linkedin_url: r.p_linkedin_url,
+          linkedin_slug: r.p_linkedin_slug,
+          country: r.p_country,
+          country_code: r.p_country_code,
+          city: r.p_city,
+          sources: r.p_sources,
+          confidence_score: r.p_confidence_score,
+          verification_status: r.p_verification_status,
+          custom_fields: r.p_custom_fields,
+          created_at: r.p_created_at,
+          updated_at: r.p_updated_at,
+        }),
+        relationship: this.mapRowToRelationship(r),
+        otherCompanies: othersByPerson.get(r.person_id),
+      }));
+    } catch {
+      return [];
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async getImportTemplates(): Promise<ImportMappingTemplate[]> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const tbl = await client.query(`SELECT to_regclass('public.import_mapping_templates') as tbl`);
+      if (!tbl.rows[0]?.tbl) return [];
+      const { rows } = await client.query('SELECT * FROM import_mapping_templates ORDER BY updated_at DESC');
+      return rows.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        description: r.description || undefined,
+        sourceFormat: (r.source_format || 'csv') as 'csv' | 'xlsx',
+        headerSignature: typeof r.header_signature === 'string' ? JSON.parse(r.header_signature) : r.header_signature || [],
+        columnMappings: typeof r.column_mappings === 'string' ? JSON.parse(r.column_mappings) : r.column_mappings || [],
+        mergeRules: typeof r.merge_rules === 'string' ? JSON.parse(r.merge_rules) : r.merge_rules || [],
+        normalizationOptions:
+          typeof r.normalization_options === 'string' ? JSON.parse(r.normalization_options) : r.normalization_options || {},
+        createdBy: r.created_by || 'Owner',
+        createdAt: new Date(r.created_at).toISOString(),
+        updatedAt: new Date(r.updated_at).toISOString(),
+      }));
+    } catch {
+      return [];
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async saveImportTemplate(
+    tpl: Omit<ImportMappingTemplate, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+  ): Promise<ImportMappingTemplate> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    const now = new Date().toISOString();
+    const id = tpl.id || `imp-tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    try {
+      client = await pool.connect();
+      await this.ensureMigration005Tables(client);
+      const { rows } = await client.query(
+        `INSERT INTO import_mapping_templates (
+          id, name, description, source_format, header_signature, column_mappings,
+          merge_rules, normalization_options, created_by, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          description = EXCLUDED.description,
+          source_format = EXCLUDED.source_format,
+          header_signature = EXCLUDED.header_signature,
+          column_mappings = EXCLUDED.column_mappings,
+          merge_rules = EXCLUDED.merge_rules,
+          normalization_options = EXCLUDED.normalization_options,
+          updated_at = NOW()
+        RETURNING created_at, updated_at`,
+        [
+          id,
+          tpl.name.trim(),
+          tpl.description?.trim() || null,
+          tpl.sourceFormat,
+          JSON.stringify(tpl.headerSignature || []),
+          JSON.stringify(tpl.columnMappings || []),
+          JSON.stringify(tpl.mergeRules || []),
+          JSON.stringify(tpl.normalizationOptions || {}),
+          tpl.createdBy || 'Owner',
+        ]
+      );
+      return {
+        ...tpl,
+        id,
+        name: tpl.name.trim(),
+        createdAt: rows[0]?.created_at ? new Date(rows[0].created_at).toISOString() : now,
+        updatedAt: rows[0]?.updated_at ? new Date(rows[0].updated_at).toISOString() : now,
+      };
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async deleteImportTemplate(id: string): Promise<boolean> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const tbl = await client.query(`SELECT to_regclass('public.import_mapping_templates') as tbl`);
+      if (!tbl.rows[0]?.tbl) return false;
+      const { rowCount } = await client.query('DELETE FROM import_mapping_templates WHERE id = $1', [id]);
+      return (rowCount ?? 0) > 0;
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async getImportBatches(options: { page?: number; pageSize?: number } = {}): Promise<{
+    batches: ImportBatchRecord[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  }> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    const pageSize = Math.max(1, Math.min(100, options.pageSize || 20));
+    const page = Math.max(1, options.page || 1);
+    try {
+      client = await pool.connect();
+      const tbl = await client.query(`SELECT to_regclass('public.import_batches') as tbl`);
+      if (!tbl.rows[0]?.tbl) {
+        return { batches: [], total: 0, page: 1, pageSize, totalPages: 1 };
+      }
+      const countRes = await client.query('SELECT COUNT(*) FROM import_batches');
+      const total = parseInt(countRes.rows[0]?.count || '0', 10);
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const safePage = Math.min(page, totalPages);
+      const offset = (safePage - 1) * pageSize;
+
+      const { rows } = await client.query(
+        'SELECT * FROM import_batches ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+        [pageSize, offset]
+      );
+      return {
+        batches: rows.map((r: any) => this.mapRowToImportBatch(r)),
+        total,
+        page: safePage,
+        pageSize,
+        totalPages,
+      };
+    } catch {
+      return { batches: [], total: 0, page: 1, pageSize, totalPages: 1 };
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async getImportBatchDetail(
+    batchId: string,
+    options: { page?: number; pageSize?: number; outcome?: string } = {}
+  ): Promise<{
+    batch: ImportBatchRecord;
+    rows: ImportBatchRowRecord[];
+    totalRows: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  } | null> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    const pageSize = Math.max(1, Math.min(500, options.pageSize || 50));
+    const page = Math.max(1, options.page || 1);
+    try {
+      client = await pool.connect();
+      const tbl = await client.query(`SELECT to_regclass('public.import_batches') as tbl`);
+      if (!tbl.rows[0]?.tbl) return null;
+
+      const bRes = await client.query('SELECT * FROM import_batches WHERE id = $1', [batchId]);
+      if (bRes.rows.length === 0) return null;
+      const batch = this.mapRowToImportBatch(bRes.rows[0]);
+
+      const filterOutcome = options.outcome && options.outcome !== 'all' ? options.outcome : null;
+      const countRes = filterOutcome
+        ? await client.query(
+            'SELECT COUNT(*) FROM import_batch_rows WHERE batch_id = $1 AND outcome = $2',
+            [batchId, filterOutcome]
+          )
+        : await client.query('SELECT COUNT(*) FROM import_batch_rows WHERE batch_id = $1', [batchId]);
+      const totalRows = parseInt(countRes.rows[0]?.count || '0', 10);
+      const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+      const safePage = Math.min(page, totalPages);
+      const offset = (safePage - 1) * pageSize;
+
+      const rRes = filterOutcome
+        ? await client.query(
+            `SELECT * FROM import_batch_rows WHERE batch_id = $1 AND outcome = $2
+             ORDER BY row_number ASC LIMIT $3 OFFSET $4`,
+            [batchId, filterOutcome, pageSize, offset]
+          )
+        : await client.query(
+            `SELECT * FROM import_batch_rows WHERE batch_id = $1
+             ORDER BY row_number ASC LIMIT $2 OFFSET $3`,
+            [batchId, pageSize, offset]
+          );
+
+      return {
+        batch,
+        rows: rRes.rows.map((r: any) => this.mapRowToImportBatchRow(r)),
+        totalRows,
+        page: safePage,
+        pageSize,
+        totalPages,
+      };
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  public async executeImportTransaction(
+    plan: ImportExecutionPlan,
+    options: { customClient?: pg.PoolClient } = {}
+  ): Promise<ImportExecutionResult> {
+    const startedMs = Date.now();
+    const now = new Date().toISOString();
+    const externalClient = options.customClient;
+    const pool = externalClient ? null : this.getClient();
+    const client = externalClient || (await pool!.connect());
+
+    let createdCompanies = 0;
+    let updatedCompanies = 0;
+    let createdPersons = 0;
+    let updatedPersons = 0;
+    let createdRelationships = 0;
+    let updatedRelationships = 0;
+    let skippedRows = 0;
+    let duplicateRows = 0;
+    let conflictRows = 0;
+    let failedRows = 0;
+    let validRows = 0;
+    let invalidRows = 0;
+
+    const batchRowRecords: ImportBatchRowRecord[] = [];
+    const createdLeadByGroupKey = new Map<string, string>();
+    const existingLeadsCache = await (externalClient ? Promise.resolve([]) : this.getLeads());
+    const existingPersonsCache = await (externalClient ? Promise.resolve([]) : this.getPersons());
+    const existingRelsCache = await (externalClient ? Promise.resolve([]) : this.getAllRelationships());
+
+    const leadById = new Map<string, CanonicalLead>(existingLeadsCache.map((l) => [l.id, l]));
+    const personsList: PersonRecord[] = [...existingPersonsCache];
+    const relsList: CompanyPersonRelationship[] = [...existingRelsCache];
+
+    try {
+      await client.query('BEGIN');
+      if (!externalClient) {
+        await this.ensureMigration005Tables(client);
+      }
+
+      const defaultStageId = await this.resolvePipelineStageId(client, undefined, true);
+
+      // Insert pending batch record first so FK from import_batch_rows is satisfied
+      await client.query(
+        `INSERT INTO import_batches (
+          id, filename, file_format, file_size_bytes, file_sha256, worksheet_name,
+          encoding_detected, template_id, template_name, duplicate_policy, status,
+          total_rows, actor_email, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'completed', $11, $12, $13)`,
+        [
+          plan.batchId,
+          plan.filename,
+          plan.fileFormat,
+          plan.fileSizeBytes,
+          plan.fileSha256,
+          plan.worksheetName || null,
+          plan.encodingDetected,
+          plan.templateId || null,
+          plan.templateName || null,
+          plan.options.duplicatePolicy,
+          plan.rows.length,
+          plan.actorEmail,
+          now,
+        ]
+      );
+
+      for (const row of plan.rows) {
+        if (plan.simulateFailureAtRow && row.rowNumber === plan.simulateFailureAtRow) {
+          throw new Error(`Simulated mid-batch transaction failure at row ${row.rowNumber}`);
+        }
+
+        if (row.valid) validRows++;
+        else invalidRows++;
+
+        if (
+          row.dedupe.classification === 'exact_crm_duplicate' ||
+          row.dedupe.classification === 'possible_duplicate'
+        ) {
+          duplicateRows++;
+        }
+        if (row.dedupe.classification === 'conflicting_identity') {
+          conflictRows++;
+        }
+
+        if (!row.valid) {
+          failedRows++;
+          if (plan.atomicRollbackOnError) {
+            throw new Error(
+              `Validation failed on row ${row.rowNumber}: ${row.errors.map((e) => e.message).join('; ')}`
+            );
+          }
+          batchRowRecords.push({
+            id: `imp-row-${plan.batchId}-${row.rowNumber}`,
+            batchId: plan.batchId,
+            rowNumber: row.rowNumber,
+            dedupeClassification: row.dedupe.classification,
+            actionTaken: 'validation_failed',
+            outcome: 'failed',
+            companyName: row.company?.companyName || row.rawData['Company Name'],
+            personName: row.person?.fullName,
+            matchedLeadId: row.dedupe.matchedCrmLeadId,
+            rawData: row.rawData,
+            normalizedData: { company: row.company, person: row.person },
+            errors: row.errors,
+            warnings: row.warnings,
+            createdAt: now,
+          });
+          continue;
+        }
+
+        if (row.finalAction === 'needs_review' || row.finalAction === 'skip') {
+          skippedRows++;
+          batchRowRecords.push({
+            id: `imp-row-${plan.batchId}-${row.rowNumber}`,
+            batchId: plan.batchId,
+            rowNumber: row.rowNumber,
+            dedupeClassification: row.dedupe.classification,
+            actionTaken: row.finalAction === 'needs_review' ? 'flagged_for_review' : 'skipped',
+            outcome:
+              row.finalAction === 'needs_review' &&
+              row.dedupe.classification === 'conflicting_identity'
+                ? 'conflict'
+                : 'skipped',
+            companyName: row.company?.companyName,
+            personName: row.person?.fullName,
+            matchedLeadId: row.dedupe.matchedCrmLeadId,
+            rawData: row.rawData,
+            normalizedData: { company: row.company, person: row.person },
+            errors: row.errors,
+            warnings: row.warnings,
+            createdAt: now,
+          });
+          continue;
+        }
+
+        const spName = `sp_imp_row_${row.rowNumber}`;
+        if (!plan.atomicRollbackOnError) {
+          await client.query(`SAVEPOINT ${spName}`);
+        }
+
+        try {
+          let targetLeadId: string | undefined = row.resolveToLeadId || row.dedupe.matchedCrmLeadId;
+          let rowOutcome: ImportBatchRowRecord['outcome'] = 'created';
+
+          if (row.company) {
+            const groupKey = row.dedupe.inFileCompanyGroupKey;
+            if (!targetLeadId && groupKey && createdLeadByGroupKey.has(groupKey)) {
+              targetLeadId = createdLeadByGroupKey.get(groupKey);
+            } else if (row.finalAction === 'update_existing' && targetLeadId) {
+              const existingLead = leadById.get(targetLeadId);
+              if (existingLead) {
+                const { merged, fieldsEnriched } = safelyMergeImportedCompanyIntoLead({
+                  existing: existingLead,
+                  imported: row.company,
+                  filename: plan.filename,
+                  actorEmail: plan.actorEmail,
+                  now,
+                });
+                await this.writeLeadInTransaction(client, merged, defaultStageId, now);
+                leadById.set(merged.id, merged);
+                if (fieldsEnriched.length > 0) updatedCompanies++;
+                rowOutcome = 'updated';
+              }
+            } else if (row.finalAction === 'create_new') {
+              const newLead = buildCanonicalLeadFromImport({
+                company: row.company,
+                filename: plan.filename,
+                pipelineStageId: defaultStageId || undefined,
+                actorEmail: plan.actorEmail,
+                now,
+              });
+              await this.writeLeadInTransaction(client, newLead, defaultStageId, now);
+              leadById.set(newLead.id, newLead);
+              targetLeadId = newLead.id;
+              if (groupKey) createdLeadByGroupKey.set(groupKey, newLead.id);
+              createdCompanies++;
+              rowOutcome = 'created';
+            }
+          }
+
+          let persistedPersonId: string | undefined;
+          let persistedRelationshipId: string | undefined;
+
+          if (row.person) {
+            const pMatch = findMatchingPerson(row.person, targetLeadId, personsList, relsList);
+            if (pMatch.matchedPerson) {
+              const { person: mergedPerson, updated } = mergeImportedPersonSafely(
+                pMatch.matchedPerson,
+                row.person,
+                plan.filename,
+                now
+              );
+              await this.upsertPersonInTransaction(client, mergedPerson, now);
+              const idx = personsList.findIndex((p) => p.id === mergedPerson.id);
+              if (idx >= 0) personsList[idx] = mergedPerson;
+              if (updated) updatedPersons++;
+              persistedPersonId = mergedPerson.id;
+            } else {
+              const newPerson = buildPersonRecordFromImport({
+                person: row.person,
+                filename: plan.filename,
+                actorEmail: plan.actorEmail,
+                now,
+              });
+              await this.upsertPersonInTransaction(client, newPerson, now);
+              personsList.unshift(newPerson);
+              persistedPersonId = newPerson.id;
+              createdPersons++;
+            }
+
+            if (targetLeadId && persistedPersonId) {
+              const relType = row.person.relationshipType || 'contact';
+              const existingRel = relsList.find(
+                (r) =>
+                  r.leadId === targetLeadId &&
+                  r.personId === persistedPersonId &&
+                  r.relationshipType === relType
+              );
+              if (existingRel) {
+                const updatedRel: CompanyPersonRelationship = {
+                  ...existingRel,
+                  jobTitle: existingRel.jobTitle || row.person.jobTitle || row.person.relationshipPosition,
+                  designation: existingRel.designation || row.person.designation,
+                  department: existingRel.department || row.person.department,
+                  decisionMakerCategory:
+                    existingRel.decisionMakerCategory || row.person.decisionMakerCategory,
+                  isPrimaryContact: existingRel.isPrimaryContact || Boolean(row.person.isPrimaryContact),
+                  updatedAt: now,
+                };
+                await this.upsertRelationshipInTransaction(client, updatedRel, now);
+                const rIdx = relsList.findIndex((r) => r.id === updatedRel.id);
+                if (rIdx >= 0) relsList[rIdx] = updatedRel;
+                persistedRelationshipId = updatedRel.id;
+                updatedRelationships++;
+              } else {
+                const newRel = buildRelationshipRecord({
+                  leadId: targetLeadId,
+                  personId: persistedPersonId,
+                  person: row.person,
+                  filename: plan.filename,
+                  rowNumber: row.rowNumber,
+                  now,
+                });
+                await this.upsertRelationshipInTransaction(client, newRel, now);
+                relsList.unshift(newRel);
+                persistedRelationshipId = newRel.id;
+                createdRelationships++;
+              }
+            }
+          }
+
+          if (!plan.atomicRollbackOnError) {
+            await client.query(`RELEASE SAVEPOINT ${spName}`);
+          }
+
+          batchRowRecords.push({
+            id: `imp-row-${plan.batchId}-${row.rowNumber}`,
+            batchId: plan.batchId,
+            rowNumber: row.rowNumber,
+            dedupeClassification: row.dedupe.classification,
+            actionTaken: row.finalAction,
+            outcome: rowOutcome,
+            companyName: row.company?.companyName || row.person?.associatedCompanyName,
+            personName: row.person?.fullName,
+            matchedLeadId: row.dedupe.matchedCrmLeadId,
+            persistedLeadId: targetLeadId,
+            persistedPersonId,
+            persistedRelationshipId,
+            rawData: row.rawData,
+            normalizedData: { company: row.company, person: row.person },
+            errors: row.errors,
+            warnings: row.warnings,
+            createdAt: now,
+          });
+        } catch (rowErr: unknown) {
+          if (plan.atomicRollbackOnError) {
+            throw rowErr;
+          }
+          await client.query(`ROLLBACK TO SAVEPOINT ${spName}`);
+          failedRows++;
+          const msg = rowErr instanceof Error ? rowErr.message : String(rowErr);
+          batchRowRecords.push({
+            id: `imp-row-${plan.batchId}-${row.rowNumber}`,
+            batchId: plan.batchId,
+            rowNumber: row.rowNumber,
+            dedupeClassification: row.dedupe.classification,
+            actionTaken: 'persistence_failed',
+            outcome: 'failed',
+            companyName: row.company?.companyName || row.person?.associatedCompanyName,
+            personName: row.person?.fullName,
+            matchedLeadId: row.dedupe.matchedCrmLeadId,
+            rawData: row.rawData,
+            normalizedData: { company: row.company, person: row.person },
+            errors: [
+              ...row.errors,
+              { field: 'database', code: 'PERSISTENCE_ERROR', message: msg, severity: 'error' },
+            ],
+            warnings: row.warnings,
+            createdAt: now,
+          });
+        }
+      }
+
+      // Insert row ledger records & finalize batch counts inside transaction
+      for (const rr of batchRowRecords) {
+        await client.query(
+          `INSERT INTO import_batch_rows (
+            id, batch_id, row_number, dedupe_classification, action_taken, outcome,
+            company_name, person_name, matched_lead_id, persisted_lead_id,
+            persisted_person_id, persisted_relationship_id, raw_data, normalized_data,
+            errors, warnings, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+          [
+            rr.id,
+            rr.batchId,
+            rr.rowNumber,
+            rr.dedupeClassification,
+            rr.actionTaken,
+            rr.outcome,
+            rr.companyName || null,
+            rr.personName || null,
+            rr.matchedLeadId || null,
+            rr.persistedLeadId || null,
+            rr.persistedPersonId || null,
+            rr.persistedRelationshipId || null,
+            JSON.stringify(rr.rawData || {}),
+            JSON.stringify(rr.normalizedData || {}),
+            JSON.stringify(rr.errors || []),
+            JSON.stringify(rr.warnings || []),
+            now,
+          ]
+        );
+      }
+
+      const finalStatus: ImportBatchRecord['status'] =
+        failedRows > 0 ? 'partial_failed' : 'completed';
+      const durationMs = Math.max(1, Date.now() - startedMs);
+      const completedAt = new Date().toISOString();
+
+      await client.query(
+        `UPDATE import_batches SET
+          status = $1, valid_rows = $2, invalid_rows = $3,
+          created_companies = $4, updated_companies = $5,
+          created_persons = $6, updated_persons = $7,
+          created_relationships = $8, updated_relationships = $9,
+          skipped_rows = $10, duplicate_rows = $11, conflict_rows = $12,
+          failed_rows = $13, duration_ms = $14, completed_at = $15
+         WHERE id = $16`,
+        [
+          finalStatus,
+          validRows,
+          invalidRows,
+          createdCompanies,
+          updatedCompanies,
+          createdPersons,
+          updatedPersons,
+          createdRelationships,
+          updatedRelationships,
+          skippedRows,
+          duplicateRows,
+          conflictRows,
+          failedRows,
+          durationMs,
+          completedAt,
+          plan.batchId,
+        ]
+      );
+
+      await client.query('COMMIT');
+
+      const batch: ImportBatchRecord = {
+        id: plan.batchId,
+        filename: plan.filename,
+        fileFormat: plan.fileFormat,
+        fileSizeBytes: plan.fileSizeBytes,
+        fileSha256: plan.fileSha256,
+        worksheetName: plan.worksheetName,
+        encodingDetected: plan.encodingDetected,
+        templateId: plan.templateId,
+        templateName: plan.templateName,
+        duplicatePolicy: plan.options.duplicatePolicy,
+        status: finalStatus,
+        totalRows: plan.rows.length,
+        validRows,
+        invalidRows,
+        createdCompanies,
+        updatedCompanies,
+        createdPersons,
+        updatedPersons,
+        createdRelationships,
+        updatedRelationships,
+        skippedRows,
+        duplicateRows,
+        conflictRows,
+        failedRows,
+        durationMs,
+        actorEmail: plan.actorEmail,
+        createdAt: now,
+        completedAt,
+      };
+
+      return { batch, rows: batchRowRecords };
+    } catch (err: unknown) {
+      await client.query('ROLLBACK');
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const durationMs = Math.max(1, Date.now() - startedMs);
+      const completedAt = new Date().toISOString();
+
+      const rolledBackBatch: ImportBatchRecord = {
+        id: plan.batchId,
+        filename: plan.filename,
+        fileFormat: plan.fileFormat,
+        fileSizeBytes: plan.fileSizeBytes,
+        fileSha256: plan.fileSha256,
+        worksheetName: plan.worksheetName,
+        encodingDetected: plan.encodingDetected,
+        templateId: plan.templateId,
+        templateName: plan.templateName,
+        duplicatePolicy: plan.options.duplicatePolicy,
+        status: 'rolled_back',
+        totalRows: plan.rows.length,
+        validRows,
+        invalidRows,
+        createdCompanies: 0,
+        updatedCompanies: 0,
+        createdPersons: 0,
+        updatedPersons: 0,
+        createdRelationships: 0,
+        updatedRelationships: 0,
+        skippedRows: 0,
+        duplicateRows,
+        conflictRows,
+        failedRows: plan.rows.length,
+        durationMs,
+        actorEmail: plan.actorEmail,
+        errorMessage: errMsg,
+        createdAt: now,
+        completedAt,
+      };
+
+      const rolledBackRows: ImportBatchRowRecord[] = plan.rows.map((r) => ({
+        id: `imp-row-${plan.batchId}-${r.rowNumber}`,
+        batchId: plan.batchId,
+        rowNumber: r.rowNumber,
+        dedupeClassification: r.dedupe.classification,
+        actionTaken: r.finalAction,
+        outcome: 'rolled_back',
+        companyName: r.company?.companyName,
+        personName: r.person?.fullName,
+        rawData: r.rawData,
+        normalizedData: { company: r.company, person: r.person },
+        errors: r.errors,
+        warnings: r.warnings,
+        createdAt: now,
+      }));
+
+      // Persist rolled_back ledger entry cleanly after rollback if schema exists
+      try {
+        await client.query(
+          `INSERT INTO import_batches (
+            id, filename, file_format, file_size_bytes, file_sha256, worksheet_name,
+            encoding_detected, duplicate_policy, status, total_rows, valid_rows, invalid_rows,
+            duplicate_rows, conflict_rows, failed_rows, duration_ms, actor_email, error_message,
+            created_at, completed_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'rolled_back', $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+          [
+            rolledBackBatch.id,
+            rolledBackBatch.filename,
+            rolledBackBatch.fileFormat,
+            rolledBackBatch.fileSizeBytes,
+            rolledBackBatch.fileSha256 || null,
+            rolledBackBatch.worksheetName || null,
+            rolledBackBatch.encodingDetected || null,
+            rolledBackBatch.duplicatePolicy,
+            rolledBackBatch.totalRows,
+            rolledBackBatch.validRows,
+            rolledBackBatch.invalidRows,
+            rolledBackBatch.duplicateRows,
+            rolledBackBatch.conflictRows,
+            rolledBackBatch.failedRows,
+            rolledBackBatch.durationMs,
+            rolledBackBatch.actorEmail,
+            errMsg,
+            now,
+            completedAt,
+          ]
+        );
+      } catch {
+        // ignore if Migration 005 tables do not yet exist
+      }
+
+      return { batch: rolledBackBatch, rows: rolledBackRows };
+    } finally {
+      if (!externalClient) {
+        client.release();
+      }
+    }
+  }
+
+  private async writeLeadInTransaction(
+    client: pg.PoolClient,
+    lead: CanonicalLead,
+    fallbackStageId: string | null,
+    now: string
+  ): Promise<void> {
+    const stageId = lead.pipelineStageId || fallbackStageId;
+    const canonRegType = lead.registrationType
+      ? canonicalizeIdentifierType(lead.registrationType, lead.address?.countryCode)
+      : null;
+
+    await client.query(
+      `INSERT INTO leads (
+        id, company_name, legal_name, registration_number, registration_type,
+        company_status, website, domain, email, email_status, phone, phone_normalized,
+        street, city, region, postal_code, country, country_code, formatted_address,
+        latitude, longitude, industry, category, employee_range, founded_year,
+        confidence_score, confidence_signals, status, pipeline_stage_id, opportunity_value,
+        currency, win_probability, lost_reason, tags, web_metadata, social_links, custom_fields,
+        created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+        $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37,
+        $38, $39
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        legal_name = EXCLUDED.legal_name,
+        registration_number = EXCLUDED.registration_number,
+        registration_type = EXCLUDED.registration_type,
+        company_status = EXCLUDED.company_status,
+        website = EXCLUDED.website,
+        domain = EXCLUDED.domain,
+        email = EXCLUDED.email,
+        email_status = EXCLUDED.email_status,
+        phone = EXCLUDED.phone,
+        phone_normalized = EXCLUDED.phone_normalized,
+        street = EXCLUDED.street,
+        city = EXCLUDED.city,
+        region = EXCLUDED.region,
+        postal_code = EXCLUDED.postal_code,
+        country = EXCLUDED.country,
+        country_code = EXCLUDED.country_code,
+        formatted_address = EXCLUDED.formatted_address,
+        industry = EXCLUDED.industry,
+        category = EXCLUDED.category,
+        employee_range = EXCLUDED.employee_range,
+        founded_year = EXCLUDED.founded_year,
+        tags = EXCLUDED.tags,
+        social_links = EXCLUDED.social_links,
+        custom_fields = EXCLUDED.custom_fields,
+        updated_at = NOW()`,
+      [
+        lead.id,
+        lead.companyName,
+        lead.legalName || null,
+        lead.registrationNumber || null,
+        canonRegType,
+        lead.companyStatus || 'unknown',
+        lead.website || null,
+        lead.domain || null,
+        lead.email || null,
+        lead.emailStatus || 'unavailable',
+        lead.phone || null,
+        lead.phoneNormalized || null,
+        lead.address?.street || null,
+        lead.address?.city || null,
+        lead.address?.region || null,
+        lead.address?.postalCode || null,
+        lead.address?.country || 'International',
+        lead.address?.countryCode || 'US',
+        lead.address?.formattedAddress || null,
+        lead.coordinates?.lat || null,
+        lead.coordinates?.lon || null,
+        lead.industry || 'Commercial Services',
+        lead.category || 'Imported Prospect',
+        lead.employeeRange || null,
+        lead.foundedYear || null,
+        lead.confidenceScore || 50,
+        JSON.stringify(lead.confidenceSignals || []),
+        lead.status || 'new',
+        stageId,
+        lead.opportunityValue || 0,
+        lead.currency || 'USD',
+        lead.winProbability || 0,
+        lead.lostReason || null,
+        JSON.stringify(lead.tags || []),
+        lead.webMetadata ? JSON.stringify(lead.webMetadata) : null,
+        lead.socialLinks ? JSON.stringify(lead.socialLinks) : null,
+        lead.customFields ? JSON.stringify(lead.customFields) : null,
+        lead.createdAt || now,
+        now,
+      ]
+    );
+
+    for (let idx = 0; idx < (lead.sources || []).length; idx++) {
+      const s = lead.sources[idx];
+      await client.query(
+        `INSERT INTO lead_sources (id, lead_id, source_name, provider_id, url, retrieved_at, license, attribution)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          `src-${lead.id}-${idx}`,
+          lead.id,
+          s.sourceName,
+          s.providerId || null,
+          s.url || null,
+          s.retrievedAt || now,
+          s.license || null,
+          s.attribution || null,
+        ]
+      );
+    }
+
+    for (let idx = 0; idx < (lead.identifiers || []).length; idx++) {
+      const ident = lead.identifiers[idx];
+      await client.query(
+        `INSERT INTO lead_identifiers (id, lead_id, type, value, verified, country_code, normalized_value, issuing_authority, source, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+         ON CONFLICT (lead_id, type, value) DO NOTHING`,
+        [
+          ident.id || `ident-${lead.id}-${idx}`,
+          lead.id,
+          ident.type,
+          ident.value,
+          Boolean(ident.verified),
+          ident.countryCode || lead.address?.countryCode || 'US',
+          ident.normalizedValue || normalizeIdentifierValue(ident.value),
+          ident.issuingAuthority || null,
+          ident.source || 'import_engine',
+          ident.status || 'user_provided',
+        ]
+      );
+    }
+  }
+
+  private async upsertPersonInTransaction(
+    client: pg.PoolClient,
+    person: PersonRecord,
+    now: string
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO persons (
+        id, full_name, first_name, last_name, normalized_name,
+        email, email_status, phone, phone_normalized, linkedin_url, linkedin_slug,
+        country, country_code, city, sources, confidence_score, verification_status,
+        custom_fields, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        email = COALESCE(persons.email, EXCLUDED.email),
+        email_status = CASE WHEN persons.email IS NOT NULL THEN persons.email_status ELSE EXCLUDED.email_status END,
+        phone = COALESCE(persons.phone, EXCLUDED.phone),
+        phone_normalized = COALESCE(persons.phone_normalized, EXCLUDED.phone_normalized),
+        linkedin_url = COALESCE(persons.linkedin_url, EXCLUDED.linkedin_url),
+        linkedin_slug = COALESCE(persons.linkedin_slug, EXCLUDED.linkedin_slug),
+        country = COALESCE(persons.country, EXCLUDED.country),
+        country_code = COALESCE(persons.country_code, EXCLUDED.country_code),
+        city = COALESCE(persons.city, EXCLUDED.city),
+        sources = EXCLUDED.sources,
+        updated_at = NOW()`,
+      [
+        person.id,
+        person.fullName,
+        person.firstName || null,
+        person.lastName || null,
+        person.normalizedName,
+        person.email || null,
+        person.emailStatus || 'unavailable',
+        person.phone || null,
+        person.phoneNormalized || null,
+        person.linkedinUrl || null,
+        person.linkedinSlug || null,
+        person.country || null,
+        person.countryCode || null,
+        person.city || null,
+        JSON.stringify(person.sources || []),
+        person.confidenceScore || 50,
+        person.verificationStatus || 'user_provided',
+        person.customFields ? JSON.stringify(person.customFields) : null,
+        person.createdAt || now,
+        now,
+      ]
+    );
+  }
+
+  private async upsertRelationshipInTransaction(
+    client: pg.PoolClient,
+    rel: CompanyPersonRelationship,
+    now: string
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO company_person_relationships (
+        id, lead_id, person_id, relationship_type, job_title, designation,
+        department, decision_maker_category, is_primary_contact, source_name,
+        provenance, confidence_score, verification_status, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+      )
+      ON CONFLICT (lead_id, person_id, relationship_type) DO UPDATE SET
+        job_title = COALESCE(company_person_relationships.job_title, EXCLUDED.job_title),
+        designation = COALESCE(company_person_relationships.designation, EXCLUDED.designation),
+        department = COALESCE(company_person_relationships.department, EXCLUDED.department),
+        decision_maker_category = COALESCE(company_person_relationships.decision_maker_category, EXCLUDED.decision_maker_category),
+        is_primary_contact = company_person_relationships.is_primary_contact OR EXCLUDED.is_primary_contact,
+        updated_at = NOW()`,
+      [
+        rel.id,
+        rel.leadId,
+        rel.personId,
+        rel.relationshipType || 'contact',
+        rel.jobTitle || null,
+        rel.designation || null,
+        rel.department || null,
+        rel.decisionMakerCategory || null,
+        Boolean(rel.isPrimaryContact),
+        rel.sourceName || 'Owner Import',
+        JSON.stringify(rel.provenance || {}),
+        rel.confidenceScore || 50,
+        rel.verificationStatus || 'user_provided',
+        rel.createdAt || now,
+        now,
+      ]
+    );
+  }
+
+  private mapRowToPerson(r: any): PersonRecord {
+    return {
+      id: r.id,
+      fullName: r.full_name,
+      firstName: r.first_name || undefined,
+      lastName: r.last_name || undefined,
+      normalizedName: r.normalized_name,
+      email: r.email || undefined,
+      emailStatus: (r.email_status || 'unavailable') as PersonRecord['emailStatus'],
+      phone: r.phone || undefined,
+      phoneNormalized: r.phone_normalized || undefined,
+      linkedinUrl: r.linkedin_url || undefined,
+      linkedinSlug: r.linkedin_slug || undefined,
+      country: r.country || undefined,
+      countryCode: r.country_code || undefined,
+      city: r.city || undefined,
+      sources: typeof r.sources === 'string' ? JSON.parse(r.sources) : r.sources || [],
+      confidenceScore: Number(r.confidence_score ?? 50),
+      verificationStatus: (r.verification_status || 'user_provided') as PersonRecord['verificationStatus'],
+      customFields: r.custom_fields
+        ? typeof r.custom_fields === 'string'
+          ? JSON.parse(r.custom_fields)
+          : r.custom_fields
+        : undefined,
+      createdAt: new Date(r.created_at).toISOString(),
+      updatedAt: new Date(r.updated_at).toISOString(),
+    };
+  }
+
+  private mapRowToRelationship(r: any): CompanyPersonRelationship {
+    return {
+      id: r.id,
+      leadId: r.lead_id,
+      personId: r.person_id,
+      relationshipType: r.relationship_type || 'contact',
+      jobTitle: r.job_title || undefined,
+      designation: r.designation || undefined,
+      department: r.department || undefined,
+      decisionMakerCategory: r.decision_maker_category || undefined,
+      isPrimaryContact: Boolean(r.is_primary_contact),
+      sourceName: r.source_name || 'Owner Import',
+      provenance:
+        r.provenance && typeof r.provenance === 'string'
+          ? JSON.parse(r.provenance)
+          : r.provenance || undefined,
+      confidenceScore: Number(r.confidence_score ?? 50),
+      verificationStatus: (r.verification_status || 'user_provided') as CompanyPersonRelationship['verificationStatus'],
+      createdAt: new Date(r.created_at).toISOString(),
+      updatedAt: new Date(r.updated_at).toISOString(),
+    };
+  }
+
+  private mapRowToImportBatch(r: any): ImportBatchRecord {
+    return {
+      id: r.id,
+      filename: r.filename,
+      fileFormat: (r.file_format || 'csv') as 'csv' | 'xlsx',
+      fileSizeBytes: Number(r.file_size_bytes || 0),
+      fileSha256: r.file_sha256 || undefined,
+      worksheetName: r.worksheet_name || undefined,
+      encodingDetected: r.encoding_detected || undefined,
+      templateId: r.template_id || undefined,
+      templateName: r.template_name || undefined,
+      duplicatePolicy: r.duplicate_policy || 'merge_safe',
+      status: (r.status || 'completed') as ImportBatchRecord['status'],
+      totalRows: Number(r.total_rows || 0),
+      validRows: Number(r.valid_rows || 0),
+      invalidRows: Number(r.invalid_rows || 0),
+      createdCompanies: Number(r.created_companies || 0),
+      updatedCompanies: Number(r.updated_companies || 0),
+      createdPersons: Number(r.created_persons || 0),
+      updatedPersons: Number(r.updated_persons || 0),
+      createdRelationships: Number(r.created_relationships || 0),
+      updatedRelationships: Number(r.updated_relationships || 0),
+      skippedRows: Number(r.skipped_rows || 0),
+      duplicateRows: Number(r.duplicate_rows || 0),
+      conflictRows: Number(r.conflict_rows || 0),
+      failedRows: Number(r.failed_rows || 0),
+      durationMs: Number(r.duration_ms || 0),
+      actorEmail: r.actor_email || 'Owner',
+      summaryMetadata:
+        r.summary_metadata && typeof r.summary_metadata === 'string'
+          ? JSON.parse(r.summary_metadata)
+          : r.summary_metadata || undefined,
+      errorMessage: r.error_message || undefined,
+      createdAt: new Date(r.created_at).toISOString(),
+      completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : undefined,
+    };
+  }
+
+  private mapRowToImportBatchRow(r: any): ImportBatchRowRecord {
+    return {
+      id: r.id,
+      batchId: r.batch_id,
+      rowNumber: Number(r.row_number),
+      dedupeClassification: r.dedupe_classification,
+      actionTaken: r.action_taken,
+      outcome: r.outcome,
+      companyName: r.company_name || undefined,
+      personName: r.person_name || undefined,
+      matchedLeadId: r.matched_lead_id || undefined,
+      persistedLeadId: r.persisted_lead_id || undefined,
+      persistedPersonId: r.persisted_person_id || undefined,
+      persistedRelationshipId: r.persisted_relationship_id || undefined,
+      rawData: typeof r.raw_data === 'string' ? JSON.parse(r.raw_data) : r.raw_data || {},
+      normalizedData:
+        typeof r.normalized_data === 'string'
+          ? JSON.parse(r.normalized_data)
+          : r.normalized_data || {},
+      errors: typeof r.errors === 'string' ? JSON.parse(r.errors) : r.errors || [],
+      warnings: typeof r.warnings === 'string' ? JSON.parse(r.warnings) : r.warnings || [],
+      createdAt: new Date(r.created_at).toISOString(),
+    };
+  }
 
   // ==========================================
   // ROW MAPPER

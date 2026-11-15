@@ -250,6 +250,10 @@ export class Migrator {
     migration004ExpectedIndexesCount: number;
     migration004PresentIndexesCount: number;
     missingMigration004Indexes: string[];
+    migration005Recorded: boolean;
+    migration005SchemaReady: boolean;
+    migration005Tables: string[];
+    missingMigration005Tables: string[];
     error?: string;
   }> {
     const expectedCols = ['country_code', 'normalized_value', 'issuing_authority', 'source', 'status'];
@@ -291,6 +295,13 @@ export class Migrator {
       ...expected004SettingsCols.map((c) => `app_settings.${c}`),
     ];
     const expected004Indexes = ['idx_connector_runs_conn_executed', 'idx_connector_runs_status'];
+    const expected005Tables = [
+      'persons',
+      'company_person_relationships',
+      'import_mapping_templates',
+      'import_batches',
+      'import_batch_rows',
+    ];
 
     const pool = clientOrPool || dbManager.getPool();
     if (!pool) {
@@ -317,6 +328,10 @@ export class Migrator {
         migration004ExpectedIndexesCount: expected004Indexes.length,
         migration004PresentIndexesCount: 0,
         missingMigration004Indexes: expected004Indexes,
+        migration005Recorded: false,
+        migration005SchemaReady: false,
+        migration005Tables: [],
+        missingMigration005Tables: expected005Tables,
         error: 'Database connection pool not available',
       };
     }
@@ -377,10 +392,18 @@ export class Migrator {
       const missingMigration003Indexes = expectedIndexes.filter((idx) => !idxSet.has(idx));
       const missingMigration004Indexes = expected004Indexes.filter((idx) => !idxSet.has(idx));
 
+      const tblRes = await client.query(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`
+      );
+      const existingTableSet = new Set(tblRes.rows.map((r: { table_name: string }) => r.table_name));
+      const migration005Tables = expected005Tables.filter((t) => existingTableSet.has(t));
+      const missingMigration005Tables = expected005Tables.filter((t) => !existingTableSet.has(t));
+
       const recordedSet = new Set(appliedVersions.map((v) => v.version));
       const migrations001To003Recorded = ['001', '002', '003'].every((v) => recordedSet.has(v));
       const migration003Recorded = recordedSet.has('003');
       const migration004Recorded = recordedSet.has('004');
+      const migration005Recorded = recordedSet.has('005');
       const latestVersion = appliedVersions.length > 0 ? appliedVersions[appliedVersions.length - 1].version : null;
 
       return {
@@ -413,6 +436,10 @@ export class Migrator {
         migration004ExpectedIndexesCount: expected004Indexes.length,
         migration004PresentIndexesCount: expected004Indexes.length - missingMigration004Indexes.length,
         missingMigration004Indexes,
+        migration005Recorded,
+        migration005SchemaReady: migration005Recorded && missingMigration005Tables.length === 0,
+        migration005Tables,
+        missingMigration005Tables,
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -439,6 +466,10 @@ export class Migrator {
         migration004ExpectedIndexesCount: expected004Indexes.length,
         migration004PresentIndexesCount: 0,
         missingMigration004Indexes: expected004Indexes,
+        migration005Recorded: false,
+        migration005SchemaReady: false,
+        migration005Tables: [],
+        missingMigration005Tables: expected005Tables,
         error: msg.replace(/:[^:@]+@/, ':***@'),
       };
     } finally {

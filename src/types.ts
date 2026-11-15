@@ -650,3 +650,260 @@ export interface RegistryVerificationReport {
   summary: string;
   notes: string[];
 }
+
+export type RelationshipType =
+  | 'founder'
+  | 'owner'
+  | 'director'
+  | 'executive'
+  | 'officer'
+  | 'procurement_contact'
+  | 'sales_contact'
+  | 'employee'
+  | 'advisor'
+  | 'contact';
+
+export interface PersonRecord {
+  id: string;
+  fullName: string;
+  firstName?: string;
+  lastName?: string;
+  normalizedName: string;
+  email?: string;
+  emailStatus: 'verified' | 'syntax_valid' | 'unverified' | 'unavailable';
+  phone?: string;
+  phoneNormalized?: string;
+  linkedinUrl?: string;
+  linkedinSlug?: string;
+  country?: string;
+  countryCode?: string;
+  city?: string;
+  confidenceScore: number;
+  verificationStatus: 'user_provided' | 'syntax_validated' | 'officially_verified';
+  customFields?: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompanyPersonRelationship {
+  id: string;
+  leadId: string;
+  personId: string;
+  relationshipType: RelationshipType | string;
+  jobTitle?: string;
+  designation?: string;
+  department?: string;
+  decisionMakerCategory?: string;
+  isPrimaryContact: boolean;
+  sourceName: string;
+  confidenceScore: number;
+  verificationStatus: 'user_provided' | 'syntax_validated' | 'officially_verified';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LinkedPersonWithRelationship {
+  person: PersonRecord;
+  relationship: CompanyPersonRelationship;
+  otherCompanies?: Array<{
+    leadId: string;
+    companyName: string;
+    relationshipType: string;
+    jobTitle?: string;
+  }>;
+}
+
+export type ImportTargetField = string;
+
+export interface ColumnMappingRule {
+  sourceColumnIndex: number;
+  sourceHeader: string;
+  targetField: ImportTargetField;
+  confidence?: number;
+  autoDetected?: boolean;
+  ambiguousReason?: string;
+}
+
+export interface MultiColumnMergeRule {
+  id: string;
+  targetField: ImportTargetField;
+  sourceColumnIndexes: number[];
+  separator?: string;
+}
+
+export interface MappingAmbiguityWarning {
+  sourceColumnIndex: number;
+  sourceHeader: string;
+  suggestedTarget: ImportTargetField;
+  candidateTargets: ImportTargetField[];
+  reason: string;
+  severity: 'high' | 'medium';
+}
+
+export interface ImportNormalizationOptions {
+  defaultCountryCode?: string;
+  dateLocale?: 'ISO' | 'US' | 'EU' | 'UK';
+  numberLocale?: 'en-US' | 'de-DE' | 'fr-FR';
+  duplicatePolicy: 'merge_safe' | 'skip_existing' | 'create_if_new_only';
+  preserveExistingCrmFields: boolean;
+  atomicRollbackOnError: boolean;
+  skipRowsWithErrors: boolean;
+}
+
+export interface ImportMappingTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  sourceFormat: 'csv' | 'xlsx';
+  headerSignature: string[];
+  columnMappings: Array<{
+    sourceHeader: string;
+    targetField: ImportTargetField;
+  }>;
+  mergeRules: MultiColumnMergeRule[];
+  normalizationOptions: ImportNormalizationOptions;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportValidationIssue {
+  field: string;
+  code: string;
+  message: string;
+  severity: 'error' | 'warning';
+  rawValue?: string;
+}
+
+export type ImportDedupeClassification =
+  | 'new_record'
+  | 'exact_crm_duplicate'
+  | 'possible_duplicate'
+  | 'conflicting_identity'
+  | 'existing_with_new_info';
+
+export type ImportRowDecisionAction =
+  | 'create_new'
+  | 'update_existing'
+  | 'link_person_only'
+  | 'skip'
+  | 'needs_review';
+
+export interface ImportPreviewRow {
+  rowNumber: number;
+  importKind: 'company_only' | 'person_only' | 'company_and_person' | 'empty';
+  rawData: Record<string, string>;
+  company?: {
+    companyName?: string;
+    legalName?: string;
+    registrationNumber?: string;
+    registrationType?: string;
+    companyStatus?: string;
+    website?: string;
+    domain?: string;
+    email?: string;
+    phone?: string;
+    phoneNormalized?: string;
+    city?: string;
+    country?: string;
+    countryCode?: string;
+    formattedAddress?: string;
+    currency?: string;
+    opportunityValue?: number;
+    industry?: string;
+  };
+  person?: {
+    fullName?: string;
+    email?: string;
+    phone?: string;
+    phoneNormalized?: string;
+    linkedinUrl?: string;
+    jobTitle?: string;
+    designation?: string;
+    department?: string;
+    relationshipType?: string;
+    decisionMakerCategory?: string;
+    isPrimaryContact?: boolean;
+    associatedCompanyName?: string;
+    associatedCompanyRegNumber?: string;
+  };
+  errors: ImportValidationIssue[];
+  warnings: ImportValidationIssue[];
+  valid: boolean;
+  dedupe: {
+    classification: ImportDedupeClassification;
+    recommendedAction: ImportRowDecisionAction;
+    inFileDuplicateOfRow?: number;
+    matchedCrmLeadId?: string;
+    matchedCrmLeadName?: string;
+    matchedCrmField?: string;
+    matchedCrmValue?: string;
+    similarityScore?: number;
+    conflictDetails?: string[];
+    newInfoFields?: string[];
+    matchedPersonId?: string;
+    matchedPersonName?: string;
+    matchedPersonBy?: string;
+  };
+  proposedAction: ImportRowDecisionAction;
+  changesSummary: string[];
+}
+
+export interface ImportWorksheetInfo {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+}
+
+export interface ImportBatchRecord {
+  id: string;
+  filename: string;
+  fileFormat: 'csv' | 'xlsx';
+  fileSizeBytes: number;
+  fileSha256?: string;
+  worksheetName?: string;
+  encodingDetected?: string;
+  templateId?: string;
+  templateName?: string;
+  duplicatePolicy: string;
+  status: 'completed' | 'partial_failed' | 'failed' | 'rolled_back';
+  totalRows: number;
+  validRows: number;
+  invalidRows: number;
+  createdCompanies: number;
+  updatedCompanies: number;
+  createdPersons: number;
+  updatedPersons: number;
+  createdRelationships: number;
+  updatedRelationships: number;
+  skippedRows: number;
+  duplicateRows: number;
+  conflictRows: number;
+  failedRows: number;
+  durationMs: number;
+  actorEmail: string;
+  errorMessage?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface ImportBatchRowRecord {
+  id: string;
+  batchId: string;
+  rowNumber: number;
+  dedupeClassification: string;
+  actionTaken: string;
+  outcome: 'created' | 'updated' | 'skipped' | 'failed' | 'conflict' | 'rolled_back';
+  companyName?: string;
+  personName?: string;
+  matchedLeadId?: string;
+  persistedLeadId?: string;
+  persistedPersonId?: string;
+  persistedRelationshipId?: string;
+  rawData: Record<string, string>;
+  normalizedData: Record<string, unknown>;
+  errors: ImportValidationIssue[];
+  warnings: ImportValidationIssue[];
+  createdAt: string;
+}
+
