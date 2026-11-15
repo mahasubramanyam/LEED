@@ -171,21 +171,124 @@ export function compareLeadAgainstOfficialRecord(
     });
   }
 
-  // Compare registration numbers and canonical identifiers
+  const crmName = crmLead.legalName || crmLead.companyName;
+  const offName = officialRecord.legalName || officialRecord.companyName;
+  const nameSimilarity = computeLegalNameSimilarity(crmName, offName);
+  const addressSimilarity = computeAddressSimilarity(crmLead.address, officialRecord.address);
+
+  // Compare registration numbers and all non-contact official identifiers
   let identifierMatched = false;
   let identifierConflict = false;
 
+  const crmIdByType = new Map<string, Array<{ raw: string; norm: string }>>();
+  const offIdByType = new Map<string, Array<{ raw: string; norm: string }>>();
+
+  const addEntry = (
+    map: Map<string, Array<{ raw: string; norm: string }>>,
+    rawType: string | undefined,
+    rawVal: string | undefined,
+    countryHint: string
+  ) => {
+    if (!rawVal || !rawVal.trim()) return;
+    const cType = rawType ? canonicalizeIdentifierType(rawType, countryHint) : '';
+    if (cType === 'DOMAIN' || cType === 'PHONE' || cType === 'EMAIL') return;
+    const norm = normalizeRegValueForType(cType, rawVal, countryHint);
+    if (!norm) return;
+    const key = cType || '__GENERIC__';
+    const list = map.get(key) || [];
+    if (!list.some((x) => x.norm === norm)) {
+      list.push({ raw: rawVal.trim(), norm });
+      map.set(key, list);
+    }
+  };
+
+  if (crmLead.registrationNumber) {
+    addEntry(
+      crmIdByType,
+      crmLead.registrationType || officialRecord.registrationType,
+      crmLead.registrationNumber,
+      crmCountry || offCountry
+    );
+  }
+  for (const crmId of crmLead.identifiers || []) {
+    addEntry(crmIdByType, crmId.type, crmId.normalizedValue || crmId.value, crmId.countryCode || crmCountry);
+  }
+
+  if (officialRecord.registrationNumber) {
+    addEntry(
+      offIdByType,
+      officialRecord.registrationType || crmLead.registrationType,
+      officialRecord.registrationNumber,
+      offCountry || crmCountry
+    );
+  }
+  for (const offId of officialRecord.identifiers || []) {
+    addEntry(offIdByType, offId.type, offId.normalizedValue || offId.value, offId.countryCode || offCountry);
+  }
+
+  // First pass: check for exact identifier match on any shared identifier type
+  for (const [cType, crmList] of crmIdByType.entries()) {
+    const offList = offIdByType.get(cType);
+    if (!offList) continue;
+    for (const cEntry of crmList) {
+      if (offList.some((oEntry) => oEntry.norm === cEntry.norm)) {
+        identifierMatched = true;
+        break;
+      }
+    }
+    if (identifierMatched) break;
+  }
+
+  // Fallback generic registrationNumber match when one side lacks registrationType
   const offRegNorm = officialRecord.registrationNumber
     ? normalizeRegValueForType(officialRecord.registrationType, officialRecord.registrationNumber, offCountry)
     : '';
   const crmRegNorm = crmLead.registrationNumber
-    ? normalizeRegValueForType(crmLead.registrationType || officialRecord.registrationType, crmLead.registrationNumber, crmCountry || offCountry)
+    ? normalizeRegValueForType(
+        crmLead.registrationType || officialRecord.registrationType,
+        crmLead.registrationNumber,
+        crmCountry || offCountry
+      )
     : '';
 
-  if (crmRegNorm && offRegNorm) {
-    if (crmRegNorm === offRegNorm) {
+  if (!identifierMatched && crmRegNorm && offRegNorm && crmRegNorm === offRegNorm) {
+    const crmCanonType = canonicalizeIdentifierType(crmLead.registrationType || '', crmCountry);
+    const offCanonType = canonicalizeIdentifierType(officialRecord.registrationType || '', offCountry);
+    if (!crmCanonType || !offCanonType || crmCanonType === offCanonType) {
       identifierMatched = true;
-    } else {
+    }
+  }
+
+  // Second pass: detect explicit identifier conflicts when same identifier type diverges
+  if (!identifierMatched) {
+    const pushedConflictKeys = new Set<string>();
+    for (const [cType, crmList] of crmIdByType.entries()) {
+      const offList = offIdByType.get(cType);
+      if (!offList || offList.length === 0) continue;
+      for (const cEntry of crmList) {
+        const oEntry = offList[0];
+        if (cEntry.norm !== oEntry.norm) {
+          identifierConflict = true;
+          const dedupeKey = `${cType}:${cEntry.norm}:${oEntry.norm}`;
+          if (!pushedConflictKeys.has(dedupeKey)) {
+            pushedConflictKeys.add(dedupeKey);
+            const similarNameNote =
+              nameSimilarity >= 0.75
+                ? ' Similar company names do not override conflicting official identifiers (possible distinct legal entity with a similar name).'
+                : '';
+            conflicts.push({
+              field: 'registrationNumber',
+              severity: 'high',
+              crmValue: cEntry.raw,
+              officialValue: oEntry.raw,
+              message: `Registration number conflict${cType !== '__GENERIC__' ? ` (${cType})` : ''}: CRM lists "${cEntry.raw}", official registry returned "${oEntry.raw}" for "${offName}".${similarNameNote}`,
+            });
+          }
+        }
+      }
+    }
+
+    if (!identifierConflict && crmRegNorm && offRegNorm && crmRegNorm !== offRegNorm) {
       const crmCanonType = canonicalizeIdentifierType(crmLead.registrationType || '', crmCountry);
       const offCanonType = canonicalizeIdentifierType(officialRecord.registrationType || '', offCountry);
       if (!crmCanonType || !offCanonType || crmCanonType === offCanonType) {
@@ -195,33 +298,11 @@ export function compareLeadAgainstOfficialRecord(
           severity: 'high',
           crmValue: crmLead.registrationNumber!,
           officialValue: officialRecord.registrationNumber!,
-          message: `Registration number conflict: CRM lists "${crmLead.registrationNumber}", official registry returned "${officialRecord.registrationNumber}".`,
+          message: `Registration number conflict: CRM lists "${crmLead.registrationNumber}", official registry returned "${officialRecord.registrationNumber}" for "${offName}".`,
         });
       }
     }
   }
-
-  if (!identifierMatched) {
-    for (const crmId of crmLead.identifiers || []) {
-      const cType = canonicalizeIdentifierType(crmId.type, crmId.countryCode || crmCountry);
-      if (cType === 'DOMAIN' || cType === 'PHONE' || cType === 'EMAIL') continue;
-      const cVal = normalizeRegValueForType(cType, crmId.normalizedValue || crmId.value, crmId.countryCode || crmCountry);
-      for (const offId of officialRecord.identifiers || []) {
-        const oType = canonicalizeIdentifierType(offId.type, offId.countryCode || offCountry);
-        const oVal = normalizeRegValueForType(oType, offId.normalizedValue || offId.value, offId.countryCode || offCountry);
-        if (cType === oType && cVal && oVal && cVal === oVal) {
-          identifierMatched = true;
-          break;
-        }
-      }
-      if (identifierMatched) break;
-    }
-  }
-
-  const crmName = crmLead.legalName || crmLead.companyName;
-  const offName = officialRecord.legalName || officialRecord.companyName;
-  const nameSimilarity = computeLegalNameSimilarity(crmName, offName);
-  const addressSimilarity = computeAddressSimilarity(crmLead.address, officialRecord.address);
 
   // Legal status conflict detection
   if (
@@ -238,8 +319,8 @@ export function compareLeadAgainstOfficialRecord(
     });
   }
 
-  // Legal name divergence conflict
-  if (identifierMatched && nameSimilarity < 0.65) {
+  // Legal name divergence conflict (surfaced when identifier matches or conflicts)
+  if ((identifierMatched || identifierConflict) && nameSimilarity < 0.65) {
     conflicts.push({
       field: 'legalName',
       severity: 'medium',
@@ -275,8 +356,10 @@ export function compareLeadAgainstOfficialRecord(
     matchType = 'exact_official_identifier';
     state = isLiveApi ? 'officially_verified' : 'offline_reference';
   } else if (nameSimilarity >= 0.9 && (!crmCountry || !offCountry || crmCountry === offCountry)) {
+    // Similar or identical names NEVER establish an exact official identity match by themselves.
+    // Keep name-only matches as probable_match (distinct from officially_verified).
     matchType = 'exact_name_jurisdiction';
-    state = isLiveApi ? 'officially_verified' : 'offline_reference';
+    state = isLiveApi ? 'probable_match' : 'offline_reference';
   } else if (nameSimilarity >= 0.68 && (addressSimilarity >= 0.5 || !crmLead.address?.postalCode)) {
     matchType = 'probable_name_address';
     state = isLiveApi ? 'probable_match' : 'offline_reference';
@@ -399,6 +482,10 @@ export async function verifyLeadWithOfficialRegistry(
   let matchedCandidate: CanonicalLead | undefined;
   let isLiveApi = false;
   let notes: string[] = [];
+  let queryMode: 'exact_identifier_lookup' | 'name_search' = 'name_search';
+  let matchedProviderMetadata: Record<string, unknown> | undefined;
+  let matchedRawApiRecord: unknown;
+  let matchedRetrievedAt: string | undefined;
 
   const supportedTypes = new Set(meta.supportedIdentifierTypes || []);
   let lookupExternalId: string | undefined;
@@ -442,6 +529,11 @@ export async function verifyLeadWithOfficialRegistry(
       notes.push(...(lookupRes.response.notes || []));
       if (lookupRes.normalization?.leads && lookupRes.normalization.leads.length > 0) {
         matchedCandidate = lookupRes.normalization.leads[0];
+        queryMode = 'exact_identifier_lookup';
+        matchedProviderMetadata =
+          lookupRes.response.result?.providerMetadata || lookupRes.response.providerMetadata;
+        matchedRawApiRecord = matchedProviderMetadata?.rawApiRecord;
+        matchedRetrievedAt = lookupRes.response.result?.retrievedAt;
       }
     } catch (err) {
       // If format invalid or 404/request issue, fall through to legal name search cleanly; preserve auth/unavailable errors
@@ -474,17 +566,32 @@ export async function verifyLeadWithOfficialRegistry(
         );
         isLiveApi = searchRes.response.isLiveApi;
         notes.push(...(searchRes.response.notes || []));
+        queryMode = 'name_search';
 
-        // Score all candidates and select the highest-scoring official match
+        // Exact identifier matches strictly take precedence over approximate name matches
         let bestScore = -1;
         for (const cand of searchRes.normalization.leads) {
           const cmp = compareLeadAgainstOfficialRecord(lead, cand, isLiveApi);
           const rankScore =
-            (cmp.identifierMatched ? 100 : 0) + cmp.nameSimilarity * 60 + cmp.addressSimilarity * 20;
+            (cmp.identifierMatched ? 1000 : 0) +
+            cmp.nameSimilarity * 60 +
+            cmp.addressSimilarity * 20 +
+            (cand.companyStatus === 'active' ? 5 : 0);
           if (rankScore > bestScore && (cmp.identifierMatched || cmp.nameSimilarity >= 0.55)) {
             bestScore = rankScore;
             matchedCandidate = cand;
           }
+        }
+
+        if (matchedCandidate) {
+          const rawMatch = searchRes.response.results.find(
+            (r) =>
+              r.externalSourceId === matchedCandidate?.registrationNumber ||
+              r.company.registrationNumber === matchedCandidate?.registrationNumber
+          );
+          matchedProviderMetadata = rawMatch?.providerMetadata || searchRes.response.providerMetadata;
+          matchedRawApiRecord = rawMatch?.providerMetadata?.rawApiRecord;
+          matchedRetrievedAt = rawMatch?.retrievedAt;
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -530,6 +637,11 @@ export async function verifyLeadWithOfficialRegistry(
         ? `No matching corporate entity found in ${meta.name} for "${lead.companyName}".`
         : `${meta.name} could not perform live verification (credentials not configured or offline reference mode only).`,
       notes,
+      provenance: {
+        queryMode,
+        queriedIdentifier: lookupExternalId,
+        queriedIdentifierType: lookupIdentType,
+      },
     };
   }
 
@@ -540,7 +652,7 @@ export async function verifyLeadWithOfficialRegistry(
   if (comparison.state === 'officially_verified') {
     summary = `Verified via ${meta.name} (${matchedCandidate.registrationType || 'ID'} ${matchedCandidate.registrationNumber || 'N/A'}, status: ${matchedCandidate.companyStatus || 'unknown'}).`;
   } else if (comparison.state === 'probable_match') {
-    summary = `Probable match found in ${meta.name}: "${matchedCandidate.legalName || matchedCandidate.companyName}" (${Math.round(comparison.nameSimilarity * 100)}% name match). Review before finalizing.`;
+    summary = `Probable match found in ${meta.name}: "${matchedCandidate.legalName || matchedCandidate.companyName}" (${matchedCandidate.registrationType || 'ID'} ${matchedCandidate.registrationNumber || 'N/A'}, ${Math.round(comparison.nameSimilarity * 100)}% name match). Confirm official identifier before verifying.`;
   } else if (comparison.state === 'offline_reference') {
     summary = `Matched against offline sample reference only (${meta.shortName} requires API credentials for live government verification).`;
   } else if (comparison.state === 'conflict_detected') {
@@ -567,6 +679,14 @@ export async function verifyLeadWithOfficialRegistry(
     preservesHigherTrust: true,
     summary,
     notes,
+    provenance: {
+      queryMode,
+      queriedIdentifier: lookupExternalId,
+      queriedIdentifierType: lookupIdentType,
+      rawApiRecord: matchedRawApiRecord,
+      providerMetadata: matchedProviderMetadata,
+      retrievedAt: matchedRetrievedAt,
+    },
   };
 }
 
@@ -621,18 +741,23 @@ export function applyOfficialVerificationToLead(
     verificationHistory: JSON.stringify(updatedHistory),
   };
 
-  // Never overwrite verified legal identity with offline reference, unfound, or conflicting registration number results
+  // Never overwrite verified legal identity with offline reference, unfound, conflicting, or unconfirmed probable matches
   const matched = report.matchedRecord;
   const hasRegConflict = report.conflicts.some((c) => c.field === 'registrationNumber' || c.field === 'countryCode');
-  const existingTrust = inferLeadTrustRank(existingLead);
-  const canUpgradeLegalIdentity =
+  const isExactOfficial =
     Boolean(matched) &&
     report.isLiveApi &&
     !hasRegConflict &&
-    (report.state === 'officially_verified' || report.state === 'probable_match') &&
-    (report.state === 'officially_verified' || existingTrust < 5);
+    report.state === 'officially_verified';
 
-  if (!canUpgradeLegalIdentity || !matched) {
+  if (matched && report.state === 'probable_match' && !hasRegConflict) {
+    baseCustomFields.probableMatchRegistrationNumber = matched.registrationNumber || '';
+    baseCustomFields.probableMatchRegistrationType = matched.registrationType || '';
+    baseCustomFields.probableMatchLegalName = matched.legalName || matched.companyName || '';
+    baseCustomFields.probableMatchSourceUrl = report.sourceUrl || '';
+  }
+
+  if (!isExactOfficial || !matched) {
     return {
       ...existingLead,
       activities: [activity, ...(existingLead.activities || [])],
@@ -675,8 +800,6 @@ export function applyOfficialVerificationToLead(
     }
   }
 
-  const isExactOfficial = report.state === 'officially_verified';
-
   return {
     ...existingLead,
     // Preserve CRM identity & pipeline state strictly
@@ -690,14 +813,10 @@ export function applyOfficialVerificationToLead(
     notes: existingLead.notes || [],
     createdAt: existingLead.createdAt,
 
-    // Upgrade legal identity fields from authoritative official registry
+    // Upgrade legal identity fields from authoritative official registry (exact official match only)
     legalName: matched.legalName || matched.companyName || existingLead.legalName,
-    registrationNumber: isExactOfficial
-      ? matched.registrationNumber || existingLead.registrationNumber
-      : existingLead.registrationNumber || matched.registrationNumber,
-    registrationType: isExactOfficial
-      ? matched.registrationType || existingLead.registrationType
-      : existingLead.registrationType || matched.registrationType,
+    registrationNumber: matched.registrationNumber || existingLead.registrationNumber,
+    registrationType: matched.registrationType || existingLead.registrationType,
     companyStatus:
       matched.companyStatus && matched.companyStatus !== 'unknown'
         ? matched.companyStatus
@@ -718,9 +837,7 @@ export function applyOfficialVerificationToLead(
       new Set([
         ...(existingLead.confidenceSignals || []),
         ...(matched.confidenceSignals || []),
-        isExactOfficial
-          ? `Official Registry Verified (${report.sourceName})`
-          : `Probable Registry Match (${report.sourceName})`,
+        `Official Registry Verified (${report.sourceName})`,
       ])
     ),
     identifiers: Array.from(identMap.values()),
@@ -728,7 +845,7 @@ export function applyOfficialVerificationToLead(
     activities: [activity, ...(existingLead.activities || [])],
     customFields: {
       ...baseCustomFields,
-      lastVerificationStatus: isExactOfficial ? 'officially_verified' : 'syntax_validated',
+      lastVerificationStatus: 'officially_verified',
     },
     updatedAt: report.verifiedAt,
   };

@@ -71,14 +71,14 @@ const US_SEC_METADATA: ConnectorMetadata = {
   sourceCategory: 'government_registry',
   accessMode: 'live_api',
   description:
-    'Official U.S. Securities and Exchange Commission (SEC) EDGAR public registry covering SEC-reporting public companies and filers (CIK, EIN, SIC, business address, filing status). Note: privately held US LLCs/corporations are registered at the state Secretary of State level.',
+    'Official U.S. Securities and Exchange Commission (SEC) EDGAR public registry covering SEC-reporting public companies and filers indexed by CIK (with EIN when disclosed on filings). Does not cover privately held US LLCs/corporations or provide universal EIN search.',
   supportedCountries: ['US'],
   supportsAllCountries: false,
   supportsRegionFilter: true,
   supportsCityFilter: true,
   supportsPostalCodeFilter: true,
   supportsIndustryFilter: true,
-  supportedIdentifierTypes: ['US_CIK', 'US_EIN'],
+  supportedIdentifierTypes: ['US_CIK'],
   capabilities: ['company_search', 'registry_lookup', 'pagination', 'connection_test'],
   credentialRequirements: {
     authType: 'none_open',
@@ -275,12 +275,34 @@ export class UsSecEdgarConnector implements IConnector {
     );
     const retrievedAt = new Date().toISOString();
     const notes: string[] = [
-      'SEC EDGAR covers US public/SEC-reporting corporations. Private LLCs and state-only corporations require state Secretary of State portals.',
+      'SEC EDGAR covers US public/SEC-reporting corporations indexed by US_CIK. Private LLCs and state-only corporations require state Secretary of State portals, and universal US_EIN search is not supported.',
     ];
 
-    const digitsOnly = query.replace(/[^0-9]/g, '');
-    if (/^\d{4,10}$/.test(digitsOnly) && digitsOnly === query.replace(/[\s-]/g, '')) {
-      const profile = await this.fetchSubmissionProfile(digitsOnly, context);
+    // Distinguish US_EIN (XX-XXXXXXX) from US_CIK: SEC EDGAR cannot search universally by EIN.
+    if (/^\d{2}-\d{7}$/.test(query)) {
+      return {
+        results: [],
+        pagination: {
+          page: 1,
+          pageSize,
+          totalItems: 0,
+          totalPages: 1,
+          hasMore: false,
+        },
+        rawCount: 0,
+        attribution: US_SEC_METADATA.attribution,
+        notes: [
+          ...notes,
+          `Query "${query}" matches US_EIN format (XX-XXXXXXX). SEC EDGAR indexes and searches issuers by 10-digit US_CIK, ticker symbol, or SEC registrant name — not by IRS EIN.`,
+        ],
+        isLiveApi: true,
+      };
+    }
+
+    const compactQuery = query.replace(/\s+/g, '');
+    const cikDigitsOnly = compactQuery.replace(/^CIK/i, '');
+    if (/^\d{4,10}$/.test(cikDigitsOnly) && !query.includes('-')) {
+      const profile = await this.fetchSubmissionProfile(cikDigitsOnly, context);
       const norm = profile ? this.normalizeResult(profile, retrievedAt) : null;
       return {
         results: norm ? [norm] : [],
@@ -427,14 +449,23 @@ export class UsSecEdgarConnector implements IConnector {
     const postalCode = bizAddr?.zipCode || undefined;
 
     const recentForms = maybeProfile.filings?.recent?.form || [];
-    const hasSuspensionOrDereg = recentForms.slice(0, 5).some((f) => /^(15-|RW|25)/i.test(f));
-    const companyStatus = maybeProfile.addresses || recentForms.length > 0
-      ? hasSuspensionOrDereg
-        ? normalizeLegalCompanyStatus('suspended')
-        : normalizeLegalCompanyStatus('active')
-      : 'active';
+    // Never mark an issuer inactive solely because of routine SEC filing codes such as Form 25 / 25-NSE
+    // (security/debt delisting notices) or 15-/RW filings, and never infer legal status from filing codes alone.
+    const hasAuthoritativeActiveIssuerProfile =
+      maybeProfile.entityType?.toLowerCase() === 'operating' &&
+      Array.isArray(maybeProfile.exchanges) &&
+      maybeProfile.exchanges.some((ex) => Boolean(ex && ex.trim())) &&
+      Array.isArray(maybeProfile.tickers) &&
+      maybeProfile.tickers.some((t) => Boolean(t && t.trim()));
 
-    const cleanEin = maybeProfile.ein && !/^0+$/.test(maybeProfile.ein) ? maybeProfile.ein : undefined;
+    const companyStatus: 'active' | 'inactive' | 'dissolved' | 'unknown' =
+      hasAuthoritativeActiveIssuerProfile ? 'active' : 'unknown';
+
+    const rawEin = typeof maybeProfile.ein === 'string' ? maybeProfile.ein.trim() : '';
+    const einDigits = rawEin.replace(/[^0-9]/g, '');
+    const cleanEin =
+      /^\d{9}$/.test(einDigits) && !/^0+$/.test(einDigits) ? rawEin : undefined;
+
     const identifiers: StandardizedConnectorResult['company']['identifiers'] = [
       {
         type: 'US_CIK',
@@ -451,6 +482,7 @@ export class UsSecEdgarConnector implements IConnector {
       identifiers.push({
         type: 'US_EIN',
         value: cleanEin,
+        normalizedValue: einDigits,
         countryCode: 'US',
         issuingAuthority: 'Internal Revenue Service / SEC Filing',
         source: 'sec_edgar_api',
@@ -541,9 +573,14 @@ export class UsSecEdgarConnector implements IConnector {
         cik: cik10,
         ein: cleanEin,
         sic: maybeProfile.sic,
+        entityType: maybeProfile.entityType,
         tickers,
         exchanges: maybeProfile.exchanges,
         stateOfIncorporation: maybeProfile.stateOfIncorporation,
+        recentForms: recentForms.slice(0, 10),
+        legalStatusBasis: hasAuthoritativeActiveIssuerProfile
+          ? 'sec_active_exchange_listed_operating_issuer'
+          : 'sec_data_insufficient_for_legal_status',
       },
     };
   }

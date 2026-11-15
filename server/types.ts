@@ -457,4 +457,12 @@ export interface RegistryVerificationReport {
   preservesHigherTrust: boolean;
   summary: string;
   notes: string[];
+  provenance?: {
+    queryMode: 'exact_identifier_lookup' | 'name_search';
+    queriedIdentifier?: string;
+    queriedIdentifierType?: string;
+    rawApiRecord?: unknown;
+    providerMetadata?: Record<string, unknown>;
+    retrievedAt?: string;
+  };
 }

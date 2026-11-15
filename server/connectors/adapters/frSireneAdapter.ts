@@ -33,13 +33,18 @@ interface FrAnnuaireResult {
   siren: string;
   nom_complet?: string;
   nom_raison_sociale?: string;
+  sigle?: string | null;
   etat_administratif?: string;
   nature_juridique?: string;
   activite_principale?: string;
   section_activite_principale?: string;
+  categorie_entreprise?: string;
+  nombre_etablissements?: number;
+  nombre_etablissements_ouverts?: number;
   date_creation?: string;
   siege?: FrAnnuaireSiege;
   matching_etablissements?: FrAnnuaireSiege[];
+  complements?: Record<string, unknown>;
 }
 
 const FR_ANNUAIRE_BASE = 'https://recherche-entreprises.api.gouv.fr/search';
@@ -215,11 +220,27 @@ export class FrSireneConnector implements IConnector {
 
     const items = Array.isArray(data.results) ? data.results : [];
     const retrievedAt = new Date().toISOString();
+    const isExactIdentifierQuery = /^\d{9}$|^\d{14}$/.test(cleanDigits);
+    const targetSiren = isExactIdentifierQuery ? cleanDigits.slice(0, 9) : undefined;
     const cityFilter = request.city?.trim().toLowerCase();
     const regionFilter = request.region?.trim().toLowerCase();
     const industryFilter = (request.industry || request.category || request.businessType || '').trim().toLowerCase();
 
     const filtered = items.filter((item) => {
+      if (isExactIdentifierQuery && targetSiren) {
+        const itemSiren = (item.siren || '').replace(/\s+/g, '');
+        const itemSiret = (item.siege?.siret || '').replace(/\s+/g, '');
+        if (cleanDigits.length === 14) {
+          const matchingSiret =
+            itemSiret === cleanDigits ||
+            (item.matching_etablissements || []).some(
+              (et) => (et.siret || '').replace(/\s+/g, '') === cleanDigits
+            );
+          if (!matchingSiret && itemSiren !== targetSiren) return false;
+        } else if (itemSiren !== targetSiren) {
+          return false;
+        }
+      }
       const siege = item.siege;
       if (cityFilter && !(siege?.libelle_commune || '').toLowerCase().includes(cityFilter)) {
         return false;
@@ -238,8 +259,10 @@ export class FrSireneConnector implements IConnector {
       .map((item) => this.normalizeResult(item, retrievedAt))
       .filter((r): r is StandardizedConnectorResult => r !== null);
 
-    const totalItems = data.total_results ?? results.length;
-    const totalPages = data.total_pages ?? Math.max(1, Math.ceil(totalItems / pageSize));
+    const totalItems = isExactIdentifierQuery ? results.length : data.total_results ?? results.length;
+    const totalPages = isExactIdentifierQuery
+      ? 1
+      : data.total_pages ?? Math.max(1, Math.ceil(totalItems / pageSize));
 
     return {
       results,
@@ -248,12 +271,23 @@ export class FrSireneConnector implements IConnector {
         pageSize,
         totalItems,
         totalPages,
-        hasMore: page < totalPages,
+        hasMore: !isExactIdentifierQuery && page < totalPages,
       },
       rawCount: items.length,
       attribution: FR_METADATA.attribution,
       notes: [],
       isLiveApi: true,
+      providerMetadata: {
+        queryUrl: url.toString(),
+        isExactIdentifierQuery,
+        rawResultsCount: items.length,
+        rawResultsSummary: items.slice(0, 10).map((i) => ({
+          siren: i.siren,
+          nom_complet: i.nom_complet,
+          nom_raison_sociale: i.nom_raison_sociale,
+          etat_administratif: i.etat_administratif,
+        })),
+      },
     };
   }
 
@@ -274,7 +308,7 @@ export class FrSireneConnector implements IConnector {
     const url = new URL(FR_ANNUAIRE_BASE);
     url.searchParams.set('q', clean);
     url.searchParams.set('page', '1');
-    url.searchParams.set('per_page', '5');
+    url.searchParams.set('per_page', '10');
 
     const response = await fetch(url.toString(), {
       headers: {
@@ -297,14 +331,20 @@ export class FrSireneConnector implements IConnector {
 
     const data = (await response.json()) as { results?: FrAnnuaireResult[] };
     const items = Array.isArray(data.results) ? data.results : [];
-    const exact = items.find((i) => i.siren === targetSiren) || items[0];
+    const exact = items.find((i) => (i.siren || '').replace(/\s+/g, '') === targetSiren);
 
-    if (!exact || exact.siren !== targetSiren) {
+    if (!exact) {
       return {
         found: false,
         attribution: FR_METADATA.attribution,
         notes: [`No French entity found for SIREN ${targetSiren}.`],
         isLiveApi: true,
+        providerMetadata: {
+          queryUrl: url.toString(),
+          queriedSiren: targetSiren,
+          candidateSirens: items.map((i) => i.siren),
+          rawApiResults: items,
+        },
       };
     }
 
@@ -315,6 +355,11 @@ export class FrSireneConnector implements IConnector {
       attribution: FR_METADATA.attribution,
       notes: [],
       isLiveApi: true,
+      providerMetadata: {
+        queryUrl: url.toString(),
+        queriedSiren: targetSiren,
+        rawApiRecord: exact,
+      },
     };
   }
 
@@ -435,10 +480,19 @@ export class FrSireneConnector implements IConnector {
       },
       providerMetadata: {
         isLiveApi: true,
+        siren,
+        nomComplet: item.nom_complet,
+        nomRaisonSociale: item.nom_raison_sociale,
+        sigle: item.sigle ?? undefined,
         etatAdministratif: item.etat_administratif,
+        rawRegistryStatus: item.etat_administratif,
         nafCode: item.activite_principale,
         natureJuridique: item.nature_juridique,
+        categorieEntreprise: item.categorie_entreprise,
+        nombreEtablissements: item.nombre_etablissements,
+        nombreEtablissementsOuverts: item.nombre_etablissements_ouverts,
         headOfficeSiret: siege?.siret,
+        rawApiRecord: item,
       },
     };
   }

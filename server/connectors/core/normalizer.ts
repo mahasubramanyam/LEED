@@ -27,28 +27,29 @@ const VERIFICATION_RANK: Record<VerificationStatus | 'user_provided' | 'discover
 
 export function normalizeLegalCompanyStatus(
   rawStatus?: string | null,
-  flags?: { bankrupt?: boolean; underLiquidation?: boolean; cancelled?: boolean }
+  flags?: {
+    bankrupt?: boolean;
+    underLiquidation?: boolean;
+    underForcedDissolution?: boolean;
+    cancelled?: boolean;
+    explicitActive?: boolean;
+  }
 ): 'active' | 'inactive' | 'dissolved' | 'unknown' {
-  if (flags?.bankrupt || flags?.underLiquidation || flags?.cancelled) {
+  if (
+    flags?.bankrupt ||
+    flags?.underLiquidation ||
+    flags?.underForcedDissolution ||
+    flags?.cancelled
+  ) {
     return 'dissolved';
   }
   const s = (rawStatus || '').trim().toLowerCase();
-  if (!s) return 'unknown';
-
-  if (
-    s === 'active' ||
-    s === 'a' ||
-    s === 'open' ||
-    s === 'registered' ||
-    s === 'live' ||
-    s === '0000000001' ||
-    s.includes('active') ||
-    s.includes('registered') ||
-    s === 'live'
-  ) {
-    return 'active';
+  if (!s) {
+    return flags?.explicitActive ? 'active' : 'unknown';
   }
 
+  // Evaluate dissolved / deregistered / inactive statuses BEFORE active / registered
+  // so strings like "deregistered" or "inactive" never match "registered" or "active".
   if (
     s === 'dissolved' ||
     s === 'c' ||
@@ -57,14 +58,22 @@ export function normalizeLegalCompanyStatus(
     s === 'cancelled' ||
     s === 'canceled' ||
     s === 'deregistered' ||
+    s === 'de-registered' ||
     s === 'struck off' ||
+    s === 'struck-off' ||
     s === 'converted-closed' ||
+    s === 'wound up' ||
+    s === 'terminated' ||
     s.includes('dissolv') ||
     s.includes('deregister') ||
+    s.includes('de-register') ||
     s.includes('cancel') ||
     s.includes('liquidation') ||
     s.includes('insolvency') ||
-    s.includes('struck')
+    s.includes('bankrupt') ||
+    s.includes('struck') ||
+    s.includes('wound up') ||
+    s.includes('ceased')
   ) {
     return 'dissolved';
   }
@@ -73,14 +82,36 @@ export function normalizeLegalCompanyStatus(
     s === 'inactive' ||
     s === 'dormant' ||
     s === 'suspended' ||
+    s === 'unregistered' ||
+    s === 'not registered' ||
     s === 'administration' ||
     s === 'receivership' ||
     s === 'voluntary-arrangement' ||
     s.includes('inactive') ||
+    s.includes('non-active') ||
+    s.includes('not active') ||
+    s.includes('unregistered') ||
+    s.includes('not registered') ||
+    s.includes('dormant') ||
     s.includes('suspend') ||
     s.includes('receivership')
   ) {
     return 'inactive';
+  }
+
+  if (
+    s === 'active' ||
+    s === 'a' ||
+    s === 'open' ||
+    s === 'registered' ||
+    s === 'live' ||
+    s === 'live company' ||
+    s === '0000000001' ||
+    /\bactive\b/.test(s) ||
+    /\bregistered\b/.test(s) ||
+    /\blive\b/.test(s)
+  ) {
+    return 'active';
   }
 
   return 'unknown';
@@ -309,6 +340,16 @@ export function normalizeConnectorResult(result: StandardizedConnectorResult): {
       lastConnectorId: result.providerId,
       lastVerificationStatus: result.verificationStatus,
       lastAccessMode: result.accessMode,
+      ...(typeof result.providerMetadata?.rawRegistryStatus === 'string'
+        ? { rawRegistryStatus: result.providerMetadata.rawRegistryStatus }
+        : typeof result.providerMetadata?.uenStatusLabel === 'string'
+        ? { rawRegistryStatus: result.providerMetadata.uenStatusLabel }
+        : typeof result.providerMetadata?.etatAdministratif === 'string'
+        ? { rawRegistryStatus: result.providerMetadata.etatAdministratif }
+        : {}),
+      ...(result.providerMetadata && Object.keys(result.providerMetadata).length > 0
+        ? { providerMetadata: JSON.stringify(result.providerMetadata) }
+        : {}),
     },
     createdAt: now,
     updatedAt: now,

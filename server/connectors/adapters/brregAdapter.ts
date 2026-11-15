@@ -41,9 +41,16 @@ interface BrregEnhet {
   postadresse?: BrregAddress;
   hjemmeside?: string;
   registreringsdatoEnhetsregisteret?: string;
+  registrertIMvaregisteret?: boolean;
+  registrertIForetaksregisteret?: boolean;
+  registrertIStiftelsesregisteret?: boolean;
+  registrertIFrivillighetsregisteret?: boolean;
   konkurs?: boolean;
+  konkursdato?: string;
   underAvvikling?: boolean;
+  underTvangsavviklingEllerTvangsopplosning?: boolean;
   slettedato?: string;
+  slettegrunn?: string;
 }
 
 const BRREG_BASE = 'https://data.brreg.no/enhetsregisteret/api';
@@ -358,11 +365,45 @@ export class BrregConnector implements IConnector {
       }
     }
 
+    const isBankrupt = e.konkurs === true || Boolean(e.konkursdato?.trim());
+    const isUnderLiquidation = e.underAvvikling === true;
+    const isForcedDissolution = e.underTvangsavviklingEllerTvangsopplosning === true;
+    const isDeleted = Boolean(e.slettedato?.trim()) || Boolean(e.slettegrunn?.trim());
+    const hasAuthoritativeActiveStatus =
+      e.konkurs === false &&
+      e.underAvvikling === false &&
+      e.underTvangsavviklingEllerTvangsopplosning !== true &&
+      !isBankrupt &&
+      !isUnderLiquidation &&
+      !isForcedDissolution &&
+      !isDeleted;
+
     const companyStatus = normalizeLegalCompanyStatus(undefined, {
-      bankrupt: e.konkurs,
-      underLiquidation: e.underAvvikling,
-      cancelled: Boolean(e.slettedato),
+      bankrupt: isBankrupt,
+      underLiquidation: isUnderLiquidation,
+      underForcedDissolution: isForcedDissolution,
+      cancelled: isDeleted,
+      explicitActive: hasAuthoritativeActiveStatus,
     });
+
+    const rawStatusTokens: string[] = [];
+    if (e.konkurs === true) rawStatusTokens.push('konkurs=true');
+    if (e.konkursdato?.trim()) rawStatusTokens.push(`konkursdato=${e.konkursdato.trim()}`);
+    if (e.underAvvikling === true) rawStatusTokens.push('underAvvikling=true');
+    if (e.underTvangsavviklingEllerTvangsopplosning === true) {
+      rawStatusTokens.push('underTvangsavviklingEllerTvangsopplosning=true');
+    }
+    if (e.slettedato?.trim()) rawStatusTokens.push(`slettedato=${e.slettedato.trim()}`);
+    if (e.slettegrunn?.trim()) rawStatusTokens.push(`slettegrunn=${e.slettegrunn.trim()}`);
+    if (rawStatusTokens.length === 0) {
+      rawStatusTokens.push(
+        hasAuthoritativeActiveStatus
+          ? 'aktiv (konkurs=false, underAvvikling=false)'
+          : 'incomplete_status_flags'
+      );
+    }
+    const rawRegistryStatus = rawStatusTokens.join('; ');
+
     const foundedYear = e.registreringsdatoEnhetsregisteret
       ? parseInt(e.registreringsdatoEnhetsregisteret.slice(0, 4), 10)
       : undefined;
@@ -373,6 +414,8 @@ export class BrregConnector implements IConnector {
       signals.push('Active Norwegian Entity Status');
     } else if (companyStatus === 'dissolved') {
       signals.push('Entity Marked Dissolved / Bankrupt / Struck Off in Brreg');
+    } else {
+      signals.push('Brreg Status Flags Incomplete (Status Unknown)');
     }
     if (website) {
       score += 15;
@@ -470,9 +513,16 @@ export class BrregConnector implements IConnector {
       providerMetadata: {
         orgFormCode: e.organisasjonsform?.kode,
         naceCode: e.naeringskode1?.kode,
-        konkurs: Boolean(e.konkurs),
-        underAvvikling: Boolean(e.underAvvikling),
+        konkurs: e.konkurs,
+        konkursdato: e.konkursdato,
+        underAvvikling: e.underAvvikling,
+        underTvangsavviklingEllerTvangsopplosning: e.underTvangsavviklingEllerTvangsopplosning,
         slettedato: e.slettedato,
+        slettegrunn: e.slettegrunn,
+        registreringsdatoEnhetsregisteret: e.registreringsdatoEnhetsregisteret,
+        rawRegistryStatus,
+        rawApiUrl: `${BRREG_BASE}/enheter/${e.organisasjonsnummer}`,
+        rawApiRecord: e,
       },
     };
   }
