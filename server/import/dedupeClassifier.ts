@@ -490,16 +490,20 @@ export function classifyImportBatchDuplicates(
       }
     }
 
-    // Track in-file duplicate person
-    const personUniqueKey = row.person
+    // Track in-file duplicate (company + person pair) so multi-company M:N contacts are preserved
+    const personIdentityPart = row.person
       ? row.person.email
         ? `email:${row.person.email.toLowerCase()}`
         : row.person.linkedinSlug
         ? `li:${row.person.linkedinSlug.toLowerCase()}`
-        : row.person.normalizedName && companyGroupKey
-        ? `name:${companyGroupKey}:${row.person.normalizedName}`
+        : row.person.normalizedName
+        ? `name:${row.person.normalizedName}`
         : undefined
       : undefined;
+    const personUniqueKey =
+      personIdentityPart && companyGroupKey
+        ? `${companyGroupKey}::${personIdentityPart}`
+        : personIdentityPart;
 
     if (personUniqueKey) {
       const prevPersonRow = seenPersonKeys.get(personUniqueKey);

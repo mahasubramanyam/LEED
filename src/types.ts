@@ -855,6 +855,21 @@ export interface ImportWorksheetInfo {
   columnCount: number;
 }
 
+export interface ParsedImportFileSummary {
+  filename: string;
+  format: 'csv' | 'xlsx';
+  fileSizeBytes: number;
+  fileSha256: string;
+  encodingDetected: string;
+  delimiterDetected?: string;
+  worksheets: ImportWorksheetInfo[];
+  selectedWorksheet?: string;
+  headers: string[];
+  totalRows: number;
+  truncated?: boolean;
+  warnings: string[];
+}
+
 export interface ImportBatchRecord {
   id: string;
   filename: string;

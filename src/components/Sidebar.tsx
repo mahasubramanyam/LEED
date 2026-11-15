@@ -16,6 +16,7 @@ import {
   User,
   ExternalLink,
   Globe2,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -50,6 +51,7 @@ export function Sidebar({
     { id: 'discovery', label: 'Registry Discovery', shortLabel: 'Discovery', icon: Search, badge: '4 Sources' },
     { id: 'country-matrix', label: 'Country Matrix', shortLabel: 'Matrix', icon: Globe2, badge: '195 States' },
     { id: 'leads', label: 'Leads Intelligence', shortLabel: 'Leads', icon: Building2, count: leadsCount },
+    { id: 'import', label: 'Import & Data Hub', shortLabel: 'Import', icon: FileSpreadsheet, badge: 'CSV/XLSX' },
     { id: 'pipeline', label: 'Pipeline Kanban', shortLabel: 'Pipeline', icon: Kanban },
     { id: 'tasks', label: 'Tasks & Follow-ups', shortLabel: 'Tasks', icon: CheckSquare, count: pendingTasksCount },
     { id: 'outreach', label: 'Outreach & HITL', shortLabel: 'Outreach', icon: Send, count: pendingApprovalsCount },

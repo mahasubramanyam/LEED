@@ -107,6 +107,10 @@ interface DiagnosticsData {
       migration004ExpectedIndexesCount?: number;
       migration004PresentIndexesCount?: number;
       missingMigration004Indexes?: string[];
+      migration005Recorded?: boolean;
+      migration005SchemaReady?: boolean;
+      migration005Tables?: string[];
+      missingMigration005Tables?: string[];
     } | null;
   };
   security: {
@@ -217,6 +221,20 @@ export function OwnerControlCentre({
       expectedColumnsCount: number;
       indexesPresentCount: number;
       expectedIndexesCount: number;
+    };
+  } | null>(null);
+
+  // Migration 005 Owner Approval State
+  const [showMigration005Confirm, setShowMigration005Confirm] = useState(false);
+  const [migration005ConfirmChecked, setMigration005ConfirmChecked] = useState(false);
+  const [applyingMigration005, setApplyingMigration005] = useState(false);
+  const [migration005Feedback, setMigration005Feedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    verification?: {
+      migration005Recorded: boolean;
+      tablesPresentCount: number;
+      expectedTablesCount: number;
     };
   } | null>(null);
 
@@ -570,6 +588,56 @@ export function OwnerControlCentre({
       });
     } finally {
       setApplyingMigration004(false);
+    }
+  };
+
+  const handleApproveMigration005 = async () => {
+    if (!migration005ConfirmChecked) return;
+    setApplyingMigration005(true);
+    setMigration005Feedback(null);
+    try {
+      const res = await apiFetch('/api/database/migrations/005/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmMigration: '005' }),
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.toLowerCase().includes('application/json')) {
+        setMigration005Feedback({
+          type: 'error',
+          message: `Migration 005 approval received non-JSON server response (HTTP ${res.status}).`,
+        });
+        await fetchDiagnostics();
+        return;
+      }
+
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        await fetchDiagnostics();
+        setMigration005Feedback({
+          type: 'error',
+          message: data?.error || `Migration 005 execution failed (HTTP ${res.status}) and was rolled back.`,
+          verification: data?.verification,
+        });
+        return;
+      }
+
+      await Promise.all([fetchDiagnostics(), fetchAuditLog()]);
+      setShowMigration005Confirm(false);
+      setMigration005ConfirmChecked(false);
+      setMigration005Feedback({
+        type: 'success',
+        message: data.message || 'Migration 005 approved, applied transactionally, and verified.',
+        verification: data.verification,
+      });
+    } catch (err: any) {
+      setMigration005Feedback({
+        type: 'error',
+        message: err?.message || 'Network or authorization error while executing Migration 005.',
+      });
+    } finally {
+      setApplyingMigration005(false);
     }
   };
 
@@ -927,6 +995,162 @@ export function OwnerControlCentre({
                   </div>
                 )}
               </div>
+
+              {/* Migration 005 Live Schema Status & Owner Approval */}
+              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-900 dark:text-white">
+                      Migration 005 (Import Processing &amp; M:N Decision-Makers)
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Script <code className="font-mono">005_import_and_relationships.sql</code> — 5 additive tables (<code className="font-mono">persons</code>, <code className="font-mono">company_person_relationships</code>, <code className="font-mono">import_mapping_templates</code>, <code className="font-mono">import_batches</code>, <code className="font-mono">import_batch_rows</code>).
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <span
+                      className={`px-2.5 py-0.5 text-xs font-semibold rounded-md ${
+                        diagData.migrations.inspection.migration005SchemaReady &&
+                        diagData.migrations.inspection.migration005Recorded
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
+                          : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200'
+                      }`}
+                    >
+                      {diagData.migrations.inspection.migration005SchemaReady &&
+                      diagData.migrations.inspection.migration005Recorded
+                        ? '005 Applied & Verified'
+                        : '005 Pending Approval'}
+                    </span>
+
+                    {!(
+                      diagData.migrations.inspection.migration005SchemaReady &&
+                      diagData.migrations.inspection.migration005Recorded
+                    ) &&
+                      !showMigration005Confirm && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMigration005ConfirmChecked(false);
+                            setMigration005Feedback(null);
+                            setShowMigration005Confirm(true);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs"
+                        >
+                          <Database className="w-3.5 h-3.5" />
+                          Approve &amp; Apply Migration 005
+                        </button>
+                      )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">SCHEMA_MIGRATIONS (005)</span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                      {diagData.migrations.inspection.migration005Recorded ? 'Recorded' : 'Not Recorded'}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">PHASE 7 TABLES PRESENT</span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
+                      {diagData.migrations.inspection.migration005Tables?.length ?? 0} / 5 Present
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">MISSING TABLES (005)</span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 truncate block">
+                      {diagData.migrations.inspection.missingMigration005Tables?.length
+                        ? diagData.migrations.inspection.missingMigration005Tables.join(', ')
+                        : 'None'}
+                    </span>
+                  </div>
+                </div>
+
+                {showMigration005Confirm && (
+                  <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 space-y-3">
+                    <div className="flex items-start gap-2.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div className="text-xs text-slate-800 dark:text-slate-200 space-y-1">
+                        <p className="font-semibold">
+                          Confirm Execution: Migration 005 Only (<code className="font-mono">005_import_and_relationships.sql</code>)
+                        </p>
+                        <p className="text-slate-600 dark:text-slate-400">
+                          Applies Migration 005 transactionally to create the 5 additive Phase 7 tables without modifying existing leads, credentials, or Migrations 001–004.
+                        </p>
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={migration005ConfirmChecked}
+                        onChange={(e) => setMigration005ConfirmChecked(e.target.checked)}
+                        disabled={applyingMigration005}
+                        className="rounded border-amber-400 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>
+                        I explicitly confirm applying <strong>Migration 005</strong> (<code>005_import_and_relationships.sql</code>) to PostgreSQL.
+                      </span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!migration005ConfirmChecked || applyingMigration005}
+                        onClick={handleApproveMigration005}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {applyingMigration005 ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            Applying Migration 005...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            Confirm &amp; Execute Migration 005
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={applyingMigration005}
+                        onClick={() => {
+                          setShowMigration005Confirm(false);
+                          setMigration005ConfirmChecked(false);
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {migration005Feedback && (
+                  <div
+                    className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${
+                      migration005Feedback.type === 'success'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                    }`}
+                  >
+                    {migration005Feedback.type === 'success' ? (
+                      <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                    )}
+                    <div className="space-y-1">
+                      <p className="font-semibold">{migration005Feedback.message}</p>
+                      {migration005Feedback.verification && (
+                        <p className="font-mono text-[11px]">
+                          005 recorded={String(migration005Feedback.verification.migration005Recorded)} · tables={migration005Feedback.verification.tablesPresentCount}/{migration005Feedback.verification.expectedTablesCount}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -935,10 +1159,10 @@ export function OwnerControlCentre({
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
-                  PostgreSQL Schema Ledger ({diagData?.diagnostics?.tables?.length ?? 18} Tables)
+                  PostgreSQL Schema Ledger ({diagData?.diagnostics?.tables?.length ?? 23} Tables)
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Core CRM intelligence tables, capability matrix, security ledger, and migration tracking
+                  Core CRM intelligence tables, capability matrix, import &amp; M:N relationship tables, security ledger, and migration tracking
                 </p>
               </div>
               <span className="text-xs font-mono font-medium text-slate-600 dark:text-slate-400">
@@ -967,6 +1191,11 @@ export function OwnerControlCentre({
                   { name: 'connector_runs', count: 0 },
                   { name: 'audit_events', count: 0 },
                   { name: 'app_settings', count: 0 },
+                  { name: 'persons', count: 0 },
+                  { name: 'company_person_relationships', count: 0 },
+                  { name: 'import_mapping_templates', count: 0 },
+                  { name: 'import_batches', count: 0 },
+                  { name: 'import_batch_rows', count: 0 },
                 ]).map((t) => (
                   <div
                     key={t.name}

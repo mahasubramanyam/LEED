@@ -46,6 +46,7 @@ export function TopBar({
     dashboard: { title: 'Executive Dashboard', subtitle: 'Platform KPI overview, registry status, and pipeline health' },
     discovery: { title: 'Registry Discovery', subtitle: 'Live query engine across Norway (Brreg), UK (Companies House), Australia (ABN), & OSM' },
     leads: { title: 'Leads Intelligence', subtitle: 'Canonical CRM database with official registration numbers & confidence scores' },
+    import: { title: 'Import & Data Processing Hub', subtitle: 'CSV & Excel parsing, field normalization, dedupe preview, audit ledger, and M:N contacts' },
     pipeline: { title: 'Pipeline Kanban', subtitle: 'Stage progression, opportunity values, and deal velocity' },
     tasks: { title: 'Tasks & Follow-ups', subtitle: 'Owner scheduled engagements and priority tracking' },
     outreach: { title: 'Campaigns & HITL Approval', subtitle: 'Human-in-the-Loop email outreach approval queue' },

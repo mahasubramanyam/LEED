@@ -65,6 +65,23 @@ import {
   ConnectorRunRecord,
   SourceCategory,
 } from './server/connectors/core/types.js';
+import multer from 'multer';
+import {
+  importService,
+  ImportFileSecurityError,
+  ImportServiceError,
+} from './server/import/importService.js';
+import { MAX_IMPORT_FILE_BYTES } from './server/import/fileParser.js';
+import { normalizeAndValidateMappedRow } from './server/import/normalizerValidator.js';
+import type { ImportMappingTemplate } from './server/types.js';
+
+const importUploadMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_IMPORT_FILE_BYTES,
+    files: 1,
+  },
+});
 
 let lastStartupMigrationResult: {
   attempted: boolean;
@@ -158,6 +175,8 @@ app.get('/api/status', async (req: Request, res: Response) => {
         migration003SchemaReady: inspection.migration003SchemaReady,
         migration004Recorded: inspection.migration004Recorded,
         migration004SchemaReady: inspection.migration004SchemaReady,
+        migration005Recorded: inspection.migration005Recorded,
+        migration005SchemaReady: inspection.migration005SchemaReady,
       };
     } else {
       const leads = storage.getLeads();
@@ -724,6 +743,107 @@ protectedApi.post('/database/migrations/004/approve', async (req: Request, res: 
     res.status(500).json({
       success: false,
       error: `Migration 004 execution failed and was rolled back: ${safeMsg}`,
+    });
+  }
+});
+
+// Dedicated Owner-Only Approval Action for Migration 005 Only
+protectedApi.post('/database/migrations/005/approve', async (req: Request, res: Response) => {
+  if (!req.owner || req.owner.role !== 'owner') {
+    res.status(403).json({
+      error: 'Owner authorization required to approve and execute Migration 005.',
+      code: 'FORBIDDEN',
+    });
+    return;
+  }
+
+  const { confirmMigration } = req.body || {};
+  if (confirmMigration !== '005') {
+    res.status(400).json({
+      error: 'Explicit owner confirmation is required (confirmMigration must equal "005").',
+      code: 'CONFIRMATION_REQUIRED',
+    });
+    return;
+  }
+
+  if (!dbManager.isDbConnected()) {
+    res.status(503).json({
+      error: 'PostgreSQL database is not connected. Cannot apply Migration 005.',
+      code: 'DATABASE_UNAVAILABLE',
+    });
+    return;
+  }
+
+  const clientIp = normalizeClientIp(req);
+  try {
+    const result = await migrator.runMigrations(undefined, { targetVersion: '005' });
+    const inspection = await migrator.inspectMigrationStatus();
+
+    const verified =
+      result.success &&
+      inspection.migration005Recorded &&
+      inspection.missingMigration005Tables.length === 0 &&
+      inspection.migration005SchemaReady;
+
+    const verification = {
+      migration005Recorded: inspection.migration005Recorded,
+      migration005Tables: inspection.migration005Tables,
+      missingMigration005Tables: inspection.missingMigration005Tables,
+      migration005SchemaReady: inspection.migration005SchemaReady,
+      verified,
+    };
+
+    try {
+      await postgresStorage.recordAuditEvent(
+        verified ? 'MIGRATION_005_APPROVED_AND_APPLIED' : 'MIGRATION_005_APPROVAL_FAILED',
+        req.owner.email,
+        'schema_migration',
+        '005_import_and_relationships.sql',
+        {
+          applied: result.applied,
+          alreadyApplied: result.alreadyApplied,
+          verification,
+          error: result.error,
+        },
+        clientIp
+      );
+    } catch (auditErr) {
+      console.warn('[Migration 005] Could not record audit event:', auditErr);
+    }
+
+    if (!result.success || !verified) {
+      res.status(500).json({
+        success: false,
+        migration: '005_import_and_relationships.sql',
+        applied: result.applied,
+        alreadyApplied: result.alreadyApplied,
+        verification,
+        inspection,
+        error:
+          result.error ||
+          'Migration 005 executed but post-execution schema verification did not pass.',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      migration: '005_import_and_relationships.sql',
+      applied: result.applied,
+      alreadyApplied: result.alreadyApplied,
+      verification,
+      inspection,
+      message:
+        result.applied.length > 0
+          ? 'Migration 005 approved, applied transactionally, and verified (5/5 Phase 7 tables ready).'
+          : 'Migration 005 was already applied and verified in Neon (5/5 Phase 7 tables ready).',
+    });
+  } catch (err: unknown) {
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const safeMsg = rawMsg.replace(/:[^:@]+@/, ':***@');
+    res.status(500).json({
+      success: false,
+      error: `Migration 005 execution failed and was rolled back: ${safeMsg}`,
     });
   }
 });
@@ -2889,6 +3009,562 @@ protectedApi.get('/export/json', async (req: Request, res: Response) => {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
+  }
+});
+
+// ==========================================
+// PHASE 7: LEAD COLLECTION, IMPORT & DATA PROCESSING ENGINE
+// ==========================================
+
+// Upload CSV or Excel (.xlsx) file to create an in-memory staged import session (zero DB writes)
+protectedApi.post(
+  '/import/upload',
+  (req: Request, res: Response, next: NextFunction) => {
+    const contentType = String(req.headers['content-type'] || '').toLowerCase();
+    if (contentType.includes('multipart/form-data')) {
+      importUploadMiddleware.single('file')(req, res, (err: any) => {
+        if (err) {
+          const status = err?.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+          res.status(status).json({
+            error:
+              err?.code === 'LIMIT_FILE_SIZE'
+                ? `Uploaded file exceeds maximum allowed size of ${Math.round(MAX_IMPORT_FILE_BYTES / (1024 * 1024))} MB.`
+                : err?.message || 'File upload failed.',
+            code: err?.code || 'UPLOAD_ERROR',
+          });
+          return;
+        }
+        next();
+      });
+    } else {
+      next();
+    }
+  },
+  async (req: Request, res: Response) => {
+    try {
+      const { isPg } = checkStorageEngine();
+      let filename = '';
+      let mimeType: string | undefined;
+      let buffer: Buffer | undefined;
+      let worksheetName: string | undefined;
+      let defaultCountryCode: string | undefined;
+      let templateId: string | undefined;
+
+      if (req.file) {
+        filename = req.file.originalname;
+        mimeType = req.file.mimetype;
+        buffer = req.file.buffer;
+        worksheetName = req.body?.worksheetName ? String(req.body.worksheetName) : undefined;
+        defaultCountryCode = req.body?.defaultCountryCode ? String(req.body.defaultCountryCode) : undefined;
+        templateId = req.body?.templateId ? String(req.body.templateId) : undefined;
+      } else if (req.body && typeof req.body === 'object') {
+        filename = String(req.body.filename || 'import.csv');
+        mimeType = req.body.mimeType ? String(req.body.mimeType) : undefined;
+        worksheetName = req.body.worksheetName ? String(req.body.worksheetName) : undefined;
+        defaultCountryCode = req.body.defaultCountryCode ? String(req.body.defaultCountryCode) : undefined;
+        templateId = req.body.templateId ? String(req.body.templateId) : undefined;
+
+        if (typeof req.body.contentBase64 === 'string' && req.body.contentBase64.length > 0) {
+          const base64Clean = req.body.contentBase64.replace(/^data:[^;]+;base64,/, '');
+          buffer = Buffer.from(base64Clean, 'base64');
+        } else if (typeof req.body.contentText === 'string' && req.body.contentText.length > 0) {
+          buffer = Buffer.from(req.body.contentText, 'utf8');
+        }
+      }
+
+      if (!buffer || buffer.length === 0) {
+        res.status(400).json({
+          error: 'An uploaded CSV/XLSX file or non-empty contentText/contentBase64 payload is required.',
+          code: 'MISSING_FILE',
+        });
+        return;
+      }
+
+      let template: ImportMappingTemplate | null = null;
+      if (templateId) {
+        const templates = isPg
+          ? await postgresStorage.getImportTemplates()
+          : storage.getImportTemplates();
+        template = templates.find((t) => t.id === templateId) || null;
+      }
+
+      const settings = isPg ? await postgresStorage.getSettings() : storage.getSettings();
+
+      const sessionData = await importService.createSessionFromUpload({
+        filename,
+        mimeType,
+        buffer,
+        worksheetName,
+        defaultCountryCode: defaultCountryCode || settings.defaultCountry || 'US',
+        template,
+      });
+
+      res.status(201).json(sessionData);
+    } catch (err: unknown) {
+      if (err instanceof ImportFileSecurityError || err instanceof ImportServiceError) {
+        res.status(err.statusCode).json({ error: err.message, code: err.code });
+        return;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(400).json({ error: redactSecrets(msg) });
+    }
+  }
+);
+
+// Switch worksheet inside an Excel (.xlsx) import session
+protectedApi.post('/import/sessions/:sessionId/worksheet', async (req: Request, res: Response) => {
+  try {
+    const worksheetName = String(req.body?.worksheetName || '').trim();
+    if (!worksheetName) {
+      res.status(400).json({ error: 'worksheetName is required.' });
+      return;
+    }
+    const result = await importService.switchWorksheet(req.params.sessionId, worksheetName);
+    res.json(result);
+  } catch (err: unknown) {
+    if (err instanceof ImportFileSecurityError || err instanceof ImportServiceError) {
+      res.status(err.statusCode).json({ error: err.message, code: err.code });
+      return;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: redactSecrets(msg) });
+  }
+});
+
+// Compute dry-run preview (normalization, validation, intra-file & CRM deduplication) — zero DB writes
+protectedApi.post('/import/sessions/:sessionId/preview', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const {
+      mappings,
+      mergeRules,
+      options,
+      rowOverrides,
+      page,
+      pageSize,
+      filter,
+    } = req.body || {};
+
+    const [existingLeads, existingPersons, existingRelationships] = await Promise.all([
+      isPg ? postgresStorage.getLeads() : Promise.resolve(storage.getLeads()),
+      isPg ? postgresStorage.getPersons() : Promise.resolve(storage.getPersons()),
+      isPg ? postgresStorage.getAllRelationships() : Promise.resolve(storage.getAllRelationships()),
+    ]);
+
+    const preview = importService.previewSession(req.params.sessionId, {
+      mappings,
+      mergeRules,
+      options,
+      rowOverrides,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+      filter,
+      existingLeads,
+      existingPersons,
+      existingRelationships,
+    });
+
+    res.json(preview);
+  } catch (err: unknown) {
+    if (err instanceof ImportFileSecurityError || err instanceof ImportServiceError) {
+      res.status(err.statusCode).json({ error: err.message, code: err.code });
+      return;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: redactSecrets(msg) });
+  }
+});
+
+// Explicit confirmation to execute staged import transaction into CRM database
+protectedApi.post('/import/sessions/:sessionId/confirm', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const {
+      confirm,
+      rowOverrides,
+      templateId,
+      templateName,
+      atomicRollbackOnError,
+      simulateFailureAtRow,
+    } = req.body || {};
+
+    const [existingLeads, existingPersons, existingRelationships] = await Promise.all([
+      isPg ? postgresStorage.getLeads() : Promise.resolve(storage.getLeads()),
+      isPg ? postgresStorage.getPersons() : Promise.resolve(storage.getPersons()),
+      isPg ? postgresStorage.getAllRelationships() : Promise.resolve(storage.getAllRelationships()),
+    ]);
+
+    const actorEmail = req.owner?.email || 'Owner';
+    const result = await importService.confirmSessionImport(req.params.sessionId, {
+      confirm: confirm === true,
+      actorEmail,
+      rowOverrides,
+      templateId: templateId ? String(templateId) : undefined,
+      templateName: templateName ? String(templateName) : undefined,
+      atomicRollbackOnError:
+        typeof atomicRollbackOnError === 'boolean' ? atomicRollbackOnError : undefined,
+      simulateFailureAtRow:
+        simulateFailureAtRow !== undefined ? Number(simulateFailureAtRow) : undefined,
+      storageAdapter: isPg ? postgresStorage : storage,
+      existingLeads,
+      existingPersons,
+      existingRelationships,
+    });
+
+    if (isPg && req.owner) {
+      try {
+        await postgresStorage.recordAuditEvent(
+          result.batch.status === 'rolled_back' ? 'IMPORT_BATCH_ROLLED_BACK' : 'IMPORT_BATCH_EXECUTED',
+          req.owner.email,
+          'import_batch',
+          result.batch.id,
+          {
+            filename: result.batch.filename,
+            status: result.batch.status,
+            totalRows: result.batch.totalRows,
+            createdCompanies: result.batch.createdCompanies,
+            updatedCompanies: result.batch.updatedCompanies,
+            createdPersons: result.batch.createdPersons,
+            createdRelationships: result.batch.createdRelationships,
+            failedRows: result.batch.failedRows,
+          },
+          normalizeClientIp(req)
+        );
+      } catch (auditErr) {
+        console.warn('[Import] Could not record audit event:', auditErr);
+      }
+    }
+
+    res.status(result.batch.status === 'rolled_back' ? 422 : 200).json({
+      success: result.batch.status !== 'rolled_back' && result.batch.status !== 'failed',
+      batch: result.batch,
+      rows: result.rows.slice(0, 100),
+    });
+  } catch (err: unknown) {
+    if (err instanceof ImportFileSecurityError || err instanceof ImportServiceError) {
+      res.status(err.statusCode).json({ error: err.message, code: err.code });
+      return;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    const status = msg.includes('Database connection unavailable')
+      ? 503
+      : msg.includes('Migration 005')
+      ? 409
+      : 500;
+    res.status(status).json({ error: redactSecrets(msg) });
+  }
+});
+
+// Import Mapping Templates CRUD
+protectedApi.get('/import/templates', async (_req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const templates = isPg
+      ? await postgresStorage.getImportTemplates()
+      : storage.getImportTemplates();
+    res.json({ templates });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
+  }
+});
+
+protectedApi.post('/import/templates', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const body = req.body || {};
+    if (!body.name || typeof body.name !== 'string' || !body.name.trim()) {
+      res.status(400).json({ error: 'Template name is required.' });
+      return;
+    }
+    if (!Array.isArray(body.columnMappings)) {
+      res.status(400).json({ error: 'columnMappings array is required.' });
+      return;
+    }
+
+    const payload = {
+      id: body.id ? String(body.id) : undefined,
+      name: String(body.name).trim(),
+      description: body.description ? String(body.description) : undefined,
+      sourceFormat: (body.sourceFormat === 'xlsx' ? 'xlsx' : 'csv') as 'csv' | 'xlsx',
+      headerSignature: Array.isArray(body.headerSignature) ? body.headerSignature.map(String) : [],
+      columnMappings: body.columnMappings,
+      mergeRules: Array.isArray(body.mergeRules) ? body.mergeRules : [],
+      normalizationOptions: body.normalizationOptions || {
+        duplicatePolicy: 'merge_safe',
+        preserveExistingCrmFields: true,
+        atomicRollbackOnError: false,
+        skipRowsWithErrors: true,
+      },
+      createdBy: req.owner?.email || 'Owner',
+    };
+
+    const template = isPg
+      ? await postgresStorage.saveImportTemplate(payload)
+      : storage.saveImportTemplate(payload);
+
+    res.status(201).json({ template });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(msg.includes('Migration 005') ? 409 : 500).json({ error: redactSecrets(msg) });
+  }
+});
+
+protectedApi.delete('/import/templates/:id', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const deleted = isPg
+      ? await postgresStorage.deleteImportTemplate(req.params.id)
+      : storage.deleteImportTemplate(req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Import mapping template not found.' });
+      return;
+    }
+    res.json({ success: true, deletedId: req.params.id });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
+  }
+});
+
+// Import Batch Audit History & Row Reports
+protectedApi.get('/import/batches', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const page = req.query.page ? Number(req.query.page) : 1;
+    const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 20;
+    const data = isPg
+      ? await postgresStorage.getImportBatches({ page, pageSize })
+      : storage.getImportBatches({ page, pageSize });
+    res.json(data);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
+  }
+});
+
+protectedApi.get('/import/batches/:batchId', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const page = req.query.page ? Number(req.query.page) : 1;
+    const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 50;
+    const outcome = req.query.outcome ? String(req.query.outcome) : 'all';
+    const detail = isPg
+      ? await postgresStorage.getImportBatchDetail(req.params.batchId, { page, pageSize, outcome })
+      : storage.getImportBatchDetail(req.params.batchId, { page, pageSize, outcome });
+
+    if (!detail) {
+      res.status(404).json({ error: 'Import batch not found.' });
+      return;
+    }
+    res.json(detail);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
+  }
+});
+
+protectedApi.get('/import/batches/:batchId/export', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const exportType = String(req.query.type || 'failed');
+    const detail = isPg
+      ? await postgresStorage.getImportBatchDetail(req.params.batchId, { page: 1, pageSize: 500, outcome: 'all' })
+      : storage.getImportBatchDetail(req.params.batchId, { page: 1, pageSize: 500, outcome: 'all' });
+
+    if (!detail) {
+      res.status(404).json({ error: 'Import batch not found.' });
+      return;
+    }
+
+    let csv: string;
+    let suffix = 'failed_rows';
+    if (exportType === 'errors') {
+      csv = importService.buildValidationErrorsCsv(detail.rows);
+      suffix = 'validation_issues';
+    } else if (exportType === 'summary') {
+      csv = importService.buildBatchSummaryCsv(detail.batch, detail.rows);
+      suffix = 'batch_report';
+    } else {
+      csv = importService.buildFailedRowsCsv(detail.rows);
+      suffix = 'failed_rows';
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename=import_${req.params.batchId}_${suffix}.csv`
+    );
+    res.send(csv);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
+  }
+});
+
+// Persons & M:N Company-Person Relationships API
+protectedApi.get('/persons', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+    const [persons, rels, leads] = await Promise.all([
+      isPg ? postgresStorage.getPersons() : Promise.resolve(storage.getPersons()),
+      isPg ? postgresStorage.getAllRelationships() : Promise.resolve(storage.getAllRelationships()),
+      isPg ? postgresStorage.getLeads() : Promise.resolve(storage.getLeads()),
+    ]);
+
+    const leadMap = new Map(leads.map((l) => [l.id, l]));
+    const relsByPerson = new Map<
+      string,
+      Array<{
+        relationshipId: string;
+        leadId: string;
+        companyName: string;
+        relationshipType: string;
+        jobTitle?: string;
+        isPrimaryContact: boolean;
+      }>
+    >();
+
+    for (const r of rels) {
+      const list = relsByPerson.get(r.personId) || [];
+      list.push({
+        relationshipId: r.id,
+        leadId: r.leadId,
+        companyName: leadMap.get(r.leadId)?.companyName || r.leadId,
+        relationshipType: r.relationshipType,
+        jobTitle: r.jobTitle,
+        isPrimaryContact: r.isPrimaryContact,
+      });
+      relsByPerson.set(r.personId, list);
+    }
+
+    const enriched = persons
+      .filter((p) => {
+        if (!search) return true;
+        const comps = relsByPerson.get(p.id) || [];
+        return (
+          p.fullName.toLowerCase().includes(search) ||
+          (p.email && p.email.toLowerCase().includes(search)) ||
+          (p.city && p.city.toLowerCase().includes(search)) ||
+          comps.some((c) => c.companyName.toLowerCase().includes(search))
+        );
+      })
+      .map((p) => ({
+        ...p,
+        companies: relsByPerson.get(p.id) || [],
+      }));
+
+    res.json({ persons: enriched, total: enriched.length });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
+  }
+});
+
+protectedApi.get('/leads/:id/persons', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const persons = isPg
+      ? await postgresStorage.getLeadPersons(req.params.id)
+      : storage.getLeadPersons(req.params.id);
+    res.json({ leadId: req.params.id, persons });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
+  }
+});
+
+protectedApi.post('/leads/:id/persons', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const lead = isPg ? await postgresStorage.getLead(req.params.id) : storage.getLead(req.params.id);
+    if (!lead) {
+      res.status(404).json({ error: 'Lead not found' });
+      return;
+    }
+
+    const body = req.body || {};
+    const fullName = String(body.fullName || '').trim();
+    if (!fullName) {
+      res.status(400).json({ error: 'Person fullName is required.' });
+      return;
+    }
+
+    const fields: Record<string, string> = {
+      personFullName: fullName,
+      isPrimaryContact: body.isPrimaryContact ? 'true' : 'false',
+      associatedCompanyName: lead.companyName,
+    };
+    if (body.email) fields.personEmail = String(body.email);
+    if (body.phone) fields.personPhone = String(body.phone);
+    if (body.linkedinUrl) fields.personLinkedInUrl = String(body.linkedinUrl);
+    if (body.jobTitle) fields.personJobTitle = String(body.jobTitle);
+    if (body.designation) fields.personDesignation = String(body.designation);
+    if (body.department) fields.personDepartment = String(body.department);
+    if (body.relationshipType) fields.relationshipType = String(body.relationshipType);
+    if (body.decisionMakerCategory) fields.decisionMakerCategory = String(body.decisionMakerCategory);
+    if (body.countryCode || lead.address?.countryCode) {
+      fields.personCountry = body.countryCode ? String(body.countryCode) : String(lead.address?.countryCode);
+    }
+    if (body.city || lead.address?.city) {
+      fields.personCity = body.city ? String(body.city) : String(lead.address?.city);
+    }
+
+    const normalized = normalizeAndValidateMappedRow({
+      rowNumber: 1,
+      fields,
+      customFields: {},
+      options: {
+        defaultCountryCode: lead.address?.countryCode || 'US',
+        duplicatePolicy: 'merge_safe',
+        preserveExistingCrmFields: true,
+        atomicRollbackOnError: false,
+        skipRowsWithErrors: true,
+      },
+    });
+
+    if (!normalized.valid || !normalized.person) {
+      res.status(400).json({
+        error: normalized.errors.map((e) => e.message).join('; ') || 'Invalid person payload.',
+      });
+      return;
+    }
+
+    const actorEmail = req.owner?.email || 'Owner';
+    const persons = isPg
+      ? await postgresStorage.linkPersonToLead({
+          leadId: lead.id,
+          person: normalized.person,
+          actorEmail,
+        })
+      : storage.linkPersonToLead({
+          leadId: lead.id,
+          person: normalized.person,
+          actorEmail,
+        });
+
+    res.status(201).json({ leadId: lead.id, persons });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(msg.includes('Migration 005') ? 409 : 500).json({ error: redactSecrets(msg) });
+  }
+});
+
+protectedApi.delete('/leads/:id/persons/:relationshipId', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const deleted = isPg
+      ? await postgresStorage.unlinkPersonFromLead(req.params.id, req.params.relationshipId)
+      : storage.unlinkPersonFromLead(req.params.id, req.params.relationshipId);
+    if (!deleted) {
+      res.status(404).json({ error: 'Company-person relationship not found.' });
+      return;
+    }
+    res.json({ success: true, deletedId: req.params.relationshipId });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: redactSecrets(msg) });
   }
 });
 

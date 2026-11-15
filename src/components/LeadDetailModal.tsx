@@ -26,6 +26,10 @@ import {
   AlertTriangle,
   RefreshCw,
   Scale,
+  Users,
+  Linkedin,
+  Trash2,
+  Briefcase,
 } from 'lucide-react';
 import {
   CanonicalLead,
@@ -35,6 +39,7 @@ import {
   VerificationConflict,
   VerificationHistoryEntry,
   RegistryVerificationState,
+  LinkedPersonWithRelationship,
 } from '../types.js';
 import { GeoSelector } from './GeoSelector.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
@@ -216,7 +221,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   onAddActivity,
   onInspectUrl,
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'web' | 'ai' | 'timeline' | 'notes'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'web' | 'ai' | 'timeline' | 'notes'>('overview');
   const [newNote, setNewNote] = useState('');
   const [newTag, setNewTag] = useState('');
   const [oppValue, setOppValue] = useState(lead?.opportunityValue?.toString() || '');
@@ -266,6 +271,39 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
+  // Decision-Makers & M:N Relationships state
+  const [linkedPersons, setLinkedPersons] = useState<LinkedPersonWithRelationship[]>([]);
+  const [loadingPersons, setLoadingPersons] = useState(false);
+  const [isAddingPerson, setIsAddingPerson] = useState(false);
+  const [savingPerson, setSavingPerson] = useState(false);
+  const [personError, setPersonError] = useState<string | null>(null);
+  const [personForm, setPersonForm] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    linkedinUrl: '',
+    relationshipType: 'director',
+    jobTitle: '',
+    designation: '',
+    department: '',
+    isPrimaryContact: false,
+  });
+
+  const fetchLinkedPersons = async (leadId: string) => {
+    setLoadingPersons(true);
+    try {
+      const res = await apiFetch(`/api/leads/${leadId}/persons`);
+      if (res.ok) {
+        const data = await res.json();
+        setLinkedPersons(data.persons || []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingPersons(false);
+    }
+  };
+
   // Keep modal local state synced when active lead changes
   useEffect(() => {
     if (!lead) return;
@@ -292,6 +330,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
     setInspectionResult(null);
     setVerificationReport(null);
     setVerificationError(null);
+    setIsAddingPerson(false);
+    setPersonError(null);
+    fetchLinkedPersons(lead.id);
   }, [lead?.id]);
 
   if (!lead) return null;
@@ -328,6 +369,58 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
       setVerificationError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsVerifyingRegistry(false);
+    }
+  };
+
+  const handleAddPersonSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!personForm.fullName.trim()) return;
+    setSavingPerson(true);
+    setPersonError(null);
+    try {
+      const res = await apiFetch(`/api/leads/${lead.id}/persons`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...personForm,
+          countryCode: lead.address?.countryCode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPersonError(data.error || 'Failed to add contact');
+        return;
+      }
+      setPersonForm({
+        fullName: '',
+        email: '',
+        phone: '',
+        linkedinUrl: '',
+        relationshipType: 'director',
+        jobTitle: '',
+        designation: '',
+        department: '',
+        isPrimaryContact: false,
+      });
+      setIsAddingPerson(false);
+      await fetchLinkedPersons(lead.id);
+    } catch (err: unknown) {
+      setPersonError(err instanceof Error ? err.message : 'Failed to link person');
+    } finally {
+      setSavingPerson(false);
+    }
+  };
+
+  const handleUnlinkPerson = async (relationshipId: string) => {
+    try {
+      const res = await apiFetch(`/api/leads/${lead.id}/persons/${relationshipId}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setLinkedPersons((prev) => prev.filter((item) => item.relationship.id !== relationshipId));
+      }
+    } catch {
+      // ignore
     }
   };
 
@@ -706,6 +799,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
         <div className="px-5 border-b border-slate-800 flex space-x-4 bg-slate-950/20 text-xs">
           {[
             { id: 'overview', label: 'Lead Facts & Profile' },
+            { id: 'contacts', label: `Decision-Makers (${linkedPersons.length})` },
             { id: 'web', label: 'Live Web Inspector (SSRF Safe)' },
             { id: 'ai', label: 'Gemini AI Assistant' },
             { id: 'timeline', label: `Provenance Timeline (${lead.sources.length})` },
@@ -1286,6 +1380,256 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     ))
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* 1B. DECISION-MAKERS & M:N RELATIONSHIPS TAB */}
+          {activeTab === 'contacts' && (
+            <div className="space-y-4 text-xs">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
+                      <Users className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Decision-Makers, Officers &amp; Contacts ({linkedPersons.length})</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Many-to-many links between persons and companies with role-specific job titles, designations, and departments.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingPerson(!isAddingPerson)}
+                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded flex items-center gap-1 text-xs transition shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{isAddingPerson ? 'Cancel' : 'Add / Link Contact'}</span>
+                  </button>
+                </div>
+
+                {isAddingPerson && (
+                  <form onSubmit={handleAddPersonSubmit} className="p-3.5 bg-slate-900 border border-slate-800 rounded-lg space-y-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Full Name *</label>
+                        <input
+                          type="text"
+                          required
+                          value={personForm.fullName}
+                          onChange={(e) => setPersonForm((p) => ({ ...p, fullName: e.target.value }))}
+                          placeholder="e.g. Astrid Solberg"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Email</label>
+                        <input
+                          type="email"
+                          value={personForm.email}
+                          onChange={(e) => setPersonForm((p) => ({ ...p, email: e.target.value }))}
+                          placeholder="astrid@company.no"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Phone</label>
+                        <input
+                          type="text"
+                          value={personForm.phone}
+                          onChange={(e) => setPersonForm((p) => ({ ...p, phone: e.target.value }))}
+                          placeholder="+47 22 34 56 78"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Relationship Type</label>
+                        <select
+                          value={personForm.relationshipType}
+                          onChange={(e) => setPersonForm((p) => ({ ...p, relationshipType: e.target.value }))}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2 py-1.5 text-xs"
+                        >
+                          <option value="founder">Founder</option>
+                          <option value="owner">Owner</option>
+                          <option value="director">Director</option>
+                          <option value="executive">Executive</option>
+                          <option value="officer">Officer</option>
+                          <option value="procurement_contact">Procurement Contact</option>
+                          <option value="sales_contact">Sales Contact</option>
+                          <option value="advisor">Advisor</option>
+                          <option value="employee">Employee</option>
+                          <option value="contact">Contact</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Job Title</label>
+                        <input
+                          type="text"
+                          value={personForm.jobTitle}
+                          onChange={(e) => setPersonForm((p) => ({ ...p, jobTitle: e.target.value }))}
+                          placeholder="Managing Director"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Designation</label>
+                        <input
+                          type="text"
+                          value={personForm.designation}
+                          onChange={(e) => setPersonForm((p) => ({ ...p, designation: e.target.value }))}
+                          placeholder="Board Member / VP"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Department</label>
+                        <input
+                          type="text"
+                          value={personForm.department}
+                          onChange={(e) => setPersonForm((p) => ({ ...p, department: e.target.value }))}
+                          placeholder="Executive / Procurement"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center gap-3 flex-1 min-w-[220px]">
+                        <input
+                          type="url"
+                          value={personForm.linkedinUrl}
+                          onChange={(e) => setPersonForm((p) => ({ ...p, linkedinUrl: e.target.value }))}
+                          placeholder="https://linkedin.com/in/..."
+                          className="flex-1 bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs font-mono"
+                        />
+                        <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={personForm.isPrimaryContact}
+                            onChange={(e) => setPersonForm((p) => ({ ...p, isPrimaryContact: e.target.checked }))}
+                            className="rounded border-slate-600"
+                          />
+                          <span>Primary Contact</span>
+                        </label>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={savingPerson}
+                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded text-xs"
+                      >
+                        {savingPerson ? 'Linking...' : 'Save & Link Person'}
+                      </button>
+                    </div>
+
+                    {personError && (
+                      <div className="p-2 bg-rose-950/40 border border-rose-800 rounded text-rose-300 text-xs">
+                        {personError}
+                      </div>
+                    )}
+                  </form>
+                )}
+
+                {loadingPersons ? (
+                  <div className="p-6 text-center text-slate-400 text-xs">Loading linked decision-makers...</div>
+                ) : linkedPersons.length === 0 ? (
+                  <div className="p-6 text-center text-slate-500 text-xs bg-slate-900/50 rounded-lg">
+                    No decision-makers or contacts linked to this company yet. Import a contact spreadsheet or click &ldquo;Add / Link Contact&rdquo;.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {linkedPersons.map(({ person, relationship, otherCompanies }) => (
+                      <div
+                        key={relationship.id}
+                        className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl space-y-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-white text-sm">{person.fullName}</span>
+                              {relationship.isPrimaryContact && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                  Primary Contact
+                                </span>
+                              )}
+                              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase">
+                                {relationship.relationshipType}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-300 flex items-center gap-2 mt-0.5 flex-wrap">
+                              {relationship.jobTitle && (
+                                <span className="inline-flex items-center gap-1">
+                                  <Briefcase className="w-3 h-3 text-slate-400" />
+                                  {relationship.jobTitle}
+                                </span>
+                              )}
+                              {relationship.designation && (
+                                <span className="text-slate-400">· {relationship.designation}</span>
+                              )}
+                              {relationship.department && (
+                                <span className="text-slate-400">· Dept: {relationship.department}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {getStatusBadge(person.verificationStatus)}
+                            <button
+                              type="button"
+                              onClick={() => handleUnlinkPerson(relationship.id)}
+                              className="p-1 text-slate-500 hover:text-rose-400 transition"
+                              title="Unlink from company"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-3 text-[11px] text-slate-300">
+                          {person.email && (
+                            <span className="inline-flex items-center gap-1 font-mono text-cyan-400">
+                              <Mail className="w-3 h-3" />
+                              {person.email}
+                            </span>
+                          )}
+                          {(person.phoneNormalized || person.phone) && (
+                            <span className="inline-flex items-center gap-1 font-mono text-emerald-400">
+                              <Phone className="w-3 h-3" />
+                              {person.phoneNormalized || person.phone}
+                            </span>
+                          )}
+                          {person.linkedinUrl && (
+                            <a
+                              href={person.linkedinUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-blue-400 hover:underline"
+                            >
+                              <Linkedin className="w-3 h-3" />
+                              <span>LinkedIn</span>
+                            </a>
+                          )}
+                        </div>
+
+                        {otherCompanies && otherCompanies.length > 0 && (
+                          <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5 text-[10px]">
+                            <span className="text-slate-500 uppercase font-semibold">Also linked to (M:N):</span>
+                            {otherCompanies.map((oc) => (
+                              <span
+                                key={oc.leadId}
+                                className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300"
+                              >
+                                {oc.companyName} ({oc.jobTitle || oc.relationshipType})
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

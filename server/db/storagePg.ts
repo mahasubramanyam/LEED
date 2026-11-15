@@ -35,6 +35,7 @@ import {
   ImportMappingTemplate,
   ImportBatchRecord,
   ImportBatchRowRecord,
+  NormalizedImportPerson,
 } from '../types.js';
 import { ImportExecutionPlan, ImportExecutionResult } from '../import/importService.js';
 import { findMatchingPerson } from '../import/dedupeClassifier.js';
@@ -2191,6 +2192,83 @@ export class PostgresStorage {
       return [];
     } finally {
       if (client) client.release();
+    }
+  }
+
+  public async linkPersonToLead(input: {
+    leadId: string;
+    person: NormalizedImportPerson;
+    actorEmail: string;
+  }): Promise<LinkedPersonWithRelationship[]> {
+    const pool = this.getClient();
+    const client = await pool.connect();
+    const now = new Date().toISOString();
+    try {
+      await client.query('BEGIN');
+      await this.ensureMigration005Tables(client);
+
+      const pRes = await client.query('SELECT * FROM persons');
+      const personsList = pRes.rows.map((r: any) => this.mapRowToPerson(r));
+      const rRes = await client.query('SELECT * FROM company_person_relationships');
+      const relsList = rRes.rows.map((r: any) => this.mapRowToRelationship(r));
+
+      const pMatch = findMatchingPerson(input.person, input.leadId, personsList, relsList);
+      let personId: string;
+
+      if (pMatch.matchedPerson) {
+        const { person: merged } = mergeImportedPersonSafely(
+          pMatch.matchedPerson,
+          input.person,
+          'Manual CRM Entry',
+          now
+        );
+        await this.upsertPersonInTransaction(client, merged, now);
+        personId = merged.id;
+      } else {
+        const created = buildPersonRecordFromImport({
+          person: input.person,
+          filename: 'Manual CRM Entry',
+          actorEmail: input.actorEmail,
+          now,
+        });
+        await this.upsertPersonInTransaction(client, created, now);
+        personId = created.id;
+      }
+
+      const rel = buildRelationshipRecord({
+        leadId: input.leadId,
+        personId,
+        person: input.person,
+        filename: 'Manual CRM Entry',
+        rowNumber: 1,
+        now,
+      });
+      rel.sourceName = 'Owner Manual Entry';
+      await this.upsertRelationshipInTransaction(client, rel, now);
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+    return this.getLeadPersons(input.leadId);
+  }
+
+  public async unlinkPersonFromLead(leadId: string, relationshipId: string): Promise<boolean> {
+    const pool = this.getClient();
+    const client = await pool.connect();
+    try {
+      const tbl = await client.query(`SELECT to_regclass('public.company_person_relationships') as tbl`);
+      if (!tbl.rows[0]?.tbl) return false;
+      const { rowCount } = await client.query(
+        'DELETE FROM company_person_relationships WHERE id = $1 AND lead_id = $2',
+        [relationshipId, leadId]
+      );
+      return (rowCount ?? 0) > 0;
+    } finally {
+      client.release();
     }
   }
 

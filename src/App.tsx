@@ -13,6 +13,7 @@ import { TasksView } from './components/TasksView.tsx';
 import { OwnerControlCentre } from './components/OwnerControlCentre.tsx';
 import { LeadDetailModal } from './components/LeadDetailModal.tsx';
 import { ImportModal } from './components/ImportModal.tsx';
+import { ImportWorkspace } from './components/ImportWorkspace.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { CountryMatrixView } from './components/CountryMatrixView.tsx';
 import {
@@ -642,6 +643,14 @@ export default function App() {
                   onDeleteLead={handleDeleteLead}
                   onBatchUpdateStage={handleBatchUpdateStage}
                   onBatchDelete={handleBatchDelete}
+                />
+              )}
+
+              {currentTab === 'import' && (
+                <ImportWorkspace
+                  existingLeads={leads}
+                  onImportComplete={() => fetchAllData()}
+                  onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
                 />
               )}
 

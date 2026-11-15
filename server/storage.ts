@@ -14,6 +14,7 @@ import {
   ImportMappingTemplate,
   ImportBatchRecord,
   ImportBatchRowRecord,
+  NormalizedImportPerson,
 } from './types.js';
 import { dbManager } from './db/pool.js';
 import { PostgresStorage } from './db/storagePg.js';
@@ -1130,6 +1131,90 @@ export class StorageManager implements ImportStorageAdapter {
     }
 
     return out;
+  }
+
+  public linkPersonToLead(input: {
+    leadId: string;
+    person: NormalizedImportPerson;
+    actorEmail: string;
+  }): LinkedPersonWithRelationship[] {
+    if (!this.db.persons) this.db.persons = [];
+    if (!this.db.companyPersonRelationships) this.db.companyPersonRelationships = [];
+    const now = new Date().toISOString();
+
+    const pMatch = findMatchingPerson(
+      input.person,
+      input.leadId,
+      this.db.persons,
+      this.db.companyPersonRelationships
+    );
+
+    let personId: string;
+    if (pMatch.matchedPerson) {
+      const idx = this.db.persons.findIndex((p) => p.id === pMatch.matchedPerson!.id);
+      const { person: merged } = mergeImportedPersonSafely(
+        this.db.persons[idx],
+        input.person,
+        'Manual CRM Entry',
+        now
+      );
+      this.db.persons[idx] = merged;
+      personId = merged.id;
+    } else {
+      const created = buildPersonRecordFromImport({
+        person: input.person,
+        filename: 'Manual CRM Entry',
+        actorEmail: input.actorEmail,
+        now,
+      });
+      this.db.persons.unshift(created);
+      personId = created.id;
+    }
+
+    const relType = input.person.relationshipType || 'contact';
+    const relIdx = this.db.companyPersonRelationships.findIndex(
+      (r) => r.leadId === input.leadId && r.personId === personId && r.relationshipType === relType
+    );
+
+    if (relIdx >= 0) {
+      const cur = this.db.companyPersonRelationships[relIdx];
+      this.db.companyPersonRelationships[relIdx] = {
+        ...cur,
+        jobTitle: input.person.jobTitle || cur.jobTitle,
+        designation: input.person.designation || cur.designation,
+        department: input.person.department || cur.department,
+        decisionMakerCategory: input.person.decisionMakerCategory || cur.decisionMakerCategory,
+        isPrimaryContact: cur.isPrimaryContact || Boolean(input.person.isPrimaryContact),
+        updatedAt: now,
+      };
+    } else {
+      const rel = buildRelationshipRecord({
+        leadId: input.leadId,
+        personId,
+        person: input.person,
+        filename: 'Manual CRM Entry',
+        rowNumber: 1,
+        now,
+      });
+      rel.sourceName = 'Owner Manual Entry';
+      this.db.companyPersonRelationships.unshift(rel);
+    }
+
+    this.saveDatabase(this.db);
+    return this.getLeadPersons(input.leadId);
+  }
+
+  public unlinkPersonFromLead(leadId: string, relationshipId: string): boolean {
+    if (!this.db.companyPersonRelationships) return false;
+    const prev = this.db.companyPersonRelationships.length;
+    this.db.companyPersonRelationships = this.db.companyPersonRelationships.filter(
+      (r) => !(r.id === relationshipId && r.leadId === leadId)
+    );
+    if (this.db.companyPersonRelationships.length !== prev) {
+      this.saveDatabase(this.db);
+      return true;
+    }
+    return false;
   }
 
   public getImportTemplates(): ImportMappingTemplate[] {
