@@ -737,3 +737,446 @@ describe('Phase 6 Final Remediation — Isolated Regression Suite', () => {
     assert.ok(cmp.conflicts.some((c) => c.field === 'registrationNumber'));
   });
 });
+
+describe('Phase 6 — Singapore ACRA Final Reliability Fix (HTTP 409 Regression)', () => {
+  const CONFIRMED_NINE_FIELDS = [
+    '_id',
+    'uen',
+    'issuance_agency_desc',
+    'uen_status_desc',
+    'entity_name',
+    'entity_type_desc',
+    'uen_issue_date',
+    'reg_street_name',
+    'reg_postal_code',
+  ];
+
+  const UNSUPPORTED_THIRTEEN_FIELDS = [
+    'issuance_agency_id',
+    'business_constitution_desc',
+    'company_type_desc',
+    'entity_status_description',
+    'registration_incorporation_date',
+    'block',
+    'street_name',
+    'level_no',
+    'unit_no',
+    'building_name',
+    'postal_code',
+    'primary_ssic_code',
+    'primary_ssic_description',
+  ];
+
+  function assertNoUnsupportedFieldsInUrl(urlStr: string) {
+    const u = new URL(urlStr);
+    const fieldsParam = u.searchParams.get('fields') || '';
+    const filtersParam = u.searchParams.get('filters') || '';
+    const fieldTokens = fieldsParam ? fieldsParam.split(',').map((s) => s.trim()) : [];
+    const filterKeys = filtersParam ? Object.keys(JSON.parse(filtersParam)) : [];
+
+    for (const badField of UNSUPPORTED_THIRTEEN_FIELDS) {
+      assert.equal(
+        fieldTokens.includes(badField),
+        false,
+        `Request fields= must not include unsupported field "${badField}" (url=${urlStr})`
+      );
+      assert.equal(
+        filterKeys.includes(badField),
+        false,
+        `Request filters= must not include unsupported field "${badField}" (url=${urlStr})`
+      );
+    }
+  }
+
+  it('1. Empty placeholder metadata ({}) and synthetic ranking fields do not overwrite a valid nine-field schema', async () => {
+    const sg = new SgAcraConnector();
+    let callIdx = 0;
+
+    globalThis.fetch = async () => {
+      callIdx += 1;
+      if (callIdx === 1) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            result: {
+              total: 2127089,
+              fields: CONFIRMED_NINE_FIELDS.map((id) => ({ id, type: id === '_id' ? 'int4' : 'text' })),
+              records: [],
+            },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          success: true,
+          result: {
+            total: 2,
+            fields: [
+              { type: 'int4', id: '_id' },
+              {},
+              {},
+              { type: 'int8', id: '_full_count' },
+              { type: 'float4', id: 'rank' },
+            ],
+            records: [
+              { uen: '198600294G', entity_name: 'DBS VICKERS SECURITIES PTE LTD', uen_status_desc: 'Registered' },
+            ],
+          },
+        }),
+        { status: 200 }
+      );
+    };
+
+    const val = await sg.validateConnection(makeContext());
+    assert.equal(val.ok, true);
+    assert.deepEqual(sg.getDatasetMetadata()?.fields, CONFIRMED_NINE_FIELDS);
+
+    const searchRes = await sg.search({ query: 'DBS', countryCode: 'SG' }, makeContext());
+    assert.equal(searchRes.results.length, 1);
+    assert.deepEqual(sg.getDatasetMetadata()?.fields, CONFIRMED_NINE_FIELDS);
+  });
+
+  it('2. Malformed metadata (non-array, strings, empty strings, missing id) does not overwrite the valid schema', async () => {
+    const sg = new SgAcraConnector();
+    let mode: 'valid' | 'empty_array' | 'malformed_string' | 'missing_ids' = 'valid';
+
+    globalThis.fetch = async () => {
+      const fieldsPayload =
+        mode === 'valid'
+          ? CONFIRMED_NINE_FIELDS.map((id) => ({ id, type: 'text' }))
+          : mode === 'empty_array'
+          ? []
+          : mode === 'malformed_string'
+          ? 'corrupted-schema'
+          : [{ id: '' }, { id: '   ' }, { name: 'uen' }, null, 42];
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          result: {
+            total: 1,
+            fields: fieldsPayload,
+            records: [
+              { uen: '198600294G', entity_name: 'DBS VICKERS SECURITIES PTE LTD', uen_status_desc: 'Registered' },
+            ],
+          },
+        }),
+        { status: 200 }
+      );
+    };
+
+    await sg.validateConnection(makeContext());
+    assert.deepEqual(sg.getDatasetMetadata()?.fields, CONFIRMED_NINE_FIELDS);
+
+    for (const badMode of ['empty_array', 'malformed_string', 'missing_ids'] as const) {
+      mode = badMode;
+      await sg.search({ query: `DBS-${badMode}`, countryCode: 'SG' }, makeContext());
+      assert.deepEqual(sg.getDatasetMetadata()?.fields, CONFIRMED_NINE_FIELDS);
+    }
+  });
+
+  it('3 & 4 & 7. Search and Lookup both work without calling validateConnection() first and never request unsupported fields', async () => {
+    const sgSearch = new SgAcraConnector();
+    const sgLookup = new SgAcraConnector();
+    const seenUrls: string[] = [];
+
+    globalThis.fetch = async (input) => {
+      const urlStr = String(input);
+      seenUrls.push(urlStr);
+      assertNoUnsupportedFieldsInUrl(urlStr);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          result: {
+            total: 1,
+            fields: [{}, {}],
+            records: [
+              {
+                _id: 1,
+                uen: '198600294G',
+                issuance_agency_desc: 'ACRA',
+                uen_status_desc: 'Registered',
+                entity_name: 'DBS VICKERS SECURITIES (SINGAPORE) PTE LTD',
+                entity_type_desc: 'Local Company',
+                uen_issue_date: '2008-09-09',
+                reg_street_name: 'MARINA BOULEVARD',
+                reg_postal_code: '018982',
+              },
+            ],
+          },
+        }),
+        { status: 200 }
+      );
+    };
+
+    const sRes = await sgSearch.search({ query: 'DBS VICKERS', countryCode: 'SG' }, makeContext());
+    assert.equal(sRes.results.length, 1);
+    assert.equal(sRes.results[0].company.companyStatus, 'active');
+
+    const lRes = await sgLookup.lookupById({ externalId: '198600294G', countryCode: 'SG' }, makeContext());
+    assert.equal(lRes.found, true);
+    assert.equal(lRes.result?.company.registrationNumber, '198600294G');
+
+    assert.equal(seenUrls.length, 2);
+    for (const urlStr of seenUrls) {
+      const u = new URL(urlStr);
+      assert.deepEqual(u.searchParams.get('fields')?.split(','), CONFIRMED_NINE_FIELDS);
+    }
+  });
+
+  it('5 & 6 & Live-Repro. validateConnection -> {} projected search -> page 2 pagination and consecutive UEN lookups succeed cleanly', async () => {
+    const sg = new SgAcraConnector();
+    const seenUrls: string[] = [];
+
+    globalThis.fetch = async (input) => {
+      const urlStr = String(input);
+      seenUrls.push(urlStr);
+      assertNoUnsupportedFieldsInUrl(urlStr);
+
+      const u = new URL(urlStr);
+      const hasFieldsParam = u.searchParams.has('fields');
+      const filtersRaw = u.searchParams.get('filters');
+      const offset = Number(u.searchParams.get('offset') || '0');
+
+      // Validate connection (no fields param) -> returns full 9-field schema
+      if (!hasFieldsParam) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            result: {
+              total: 2127089,
+              fields: CONFIRMED_NINE_FIELDS.map((id) => ({ id, type: id === '_id' ? 'int4' : 'text' })),
+              records: [{ uen: '198600294G', entity_name: 'DBS VICKERS', uen_status_desc: 'Registered' }],
+            },
+          }),
+          { status: 200 }
+        );
+      }
+
+      // When fields param is present, mimic live data.gov.sg returning `{}` placeholder objects!
+      if (filtersRaw) {
+        const parsed = JSON.parse(filtersRaw) as { uen?: string };
+        if (parsed.uen === '198600294G') {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              result: {
+                total: 1,
+                fields: [{}, {}, {}],
+                records: [
+                  {
+                    uen: '198600294G',
+                    entity_name: 'DBS VICKERS SECURITIES (SINGAPORE) PTE LTD',
+                    uen_status_desc: 'Registered',
+                  },
+                ],
+              },
+            }),
+            { status: 200 }
+          );
+        }
+        if (parsed.uen === '195800116D') {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              result: {
+                total: 1,
+                fields: [{}, {}, {}],
+                records: [
+                  {
+                    uen: '195800116D',
+                    entity_name: 'FAR EASTERN BANK LIMITED',
+                    uen_status_desc: 'Deregistered',
+                  },
+                ],
+              },
+            }),
+            { status: 200 }
+          );
+        }
+      }
+
+      if (offset === 0) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            result: {
+              total: 4,
+              fields: [{}, {}, {}],
+              records: [
+                { uen: '200803195Z', entity_name: 'ALPHA ONE PTE LTD', uen_status_desc: 'Registered' },
+                { uen: '201511638H', entity_name: 'BETA TWO PTE LTD', uen_status_desc: 'Registered' },
+              ],
+            },
+          }),
+          { status: 200 }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          result: {
+            total: 4,
+            fields: [{}, {}, {}],
+            records: [
+              { uen: '196800152R', entity_name: 'GAMMA THREE LTD', uen_status_desc: 'Deregistered' },
+              { uen: '201333447D', entity_name: 'DELTA FOUR PTE LTD', uen_status_desc: 'Registered' },
+            ],
+          },
+        }),
+        { status: 200 }
+      );
+    };
+
+    // Exact live sequence reproduction:
+    // 1. validateConnection
+    const val = await sg.validateConnection(makeContext());
+    assert.equal(val.ok, true);
+    assert.deepEqual(sg.getDatasetMetadata()?.fields, CONFIRMED_NINE_FIELDS);
+
+    // 2. First projected search (returns `{}` field metadata) -> page 1
+    const page1 = await sg.search({ query: 'SINGAPORE', countryCode: 'SG', page: 1, pageSize: 2 }, makeContext());
+    assert.equal(page1.results.length, 2);
+    assert.equal(page1.pagination.hasMore, true);
+    assert.deepEqual(sg.getDatasetMetadata()?.fields, CONFIRMED_NINE_FIELDS);
+
+    // 3. Second paginated search -> page 2 (must succeed without HTTP 409/unsupported fields)
+    const page2 = await sg.search({ query: 'SINGAPORE', countryCode: 'SG', page: 2, pageSize: 2 }, makeContext());
+    assert.equal(page2.results.length, 2);
+    assert.deepEqual(
+      page2.results.map((r) => r.externalSourceId),
+      ['196800152R', '201333447D']
+    );
+    assert.equal(page2.results[0].company.companyStatus, 'dissolved');
+
+    // 4. Consecutive lookups for two different UENs (registered + deregistered)
+    const lookup1 = await sg.lookupById({ externalId: '198600294G', countryCode: 'SG' }, makeContext());
+    const lookup2 = await sg.lookupById({ externalId: '195800116D', countryCode: 'SG' }, makeContext());
+    assert.equal(lookup1.found, true);
+    assert.equal(lookup1.result?.company.companyStatus, 'active');
+    assert.equal(lookup2.found, true);
+    assert.equal(lookup2.result?.company.companyStatus, 'dissolved');
+    assert.equal(seenUrls.length, 5);
+  });
+
+  it('8. Indexed UEN and postal-code filtering continue to work without full-text q', async () => {
+    const sg = new SgAcraConnector();
+    const seenUrls: URL[] = [];
+
+    globalThis.fetch = async (input) => {
+      const u = new URL(String(input));
+      seenUrls.push(u);
+      assertNoUnsupportedFieldsInUrl(u.toString());
+      return new Response(
+        JSON.stringify({
+          success: true,
+          result: {
+            total: 1,
+            fields: [{}],
+            records: [
+              {
+                uen: '201201936C',
+                entity_name: 'MARINA TECH PTE. LTD.',
+                uen_status_desc: 'Registered',
+                reg_postal_code: '018956',
+              },
+            ],
+          },
+        }),
+        { status: 200 }
+      );
+    };
+
+    const uenRes = await sg.search({ query: '201201936C', countryCode: 'SG' }, makeContext());
+    assert.equal(uenRes.results.length, 1);
+    assert.equal(seenUrls[0].searchParams.get('q'), null);
+    assert.equal(seenUrls[0].searchParams.get('filters'), JSON.stringify({ uen: '201201936C' }));
+
+    const postRes = await sg.search({ query: '018956', countryCode: 'SG' }, makeContext());
+    assert.equal(postRes.results.length, 1);
+    assert.equal(seenUrls[1].searchParams.get('q'), null);
+    assert.equal(seenUrls[1].searchParams.get('filters'), JSON.stringify({ reg_postal_code: '018956' }));
+  });
+
+  it('9. Unsupported SSIC and unconfirmed field filters are clearly reported rather than silently applied', async () => {
+    const sg = new SgAcraConnector();
+    const seenUrls: URL[] = [];
+
+    globalThis.fetch = async (input) => {
+      const u = new URL(String(input));
+      seenUrls.push(u);
+      assertNoUnsupportedFieldsInUrl(u.toString());
+      return new Response(
+        JSON.stringify({
+          success: true,
+          result: {
+            total: 1,
+            fields: [{}],
+            records: [
+              {
+                uen: '198600294G',
+                entity_name: 'DBS VICKERS SECURITIES (SINGAPORE) PTE LTD',
+                uen_status_desc: 'Registered',
+              },
+            ],
+          },
+        }),
+        { status: 200 }
+      );
+    };
+
+    // Case A: explicit unsupported filters + SSIC industry code
+    const resA = await sg.search(
+      {
+        query: 'DBS',
+        countryCode: 'SG',
+        industry: '62011',
+        filters: {
+          primary_ssic_code: '62011',
+          uen_status_desc: 'Registered',
+        },
+      },
+      makeContext()
+    );
+
+    assert.equal(resA.results.length, 1);
+    assert.deepEqual(seenUrls[0].searchParams.get('filters'), JSON.stringify({ uen_status_desc: 'Registered' }));
+    assert.deepEqual(resA.providerMetadata?.appliedFilters, { uen_status_desc: 'Registered' });
+    const unsupportedA = (resA.providerMetadata?.unsupportedFilters || []) as Array<{ field: string }>;
+    assert.ok(unsupportedA.some((f) => f.field === 'primary_ssic_code'));
+    assert.ok(resA.notes.some((n) => n.includes('primary_ssic_code')));
+
+    // Case B: 5-digit SSIC code as main query must not emit primary_ssic_code filter
+    const resB = await sg.search({ query: '62011', countryCode: 'SG' }, makeContext());
+    assert.equal(seenUrls[1].searchParams.get('filters'), null);
+    assert.equal(seenUrls[1].searchParams.get('q'), '62011');
+    const unsupportedB = (resB.providerMetadata?.unsupportedFilters || []) as Array<{ field: string }>;
+    assert.ok(unsupportedB.some((f) => f.field === 'primary_ssic_code'));
+    assert.ok(resB.notes.some((n) => n.includes('primary_ssic_code')));
+  });
+
+  it('10. Genuine upstream HTTP errors (e.g. 409/503) and incomplete responses produce ConnectorError rather than false success', async () => {
+    const sg = new SgAcraConnector();
+
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ success: false, error: { message: 'Invalid field' } }), {
+        status: 409,
+        statusText: 'Conflict',
+      });
+    await assert.rejects(
+      () => sg.lookupById({ externalId: '198600294G', countryCode: 'SG' }, makeContext()),
+      (err: any) => err instanceof ConnectorError && err.httpStatus === 409
+    );
+
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ success: true, result: { total: 25, records: [] } }), { status: 200 });
+    await assert.rejects(
+      () => sg.search({ query: 'DBS', countryCode: 'SG', page: 1, pageSize: 5 }, makeContext()),
+      (err: any) => err instanceof ConnectorError && err.category === 'invalid_response'
+    );
+  });
+});
+

@@ -92,54 +92,45 @@ const DEFAULT_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_LOOKUP_CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 150;
 
-const ACRA_SELECT_FIELDS = [
+const ACRA_CONFIRMED_FIELDS = [
+  '_id',
   'uen',
-  'issuance_agency_id',
+  'issuance_agency_desc',
+  'uen_status_desc',
   'entity_name',
   'entity_type_desc',
-  'business_constitution_desc',
-  'company_type_desc',
-  'entity_status_description',
-  'uen_status_desc',
-  'registration_incorporation_date',
   'uen_issue_date',
-  'block',
-  'street_name',
-  'level_no',
-  'unit_no',
-  'building_name',
-  'postal_code',
   'reg_street_name',
   'reg_postal_code',
-  'primary_ssic_code',
-  'primary_ssic_description',
-];
+] as const;
 
-const ACRA_INDEXED_FILTER_FIELDS = new Set([
+const ACRA_CONFIRMED_FIELD_SET = new Set<string>(ACRA_CONFIRMED_FIELDS);
+
+const ACRA_INDEXED_FILTER_FIELDS = new Set<string>([
   'uen',
   'reg_postal_code',
-  'postal_code',
-  'primary_ssic_code',
   'uen_status_desc',
-  'entity_status_description',
   'entity_type_desc',
+  'issuance_agency_desc',
 ]);
+
+const ACRA_SYNTHETIC_RESULT_FIELDS = new Set<string>(['_full_count', 'rank']);
 
 const SG_ACRA_METADATA: ConnectorMetadata = {
   id: 'conn-sg-acra',
   name: 'Singapore ACRA Entities (data.gov.sg)',
   shortName: 'Singapore ACRA',
-  version: '4.1.0',
+  version: '4.1.1',
   sourceCategory: 'government_registry',
   accessMode: 'live_api',
   description:
-    'Official Singapore ACRA Registered Entities open dataset via data.gov.sg (UEN, legal name, entity status, SSIC industry classification, and registered office address). Note: transactional BizFile+ officer profiles require SingPass / ACRA API Mall.',
+    'Official Singapore ACRA Registered Entities open dataset via data.gov.sg (UEN, legal name, entity status, entity type, issuance agency, and registered street/postal address). Note: SSIC industry classification and transactional BizFile+ officer profiles are not included in this open dataset.',
   supportedCountries: ['SG'],
   supportsAllCountries: false,
   supportsRegionFilter: false,
   supportsCityFilter: false,
   supportsPostalCodeFilter: true,
-  supportsIndustryFilter: true,
+  supportsIndustryFilter: false,
   supportedIdentifierTypes: ['SG_UEN'],
   capabilities: ['company_search', 'registry_lookup', 'pagination', 'connection_test'],
   credentialRequirements: {
@@ -231,23 +222,66 @@ export class SgAcraConnector implements IConnector {
   }
 
   private updateDatasetMetadataCache(
-    fields?: SgAcraFieldMeta[],
+    fields?: unknown,
     total?: number
   ): SgAcraDatasetMetadataCache | null {
-    if (!Array.isArray(fields) || fields.length === 0) {
-      return this.getDatasetMetadata();
+    const existingValid = this.getDatasetMetadata();
+    const validItems: Array<{ id: string; type?: string }> = [];
+    let sawPlaceholderOrInvalidEntry = false;
+
+    if (Array.isArray(fields)) {
+      for (const entry of fields) {
+        if (!entry || typeof entry !== 'object') {
+          sawPlaceholderOrInvalidEntry = true;
+          continue;
+        }
+        const rawId = (entry as { id?: unknown }).id;
+        if (typeof rawId !== 'string' || !rawId.trim()) {
+          sawPlaceholderOrInvalidEntry = true;
+          continue;
+        }
+        const cleanId = rawId.trim();
+        if (ACRA_SYNTHETIC_RESULT_FIELDS.has(cleanId)) continue;
+        const rawType = (entry as { type?: unknown }).type;
+        validItems.push({
+          id: cleanId,
+          type: typeof rawType === 'string' && rawType.trim() ? rawType.trim() : undefined,
+        });
+      }
     }
+
+    // Never overwrite an existing valid schema cache with placeholder objects ({}),
+    // partial schema fragments (e.g. only `_id` + `{}`), empty arrays, or malformed metadata.
+    const confirmedItems = validItems.filter((item) => ACRA_CONFIRMED_FIELD_SET.has(item.id));
+    const confirmedIdSet = new Set(confirmedItems.map((i) => i.id));
+    const hasCoreEntityFields = confirmedIdSet.has('uen') && confirmedIdSet.has('entity_name');
+
+    if (sawPlaceholderOrInvalidEntry || !hasCoreEntityFields || confirmedItems.length === 0) {
+      if (existingValid && typeof total === 'number' && Number.isFinite(total)) {
+        this.datasetMetadataCache = {
+          ...existingValid,
+          totalRecords: total,
+        };
+        return this.getDatasetMetadata();
+      }
+      return existingValid;
+    }
+
     const now = Date.now();
-    const fieldIds = fields.map((f) => f.id).filter(Boolean);
+    const fieldIds = Array.from(confirmedIdSet);
     const fieldTypes: Record<string, string> = {};
-    for (const f of fields) {
-      if (f.id && f.type) fieldTypes[f.id] = f.type;
+    for (const f of confirmedItems) {
+      if (f.type) fieldTypes[f.id] = f.type;
     }
+
     this.datasetMetadataCache = {
       resourceId: ACRA_RESOURCE_ID,
       fields: fieldIds,
       fieldTypes,
-      totalRecords: typeof total === 'number' ? total : this.datasetMetadataCache?.totalRecords,
+      totalRecords:
+        typeof total === 'number' && Number.isFinite(total)
+          ? total
+          : existingValid?.totalRecords,
       cachedAt: now,
       expiresAt: now + this.metadataCacheTtlMs,
     };
@@ -283,25 +317,47 @@ export class SgAcraConnector implements IConnector {
     const meta = this.getDatasetMetadata();
     if (meta && meta.fields.length > 0) {
       const available = new Set(meta.fields);
-      const supported = ACRA_SELECT_FIELDS.filter((f) => available.has(f));
-      if (supported.length > 0) return supported.join(',');
+      if (available.has('uen') && available.has('entity_name')) {
+        const supported = ACRA_CONFIRMED_FIELDS.filter((f) => available.has(f));
+        if (supported.length > 0) return supported.join(',');
+      }
     }
-    return ACRA_SELECT_FIELDS.join(',');
+    return ACRA_CONFIRMED_FIELDS.join(',');
   }
 
   private filterSupportedCkanFilters(
     filters: Record<string, string>
-  ): Record<string, string> {
+  ): {
+    applied: Record<string, string>;
+    rejected: Array<{ field: string; value: string; reason: string }>;
+  } {
     const meta = this.getDatasetMetadata();
     const available = meta && meta.fields.length > 0 ? new Set(meta.fields) : null;
-    const out: Record<string, string> = {};
+    const applied: Record<string, string> = {};
+    const rejected: Array<{ field: string; value: string; reason: string }> = [];
+
     for (const [k, v] of Object.entries(filters)) {
       if (!v) continue;
-      if (available && !available.has(k)) continue;
-      if (!available && !ACRA_INDEXED_FILTER_FIELDS.has(k)) continue;
-      out[k] = v;
+      if (!ACRA_INDEXED_FILTER_FIELDS.has(k)) {
+        rejected.push({
+          field: k,
+          value: v,
+          reason: `Field "${k}" is not part of the confirmed live data.gov.sg ACRA dataset schema.`,
+        });
+        continue;
+      }
+      if (available && !available.has(k)) {
+        rejected.push({
+          field: k,
+          value: v,
+          reason: `Field "${k}" is unavailable in cached ACRA dataset metadata.`,
+        });
+        continue;
+      }
+      applied[k] = v;
     }
-    return out;
+
+    return { applied, rejected };
   }
 
   private async fetchWithTimeout<T>(
@@ -558,12 +614,13 @@ export class SgAcraConnector implements IConnector {
     const offset = (page - 1) * pageSize;
 
     const postalFilter = request.postalCode?.trim().toLowerCase() || '';
-    const industryFilter = (request.industry || request.category || request.businessType || '')
-      .trim()
-      .toLowerCase();
+    const industryRaw = (request.industry || request.category || request.businessType || '').trim();
+    const industryFilter = industryRaw.toLowerCase();
 
-    // Build selective CKAN query, avoiding unnecessary full-text `q` when indexed filters apply
+    // Build selective CKAN query, avoiding unnecessary full-text `q` when confirmed indexed filters apply.
+    // Never issue filters on absent fields such as `primary_ssic_code` or `entity_status_description`.
     const rawCkanFilters: Record<string, string> = {};
+    const unsupportedFilters: Array<{ field: string; value: string; reason: string }> = [];
     let useFullTextQ = false;
     let queryStrategy = 'full_text_search';
     const compactQuery = query.replace(/\s+/g, '');
@@ -574,29 +631,51 @@ export class SgAcraConnector implements IConnector {
     } else if (/^\d{6}$/.test(compactQuery)) {
       rawCkanFilters.reg_postal_code = compactQuery;
       queryStrategy = 'indexed_postal_filter';
-    } else if (/^\d{5}$/.test(compactQuery)) {
-      rawCkanFilters.primary_ssic_code = compactQuery;
-      queryStrategy = 'indexed_ssic_filter';
     } else {
       useFullTextQ = true;
+      if (/^\d{5}$/.test(compactQuery)) {
+        unsupportedFilters.push({
+          field: 'primary_ssic_code',
+          value: compactQuery,
+          reason:
+            'SSIC code filtering ("primary_ssic_code") is not supported by the live data.gov.sg ACRA dataset schema; executed text search without SSIC filter.',
+        });
+      }
+      if (/^\d{6}$/.test(postalFilter)) {
+        rawCkanFilters.reg_postal_code = postalFilter;
+      }
       if (request.filters) {
         for (const [k, v] of Object.entries(request.filters)) {
-          if (typeof v === 'string' && v.trim() && ACRA_INDEXED_FILTER_FIELDS.has(k)) {
+          if (typeof v === 'string' && v.trim()) {
             rawCkanFilters[k] = v.trim();
           }
         }
       }
       if (/^\d{5}$/.test(industryFilter)) {
-        rawCkanFilters.primary_ssic_code = industryFilter;
+        unsupportedFilters.push({
+          field: 'primary_ssic_code',
+          value: industryRaw,
+          reason:
+            'SSIC code filtering ("primary_ssic_code") is not supported because "primary_ssic_code" is absent from the confirmed live ACRA dataset schema.',
+        });
       }
     }
 
-    const ckanFilters = this.filterSupportedCkanFilters(rawCkanFilters);
+    const filterCheck = this.filterSupportedCkanFilters(rawCkanFilters);
+    const ckanFilters = filterCheck.applied;
+    for (const rej of filterCheck.rejected) {
+      if (!unsupportedFilters.some((u) => u.field === rej.field && u.value === rej.value)) {
+        unsupportedFilters.push(rej);
+      }
+    }
+
     const cacheKey = JSON.stringify({
       resourceId: ACRA_RESOURCE_ID,
       strategy: queryStrategy,
       q: useFullTextQ ? query.toLowerCase() : undefined,
       filters: ckanFilters,
+      requestedFilters: request.filters || undefined,
+      unsupportedFilters,
       page,
       pageSize,
       postalFilter,
@@ -699,10 +778,11 @@ export class SgAcraConnector implements IConnector {
       }
 
       const retrievedAt = new Date().toISOString();
+      const applyLocalIndustryFilter = Boolean(industryFilter) && !/^\d{5}$/.test(industryFilter);
       const filtered = records.filter((rec) => {
         const post = (rec.reg_postal_code || rec.postal_code || '').toLowerCase();
         if (postalFilter && !post.startsWith(postalFilter)) return false;
-        if (industryFilter) {
+        if (applyLocalIndustryFilter) {
           const hay = `${rec.primary_ssic_description || ''} ${rec.primary_ssic_code || ''} ${
             rec.entity_type_desc || ''
           }`.toLowerCase();
@@ -733,6 +813,9 @@ export class SgAcraConnector implements IConnector {
       if (request.region?.trim()) {
         notes.push(`Singapore is a city-state; region filter "${request.region.trim()}" is not required.`);
       }
+      for (const u of unsupportedFilters) {
+        notes.push(`Unsupported filter "${u.field}" (value: "${u.value}") was not applied: ${u.reason}`);
+      }
 
       const responseObj: ConnectorSearchResponse = {
         results,
@@ -750,13 +833,15 @@ export class SgAcraConnector implements IConnector {
         providerMetadata: {
           queryStrategy,
           ckanFilters,
+          appliedFilters: ckanFilters,
+          unsupportedFilters,
           usedFullTextQ: useFullTextQ,
           latencyMs,
           timeoutMs,
           cacheHit: false,
           deduped: false,
           datasetMetadataCached: Boolean(metaSnapshot),
-          datasetFieldCount: metaSnapshot?.fields.length ?? 0,
+          datasetFieldCount: metaSnapshot?.fields.length ?? ACRA_CONFIRMED_FIELDS.length,
         },
       };
 
