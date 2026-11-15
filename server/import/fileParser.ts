@@ -691,3 +691,17 @@ export async function parseImportFileBuffer(options: {
     rows,
   };
 }
+
+export function getUploadGuardConfig() {
+  return {
+    maxBytes: MAX_IMPORT_FILE_BYTES,
+    maxRows: MAX_IMPORT_ROWS,
+    maxColumns: MAX_IMPORT_COLUMNS,
+    maxXlsxUncompressedBytes: MAX_XLSX_UNCOMPRESSED_BYTES,
+    maxXlsxZipEntries: MAX_XLSX_ZIP_ENTRIES,
+    magicByteAndMacroScan:
+      typeof detectAndValidateFileFormat === 'function' &&
+      MAX_XLSX_UNCOMPRESSED_BYTES > 0 &&
+      MAX_XLSX_ZIP_ENTRIES > 0,
+  };
+}

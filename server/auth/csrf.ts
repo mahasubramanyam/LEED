@@ -6,17 +6,21 @@ import { normalizeClientIp } from './rateLimit.js';
 const CSRF_HEADER_NAME = 'x-leed-csrf-token';
 const CSRF_COOKIE_NAME = 'leed_csrf';
 
+export const CSRF_COOKIE_OPTIONS = {
+  httpOnly: false, // Frontend reads this to attach x-leed-csrf-token header
+  secure: true,
+  sameSite: 'none' as const,
+  partitioned: true,
+  path: '/',
+};
+
 export function generateCsrfToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
 export function setCsrfCookie(res: Response, token: string): void {
   res.cookie(CSRF_COOKIE_NAME, token, {
-    httpOnly: false, // Frontend reads this to attach x-leed-csrf-token header
-    secure: true,
-    sameSite: 'none',
-    partitioned: true,
-    path: '/',
+    ...CSRF_COOKIE_OPTIONS,
     maxAge: 7 * 24 * 60 * 60 * 1000,
   } as any);
 }

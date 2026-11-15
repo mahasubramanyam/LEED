@@ -36,7 +36,7 @@ export function buildContentSecurityPolicy(isProd: boolean): string {
 export function securityHeadersMiddleware(isProd: boolean) {
   const csp = buildContentSecurityPolicy(isProd);
 
-  return (req: Request, res: Response, next: NextFunction): void => {
+  return function leedSecurityHeadersMiddleware(req: Request, res: Response, next: NextFunction): void {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader(

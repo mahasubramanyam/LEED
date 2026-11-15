@@ -3,13 +3,19 @@ import { redactSecrets } from '../connectors/core/errors.js';
 const PG_DETAIL_PATTERNS = [
   /relation "[^"]+" does not exist/i,
   /column "[^"]+" (?:of relation "[^"]+" )?does not exist/i,
+  /database "[^"]+" does not exist/i,
+  /role "[^"]+" does not exist/i,
   /duplicate key value violates unique constraint/i,
-  /violates foreign key constraint/i,
-  /violates check constraint/i,
-  /violates not-null constraint/i,
+  /violates .* constraint/i,
+  /null value in column/i,
+  /value too long for type/i,
   /syntax error at or near/i,
   /invalid input syntax for type/i,
   /permission denied for (?:table|relation|schema)/i,
+  /password authentication failed/i,
+  /no pg_hba\.conf entry/i,
+  /could not serialize access/i,
+  /deadlock detected/i,
   /DETAIL:\s+/i,
   /STATEMENT:\s+/i,
   /pg_catalog\./i,
@@ -17,6 +23,9 @@ const PG_DETAIL_PATTERNS = [
   /INSERT\s+INTO\s+/i,
   /UPDATE\s+\S+\s+SET\s+/i,
   /DELETE\s+FROM\s+/i,
+  /Cannot read propert/i,
+  /is not a function/i,
+  /\b(?:ENOENT|EACCES|EPERM)\b/i,
 ];
 
 const INTERNAL_PATH_PATTERN = /(?:\/app\/applet\/|\/Users\/|\/home\/|[A-Za-z]:\\)[^\s:)]+(?::\d+(?::\d+)?)?/g;

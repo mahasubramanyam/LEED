@@ -5,6 +5,14 @@ import { OwnerUser } from './session.js';
 
 export const SESSION_COOKIE_NAME = 'leed_session';
 
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none' as const,
+  partitioned: true,
+  path: '/',
+};
+
 // Extend Express Request interface to include authenticated owner
 declare global {
   namespace Express {
@@ -18,22 +26,14 @@ declare global {
 export function setSessionCookie(res: Response, token: string): void {
   // Cross-origin iframe deployment in Google AI Studio requires SameSite=None, Secure, and Partitioned (CHIPS)
   res.cookie(SESSION_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    partitioned: true,
-    path: '/',
+    ...SESSION_COOKIE_OPTIONS,
     maxAge: SESSION_DURATION_MS,
   } as any);
 }
 
 export function clearSessionCookie(res: Response): void {
   res.clearCookie(SESSION_COOKIE_NAME, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    partitioned: true,
-    path: '/',
+    ...SESSION_COOKIE_OPTIONS,
   } as any);
 }
 

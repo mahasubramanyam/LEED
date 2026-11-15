@@ -1984,55 +1984,161 @@ export class PostgresStorage {
   }
 
   public async getDatabaseSecurityStatus(): Promise<{
+    diagnosticState: 'verified' | 'unavailable' | 'error';
+    tlsProbeStatus: 'verified' | 'unavailable' | 'error';
+    auditTriggerProbeStatus: 'verified' | 'unavailable' | 'error';
+    sessionProbeStatus: 'verified' | 'unavailable' | 'error';
+    credentialProbeStatus: 'verified' | 'unavailable' | 'error';
     tlsEncrypted: boolean;
     sslSetting: string;
     auditUpdateDeleteTrigger: boolean;
     auditTruncateTrigger: boolean;
-    activeSessionCount: number;
-    totalSessionCount: number;
-    encryptedCredentialCount: number;
+    activeSessionCount: number | null;
+    totalSessionCount: number | null;
+    encryptedCredentialCount: number | null;
   }> {
-    const pool = this.getClient();
+    let pool: pg.Pool;
+    try {
+      pool = this.getClient();
+    } catch {
+      return {
+        diagnosticState: 'unavailable',
+        tlsProbeStatus: 'unavailable',
+        auditTriggerProbeStatus: 'unavailable',
+        sessionProbeStatus: 'unavailable',
+        credentialProbeStatus: 'unavailable',
+        tlsEncrypted: false,
+        sslSetting: 'unavailable',
+        auditUpdateDeleteTrigger: false,
+        auditTruncateTrigger: false,
+        activeSessionCount: null,
+        totalSessionCount: null,
+        encryptedCredentialCount: null,
+      };
+    }
+
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      const [sslSettingRes, sslUsedRes, trigRes, sessRes, credRes] = await Promise.all([
-        client.query(`SHOW ssl`).catch(() => ({ rows: [{ ssl: 'unknown' }] })),
-        client
-          .query(`SELECT ssl_is_used() as used`)
-          .catch(() => ({ rows: [{ used: null }] })),
-        client.query(
+
+      let tlsProbeStatus: 'verified' | 'error' = 'verified';
+      let sslSetting = 'unknown';
+      let tlsEncrypted = false;
+      try {
+        const [sslSettingSettled, sslUsedSettled] = await Promise.allSettled([
+          client.query(`SHOW ssl`),
+          client.query(`SELECT ssl_is_used() as used`),
+        ]);
+        if (sslSettingSettled.status === 'rejected' && sslUsedSettled.status === 'rejected') {
+          tlsProbeStatus = 'error';
+          sslSetting = 'error';
+          console.warn('[DB Security] TLS probe failed.');
+        } else {
+          if (sslSettingSettled.status === 'fulfilled') {
+            sslSetting = String(sslSettingSettled.value.rows[0]?.ssl || 'unknown');
+          }
+          const sslUsedVal =
+            sslUsedSettled.status === 'fulfilled' ? sslUsedSettled.value.rows[0]?.used : null;
+          tlsEncrypted = sslUsedVal === true || sslSetting.toLowerCase() === 'on';
+        }
+      } catch {
+        tlsProbeStatus = 'error';
+        sslSetting = 'error';
+      }
+
+      let auditTriggerProbeStatus: 'verified' | 'error' = 'verified';
+      let auditUpdateDeleteTrigger = false;
+      let auditTruncateTrigger = false;
+      try {
+        const trigRes = await client.query(
           `SELECT tgname FROM pg_trigger t
            JOIN pg_class c ON c.oid = t.tgrelid
            WHERE c.relname = 'audit_events' AND NOT t.tgisinternal`
-        ),
-        client
-          .query(
-            `SELECT COUNT(*) FILTER (WHERE is_active = TRUE AND revoked_at IS NULL AND expires_at > NOW()) AS active_cnt,
-                    COUNT(*) AS total_cnt
-             FROM owner_sessions`
-          )
-          .catch(() => ({ rows: [{ active_cnt: '0', total_cnt: '0' }] })),
-        client
-          .query(
-            `SELECT COUNT(*) AS cnt FROM connector_credentials WHERE encrypted_secret IS NOT NULL AND encrypted_secret <> ''`
-          )
-          .catch(() => ({ rows: [{ cnt: '0' }] })),
-      ]);
+        );
+        const trigNames = new Set((trigRes.rows || []).map((r: any) => String(r.tgname)));
+        auditUpdateDeleteTrigger = trigNames.has('trg_audit_events_prevent_update_delete');
+        auditTruncateTrigger = trigNames.has('trg_audit_events_prevent_truncate');
+      } catch {
+        auditTriggerProbeStatus = 'error';
+        console.warn('[DB Security] Audit trigger verification query failed.');
+      }
 
-      const sslSetting = String(sslSettingRes.rows[0]?.ssl || 'unknown');
-      const sslUsedVal = sslUsedRes.rows[0]?.used;
-      const tlsEncrypted = sslUsedVal === true || sslSetting.toLowerCase() === 'on';
-      const trigNames = new Set((trigRes.rows || []).map((r: any) => String(r.tgname)));
+      let sessionProbeStatus: 'verified' | 'error' = 'verified';
+      let activeSessionCount: number | null = null;
+      let totalSessionCount: number | null = null;
+      try {
+        const sessRes = await client.query(
+          `SELECT COUNT(*) FILTER (WHERE revoked_at IS NULL AND expires_at > NOW()) AS active_cnt,
+                  COUNT(*) AS total_cnt
+           FROM owner_sessions`
+        );
+        const parsedActive = Number.parseInt(String(sessRes.rows[0]?.active_cnt ?? ''), 10);
+        const parsedTotal = Number.parseInt(String(sessRes.rows[0]?.total_cnt ?? ''), 10);
+        if (!Number.isFinite(parsedActive) || !Number.isFinite(parsedTotal)) {
+          sessionProbeStatus = 'error';
+        } else {
+          activeSessionCount = parsedActive;
+          totalSessionCount = parsedTotal;
+        }
+      } catch {
+        sessionProbeStatus = 'error';
+        console.warn('[DB Security] Session diagnostic query failed.');
+      }
+
+      let credentialProbeStatus: 'verified' | 'error' = 'verified';
+      let encryptedCredentialCount: number | null = null;
+      try {
+        const credRes = await client.query(
+          `SELECT COUNT(*) AS cnt
+           FROM connector_credentials
+           WHERE encrypted_payload IS NOT NULL AND encrypted_payload <> ''`
+        );
+        const parsedCred = Number.parseInt(String(credRes.rows[0]?.cnt ?? ''), 10);
+        if (!Number.isFinite(parsedCred)) {
+          credentialProbeStatus = 'error';
+        } else {
+          encryptedCredentialCount = parsedCred;
+        }
+      } catch {
+        credentialProbeStatus = 'error';
+        console.warn('[DB Security] Credential diagnostic query failed.');
+      }
+
+      const anyError =
+        tlsProbeStatus === 'error' ||
+        auditTriggerProbeStatus === 'error' ||
+        sessionProbeStatus === 'error' ||
+        credentialProbeStatus === 'error';
 
       return {
+        diagnosticState: anyError ? 'error' : 'verified',
+        tlsProbeStatus,
+        auditTriggerProbeStatus,
+        sessionProbeStatus,
+        credentialProbeStatus,
         tlsEncrypted,
         sslSetting,
-        auditUpdateDeleteTrigger: trigNames.has('trg_audit_events_prevent_update_delete'),
-        auditTruncateTrigger: trigNames.has('trg_audit_events_prevent_truncate'),
-        activeSessionCount: parseInt(sessRes.rows[0]?.active_cnt || '0', 10) || 0,
-        totalSessionCount: parseInt(sessRes.rows[0]?.total_cnt || '0', 10) || 0,
-        encryptedCredentialCount: parseInt(credRes.rows[0]?.cnt || '0', 10) || 0,
+        auditUpdateDeleteTrigger,
+        auditTruncateTrigger,
+        activeSessionCount,
+        totalSessionCount,
+        encryptedCredentialCount,
+      };
+    } catch {
+      console.warn('[DB Security] Failed to acquire database connection for security diagnostics.');
+      return {
+        diagnosticState: 'error',
+        tlsProbeStatus: 'error',
+        auditTriggerProbeStatus: 'error',
+        sessionProbeStatus: 'error',
+        credentialProbeStatus: 'error',
+        tlsEncrypted: false,
+        sslSetting: 'error',
+        auditUpdateDeleteTrigger: false,
+        auditTruncateTrigger: false,
+        activeSessionCount: null,
+        totalSessionCount: null,
+        encryptedCredentialCount: null,
       };
     } finally {
       if (client) client.release();

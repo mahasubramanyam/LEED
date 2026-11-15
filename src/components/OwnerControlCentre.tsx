@@ -142,43 +142,47 @@ interface SecurityPostureData {
     singleOwnerLocked: boolean;
     passwordHashing: string;
     sessionTokenStorage: string;
-    activeSessionCount: number;
-    totalSessionCount: number;
-    csrfProtection: boolean;
-    originValidationFailClosed: boolean;
+    sessionProbeStatus?: 'verified' | 'unavailable' | 'error';
+    activeSessionCount: number | null;
+    totalSessionCount: number | null;
+    csrfProtection: boolean | null;
+    originValidationFailClosed: boolean | null;
   };
   databaseSecurity: {
     connected: boolean;
+    diagnosticState?: 'verified' | 'unavailable' | 'error';
     engine: string;
-    tlsEncrypted: boolean;
+    tlsEncrypted: boolean | null;
     sslSetting: string;
-    auditTriggersPresent: boolean;
+    auditTriggersPresent: boolean | null;
     auditHashChainValid: boolean | null;
     auditEventCount: number;
-    migration005PendingApproval: boolean;
+    migration005PendingApproval: boolean | null;
     startupAutoMigrateMaxVersion: string;
   };
   secretsAndEncryption: {
     algorithm: string;
     credentialKeyConfigured: boolean;
     credentialKeySource: string;
-    encryptedConnectorCredentialsCount: number;
+    credentialProbeStatus?: 'verified' | 'unavailable' | 'error';
+    encryptedConnectorCredentialsCount: number | null;
     secretRedactionActive: boolean;
     neonManagedAtRestEncryption: string;
   };
   networkAndHttpHardening: {
-    cspEnabled: boolean;
-    aiStudioIframeCompatible: boolean;
-    xPoweredByDisabled: boolean;
+    cspEnabled: boolean | null;
+    aiStudioIframeCompatible: boolean | null;
+    xPoweredByDisabled: boolean | null;
     ssrfGuardVersion: string;
-    ssrfPrivateIpv4AndIpv6Blocked: boolean;
-    ssrfRedirectRevalidation: boolean;
-    ssrfResponseByteLimitBytes: number;
-    uploadMaxBytes: number;
-    uploadMagicByteAndMacroScan: boolean;
+    ssrfDnsPinningEnabled?: boolean | null;
+    ssrfPrivateIpv4AndIpv6Blocked: boolean | null;
+    ssrfRedirectRevalidation: boolean | null;
+    ssrfResponseByteLimitBytes: number | null;
+    uploadMaxBytes: number | null;
+    uploadMagicByteAndMacroScan: boolean | null;
   };
   rateLimiting: {
-    loginRateLimiterActive: boolean;
+    loginRateLimiterActive: boolean | null;
     routeLimiters: Array<{
       name: string;
       maxRequests: number;
@@ -190,12 +194,13 @@ interface SecurityPostureData {
   backups: {
     localBackupCount: number;
     latestBackupAt?: string;
+    restoreDrillStatus?: 'verified' | 'not_verified';
     documentationPath: string;
   };
   checks: Array<{
     id: string;
     label: string;
-    status: 'pass' | 'warn' | 'fail';
+    status: 'pass' | 'warn' | 'fail' | 'not_verified' | 'unknown';
     detail: string;
   }>;
   recentSecurityEvents: Array<{
@@ -1576,12 +1581,18 @@ export function OwnerControlCentre({
                           className={`px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase rounded ${
                             chk.status === 'pass'
                               ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                              : chk.status === 'warn'
+                              : chk.status === 'warn' || chk.status === 'not_verified'
                               ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                              : chk.status === 'unknown'
+                              ? 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
                               : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
                           }`}
                         >
-                          {chk.status}
+                          {chk.status === 'not_verified'
+                            ? 'NOT_VERIFIED'
+                            : chk.status === 'unknown'
+                            ? 'UNKNOWN'
+                            : chk.status.toUpperCase()}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">{chk.detail}</p>
@@ -1596,10 +1607,35 @@ export function OwnerControlCentre({
                       Database &amp; Encryption
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 font-mono">
-                      <div>TLS Session: {securityPosture.databaseSecurity.tlsEncrypted ? 'Verified ON' : securityPosture.databaseSecurity.sslSetting}</div>
-                      <div>App Vault: {securityPosture.secretsAndEncryption.algorithm.toUpperCase()} ({securityPosture.secretsAndEncryption.credentialKeyConfigured ? securityPosture.secretsAndEncryption.credentialKeySource : 'unconfigured'})</div>
-                      <div>Encrypted Secrets: {securityPosture.secretsAndEncryption.encryptedConnectorCredentialsCount}</div>
-                      <div>Migration 005 Lock: {securityPosture.databaseSecurity.migration005PendingApproval ? 'Pending Approval' : 'Applied'}</div>
+                      <div>
+                        TLS Session:{' '}
+                        {securityPosture.databaseSecurity.tlsEncrypted === true
+                          ? 'Verified ON'
+                          : securityPosture.databaseSecurity.tlsEncrypted === false
+                          ? securityPosture.databaseSecurity.sslSetting || 'OFF'
+                          : 'Unverified'}
+                      </div>
+                      <div>
+                        App Vault: {securityPosture.secretsAndEncryption.algorithm.toUpperCase()} (
+                        {securityPosture.secretsAndEncryption.credentialKeyConfigured
+                          ? securityPosture.secretsAndEncryption.credentialKeySource
+                          : 'unconfigured'}
+                        )
+                      </div>
+                      <div>
+                        Encrypted Secrets:{' '}
+                        {securityPosture.secretsAndEncryption.encryptedConnectorCredentialsCount === null
+                          ? `Unavailable (${securityPosture.secretsAndEncryption.credentialProbeStatus || 'error'})`
+                          : securityPosture.secretsAndEncryption.encryptedConnectorCredentialsCount}
+                      </div>
+                      <div>
+                        Migration 005 Lock:{' '}
+                        {securityPosture.databaseSecurity.migration005PendingApproval === null
+                          ? 'Unverified'
+                          : securityPosture.databaseSecurity.migration005PendingApproval
+                          ? 'Pending Approval'
+                          : 'Applied'}
+                      </div>
                     </div>
                   </div>
 
@@ -1609,10 +1645,33 @@ export function OwnerControlCentre({
                       Network, SSRF &amp; Uploads
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 font-mono">
-                      <div>CSP + AI Studio Frame: {securityPosture.networkAndHttpHardening.cspEnabled ? 'Active' : 'Off'}</div>
-                      <div>Redirect Re-validation: {securityPosture.networkAndHttpHardening.ssrfRedirectRevalidation ? 'Enforced' : 'Off'}</div>
-                      <div>Stream Cap: {Math.round(securityPosture.networkAndHttpHardening.ssrfResponseByteLimitBytes / 1024)} KB</div>
-                      <div>Upload Cap: {Math.round(securityPosture.networkAndHttpHardening.uploadMaxBytes / (1024 * 1024))} MB + Macro/Zip Scan</div>
+                      <div>
+                        CSP + AI Studio Frame:{' '}
+                        {securityPosture.networkAndHttpHardening.cspEnabled === true
+                          ? 'Active'
+                          : securityPosture.networkAndHttpHardening.cspEnabled === false
+                          ? 'Off'
+                          : 'Not Verified'}
+                      </div>
+                      <div>
+                        DNS Pinning &amp; Redirect Guard:{' '}
+                        {securityPosture.networkAndHttpHardening.ssrfDnsPinningEnabled &&
+                        securityPosture.networkAndHttpHardening.ssrfRedirectRevalidation
+                          ? 'Enforced'
+                          : 'Not Verified'}
+                      </div>
+                      <div>
+                        Stream Cap:{' '}
+                        {securityPosture.networkAndHttpHardening.ssrfResponseByteLimitBytes !== null
+                          ? `${Math.round(securityPosture.networkAndHttpHardening.ssrfResponseByteLimitBytes / 1024)} KB`
+                          : 'Unknown'}
+                      </div>
+                      <div>
+                        Upload Cap:{' '}
+                        {securityPosture.networkAndHttpHardening.uploadMaxBytes !== null
+                          ? `${Math.round(securityPosture.networkAndHttpHardening.uploadMaxBytes / (1024 * 1024))} MB + Macro/Zip Scan`
+                          : 'Unknown'}
+                      </div>
                     </div>
                   </div>
 
@@ -1623,9 +1682,24 @@ export function OwnerControlCentre({
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 font-mono">
                       <div>Local Snapshots: {securityPosture.backups.localBackupCount} files</div>
-                      <div>Active Route Limiters: {securityPosture.rateLimiting.routeLimiters.length + 1}</div>
-                      <div>Blocked Requests: {securityPosture.rateLimiting.routeLimiters.reduce((acc, r) => acc + r.blockedCount, 0)}</div>
-                      <div>Guide: {securityPosture.backups.documentationPath}</div>
+                      <div>
+                        Restore Drill:{' '}
+                        {securityPosture.backups.restoreDrillStatus === 'verified'
+                          ? 'Verified'
+                          : 'NOT_VERIFIED'}
+                      </div>
+                      <div>
+                        Active Route Limiters:{' '}
+                        {securityPosture.rateLimiting.routeLimiters.length +
+                          (securityPosture.rateLimiting.loginRateLimiterActive ? 1 : 0)}
+                      </div>
+                      <div>
+                        Blocked Requests:{' '}
+                        {securityPosture.rateLimiting.routeLimiters.reduce(
+                          (acc, r) => acc + r.blockedCount,
+                          0
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

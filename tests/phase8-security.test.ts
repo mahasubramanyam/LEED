@@ -21,9 +21,12 @@ import {
   getRecentSecurityEvents,
 } from '../server/security/securityEvents.js';
 import {
+  createPinnedLookup,
   fetchWithSsrfProtection,
+  getSsrfRuntimeStatus,
   isDisallowedIpAddress,
   readBoundedResponseText,
+  SsrfBlockedError,
   validateOutboundUrl,
 } from '../server/security/ssrf.js';
 import { inspectWebsite } from '../server/connectors/webInspector.js';
@@ -45,6 +48,7 @@ import {
 } from '../server/auth/csrf.js';
 import { LoginRateLimiter } from '../server/auth/rateLimit.js';
 import {
+  getUploadGuardConfig,
   ImportFileSecurityError,
   parseImportFileBuffer,
 } from '../server/import/fileParser.js';
@@ -58,6 +62,8 @@ import {
   handleLegacyRunMigrationsBlocked,
 } from '../server/db/migrationWorkflow.js';
 import { requireOwnerAuth } from '../server/auth/middleware.js';
+import { PostgresStorage } from '../server/db/storagePg.js';
+import ExcelJS from 'exceljs';
 
 async function startTestApp(app: express.Express): Promise<{
   baseUrl: string;
@@ -436,12 +442,17 @@ test('9. Regression Preservation: AES-256-GCM Vault, Auth Crypto, Security Postu
   );
   assert.equal(missingConfirm.status, 400);
 
-  // Security posture report never leaks secrets and reports accurate telemetry
+  // Security posture report never leaks secrets and reports accurate telemetry when runtime + restore verified
   const posture = await buildSecurityPostureReport({
     isProd: true,
     isDbConnected: () => true,
     getEncryptionStatus: () => ({ configured: true, source: 'env', algorithm: 'aes-256-gcm' }),
     getDatabaseSecurityStatus: async () => ({
+      diagnosticState: 'verified',
+      tlsProbeStatus: 'verified',
+      auditTriggerProbeStatus: 'verified',
+      sessionProbeStatus: 'verified',
+      credentialProbeStatus: 'verified',
       tlsEncrypted: true,
       sslSetting: 'on',
       auditUpdateDeleteTrigger: true,
@@ -453,6 +464,29 @@ test('9. Regression Preservation: AES-256-GCM Vault, Auth Crypto, Security Postu
     verifyAuditChain: async () => ({ valid: true, totalEvents: 12 }),
     inspectMigrations: async () => ({ migration005Recorded: false }),
     ownerInitialized: async () => true,
+    inspectRuntimeSecurity: () => ({
+      xPoweredByDisabled: true,
+      securityHeadersMiddlewareMounted: true,
+      cspEnabled: true,
+      aiStudioIframeCompatible: true,
+      ownerAuthMiddlewareMounted: true,
+      csrfMiddlewareMounted: true,
+      originValidationFailClosed: true,
+      cookieFlags: { httpOnly: true, secure: true, sameSite: 'none', partitioned: true },
+      loginRateLimiterActive: true,
+      routeLimitersExpectedCount: 8,
+      ssrf: {
+        dnsPinningEnabled: true,
+        privateCidrsBlockedSelfTest: true,
+        redirectRevalidationEnabled: true,
+        maxResponseBytes: 350 * 1024,
+      },
+      upload: {
+        maxBytes: 15 * 1024 * 1024,
+        magicByteAndMacroScan: true,
+      },
+      backupRestoreVerified: true,
+    }),
   });
   assert.equal(posture.overallPosture, 'hardened');
   assert.equal(posture.databaseSecurity.tlsEncrypted, true);
@@ -488,4 +522,234 @@ test('10. Auth Middleware Rejects Missing & Invalid/Expired Sessions + Hides X-P
   } finally {
     await srv.close();
   }
+});
+
+test('11. DB Security Diagnostics Use Real Columns (revoked_at/expires_at, encrypted_payload) & Never Mask Errors as Zero', async () => {
+  const executedSql: string[] = [];
+  const pgStore = new PostgresStorage();
+  (pgStore as any).getClient = () => ({
+    connect: async () => ({
+      query: async (sql: string) => {
+        executedSql.push(sql);
+        if (sql.includes('SHOW ssl')) return { rows: [{ ssl: 'on' }] };
+        if (sql.includes('ssl_is_used')) return { rows: [{ used: true }] };
+        if (sql.includes('pg_trigger')) {
+          return {
+            rows: [
+              { tgname: 'trg_audit_events_prevent_update_delete' },
+              { tgname: 'trg_audit_events_prevent_truncate' },
+            ],
+          };
+        }
+        if (sql.includes('FROM owner_sessions')) {
+          return { rows: [{ active_cnt: '2', total_cnt: '5' }] };
+        }
+        if (sql.includes('FROM connector_credentials')) {
+          return { rows: [{ cnt: '3' }] };
+        }
+        return { rows: [] };
+      },
+      release: () => {},
+    }),
+  });
+
+  const verified = await pgStore.getDatabaseSecurityStatus();
+  assert.equal(verified.diagnosticState, 'verified');
+  assert.equal(verified.sessionProbeStatus, 'verified');
+  assert.equal(verified.credentialProbeStatus, 'verified');
+  assert.equal(verified.activeSessionCount, 2);
+  assert.equal(verified.totalSessionCount, 5);
+  assert.equal(verified.encryptedCredentialCount, 3);
+  assert.ok(executedSql.some((s) => s.includes('revoked_at IS NULL AND expires_at > NOW()')));
+  assert.ok(!executedSql.some((s) => s.includes('is_active')));
+  assert.ok(executedSql.some((s) => s.includes('encrypted_payload')));
+  assert.ok(!executedSql.some((s) => s.includes('encrypted_secret')));
+
+  // SQL/schema error must surface diagnosticState: 'error' + null counts (never masked 0)
+  const errStore = new PostgresStorage();
+  (errStore as any).getClient = () => ({
+    connect: async () => ({
+      query: async (sql: string) => {
+        if (sql.includes('FROM owner_sessions')) {
+          throw new Error('column "bogus" of relation "owner_sessions" does not exist');
+        }
+        if (sql.includes('FROM connector_credentials')) {
+          throw new Error('permission denied for table connector_credentials');
+        }
+        if (sql.includes('SHOW ssl')) return { rows: [{ ssl: 'on' }] };
+        if (sql.includes('ssl_is_used')) return { rows: [{ used: true }] };
+        return { rows: [] };
+      },
+      release: () => {},
+    }),
+  });
+
+  const failed = await errStore.getDatabaseSecurityStatus();
+  assert.equal(failed.diagnosticState, 'error');
+  assert.equal(failed.sessionProbeStatus, 'error');
+  assert.equal(failed.credentialProbeStatus, 'error');
+  assert.equal(failed.activeSessionCount, null);
+  assert.equal(failed.totalSessionCount, null);
+  assert.equal(failed.encryptedCredentialCount, null);
+  assert.ok(!JSON.stringify(failed).includes('permission denied'));
+
+  // Disconnected/uninitialized pool returns explicit 'unavailable'
+  const unavailStore = new PostgresStorage();
+  (unavailStore as any).getClient = () => {
+    throw new Error('Database connection unavailable');
+  };
+  const unavail = await unavailStore.getDatabaseSecurityStatus();
+  assert.equal(unavail.diagnosticState, 'unavailable');
+  assert.equal(unavail.activeSessionCount, null);
+});
+
+test('12. Truthful Security Posture Never Reports Hardened When Checks Fail or Remain Unverified', async () => {
+  // Missing inspectRuntimeSecurity -> HTTP/CSRF/SSRF checks must report not_verified & nulls
+  const uninspected = await buildSecurityPostureReport({
+    isProd: true,
+    isDbConnected: () => true,
+    getEncryptionStatus: () => ({ configured: true, source: 'env', algorithm: 'aes-256-gcm' }),
+    getDatabaseSecurityStatus: async () => ({
+      diagnosticState: 'verified',
+      tlsProbeStatus: 'verified',
+      auditTriggerProbeStatus: 'verified',
+      sessionProbeStatus: 'verified',
+      credentialProbeStatus: 'verified',
+      tlsEncrypted: true,
+      sslSetting: 'on',
+      auditUpdateDeleteTrigger: true,
+      auditTruncateTrigger: true,
+      activeSessionCount: 1,
+      totalSessionCount: 1,
+      encryptedCredentialCount: 0,
+    }),
+    verifyAuditChain: async () => ({ valid: true, totalEvents: 5 }),
+    inspectMigrations: async () => ({ migration005Recorded: true }),
+    ownerInitialized: async () => true,
+  });
+
+  assert.equal(uninspected.overallPosture, 'attention_required');
+  assert.equal(uninspected.networkAndHttpHardening.cspEnabled, null);
+  assert.equal(uninspected.networkAndHttpHardening.xPoweredByDisabled, null);
+  assert.equal(uninspected.authentication.csrfProtection, null);
+  assert.equal(uninspected.rateLimiting.loginRateLimiterActive, null);
+  assert.equal(uninspected.checks.find((c) => c.id === 'ssrf_and_upload')?.status, 'not_verified');
+  assert.equal(uninspected.checks.find((c) => c.id === 'http_and_csrf')?.status, 'not_verified');
+  assert.equal(uninspected.checks.find((c) => c.id === 'owner_lock')?.status, 'not_verified');
+  assert.equal(uninspected.checks.find((c) => c.id === 'backup_restore')?.status, 'not_verified');
+
+  // Probe error in DB diagnostics -> checks fail & posture stays attention_required
+  const failing = await buildSecurityPostureReport({
+    isProd: true,
+    isDbConnected: () => true,
+    getEncryptionStatus: () => ({ configured: true, source: 'env', algorithm: 'aes-256-gcm' }),
+    getDatabaseSecurityStatus: async () => ({
+      diagnosticState: 'error',
+      tlsProbeStatus: 'error',
+      auditTriggerProbeStatus: 'error',
+      sessionProbeStatus: 'error',
+      credentialProbeStatus: 'error',
+      tlsEncrypted: false,
+      sslSetting: 'error',
+      auditUpdateDeleteTrigger: false,
+      auditTruncateTrigger: false,
+      activeSessionCount: null,
+      totalSessionCount: null,
+      encryptedCredentialCount: null,
+    }),
+    verifyAuditChain: async () => ({ valid: false, totalEvents: 0 }),
+    inspectMigrations: async () => ({ migration005Recorded: false }),
+    ownerInitialized: async () => true,
+  });
+
+  assert.equal(failing.overallPosture, 'attention_required');
+  assert.equal(failing.checks.find((c) => c.id === 'db_tls')?.status, 'fail');
+  assert.equal(failing.checks.find((c) => c.id === 'cred_encryption')?.status, 'fail');
+  assert.equal(failing.checks.find((c) => c.id === 'audit_immutability')?.status, 'fail');
+});
+
+test('13. SSRF DNS Pinning: Eliminates TOCTOU Rebinding & Blocks Private/Host-Mismatch Pinning', async () => {
+  const ssrfRuntime = getSsrfRuntimeStatus();
+  assert.equal(ssrfRuntime.dnsPinningEnabled, true);
+  assert.equal(ssrfRuntime.privateCidrsBlockedSelfTest, true);
+  assert.equal(getUploadGuardConfig().magicByteAndMacroScan, true);
+
+  // Refuses to pin private/loopback IPs
+  assert.throws(
+    () => createPinnedLookup('rebind.example.com', [{ address: '127.0.0.1', family: 4 }]),
+    SsrfBlockedError
+  );
+
+  // Pinned lookup returns ONLY the pre-validated public IP (both single & all: true)
+  const pinned = createPinnedLookup('rebind.example.com', [
+    { address: '93.184.216.34', family: 4 },
+  ]);
+
+  await new Promise<void>((resolve, reject) => {
+    pinned('rebind.example.com', { all: true }, (err, res) => {
+      if (err) return reject(err);
+      assert.ok(Array.isArray(res));
+      assert.deepEqual(res, [{ address: '93.184.216.34', family: 4 }]);
+      resolve();
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    pinned('rebind.example.com', {}, (err, addr, fam) => {
+      if (err) return reject(err);
+      assert.equal(addr, '93.184.216.34');
+      assert.equal(fam, 4);
+      resolve();
+    });
+  });
+
+  // Unexpected host mismatch fails closed
+  await new Promise<void>((resolve) => {
+    pinned('attacker.internal', {}, (err) => {
+      assert.ok(err instanceof SsrfBlockedError);
+      resolve();
+    });
+  });
+
+  // DNS rebinding attempt where lookup flips to 169.254.169.254 on validation is blocked before socket open
+  let calls = 0;
+  await assert.rejects(
+    () =>
+      fetchWithSsrfProtection('https://rebind.example.com/profile', {
+        dnsLookupAll: async () => {
+          calls++;
+          return [{ address: '169.254.169.254', family: 4 }];
+        },
+      }),
+    SsrfBlockedError
+  );
+  assert.equal(calls, 1);
+});
+
+test('14. ExcelJS XLSX Roundtrip & Import Parsing Compatible with Patched uuid@11.1.1', async () => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Targets');
+  ws.addRow(['Company Name', 'Country', 'Website']);
+  ws.addRow(['Nordic Marine AS', 'NO', 'https://nordicmarine.no']);
+  ws.addConditionalFormatting({
+    ref: 'A2:C2',
+    rules: [
+      {
+        type: 'expression',
+        priority: 1,
+        formulae: ['LEN(A2)>0'],
+        style: { font: { bold: true } },
+      },
+    ],
+  });
+
+  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+  const parsed = await parseImportFileBuffer({
+    filename: 'nordic_targets.xlsx',
+    buffer,
+  });
+
+  assert.equal(parsed.summary.format, 'xlsx');
+  assert.equal(parsed.summary.totalRows, 1);
+  assert.deepEqual(parsed.rows[0], ['Nordic Marine AS', 'NO', 'https://nordicmarine.no']);
 });

@@ -421,7 +421,7 @@ describe('LEED Phase 3 Remediation Verification Suite', () => {
       assert.ok(queriedTables.includes('country_source_capabilities'));
       assert.ok(!queriedTables.includes('dedupe_candidates'));
       assert.ok(!queriedTables.includes('merge_history'));
-      assert.strictEqual(diag.tables.length, 18);
+      assert.strictEqual(diag.tables.length, 23);
     });
 
     it('should accurately detect applied vs incomplete Migration 003 schemas without executing DDL', async () => {

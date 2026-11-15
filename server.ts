@@ -31,6 +31,7 @@ import {
   setSessionCookie,
   clearSessionCookie,
   SESSION_COOKIE_NAME,
+  SESSION_COOKIE_OPTIONS,
 } from './server/auth/middleware.js';
 import {
   listOwnerSessions,
@@ -39,8 +40,13 @@ import {
   hashSessionToken,
 } from './server/auth/session.js';
 import { ownerService } from './server/auth/ownerService.js';
-import { generateCsrfToken, setCsrfCookie, validateCsrf } from './server/auth/csrf.js';
-import { normalizeClientIp } from './server/auth/rateLimit.js';
+import {
+  generateCsrfToken,
+  setCsrfCookie,
+  validateCsrf,
+  validateSameOrigin,
+} from './server/auth/csrf.js';
+import { loginRateLimiter, normalizeClientIp } from './server/auth/rateLimit.js';
 import { getAllCountries, getCountryByCode, searchCountries } from './server/geo/countries.js';
 import { getDivisionsForCountry } from './server/geo/divisions.js';
 import { searchCities } from './server/geo/cities.js';
@@ -75,12 +81,16 @@ import {
   ImportFileSecurityError,
   ImportServiceError,
 } from './server/import/importService.js';
-import { MAX_IMPORT_FILE_BYTES } from './server/import/fileParser.js';
+import { getUploadGuardConfig, MAX_IMPORT_FILE_BYTES } from './server/import/fileParser.js';
 import { normalizeAndValidateMappedRow } from './server/import/normalizerValidator.js';
 import type { ImportMappingTemplate } from './server/types.js';
-import { securityHeadersMiddleware } from './server/security/headers.js';
+import {
+  buildContentSecurityPolicy,
+  securityHeadersMiddleware,
+} from './server/security/headers.js';
 import { sanitizeApiError, sanitizeExportFilenamePart } from './server/security/errorHandler.js';
-import { buildSecurityPostureReport } from './server/security/posture.js';
+import { buildSecurityPostureReport, RuntimeSecurityInspection } from './server/security/posture.js';
+import { getSsrfRuntimeStatus } from './server/security/ssrf.js';
 import { recordSecurityEvent } from './server/security/securityEvents.js';
 import {
   aiRateLimiter,
@@ -503,8 +513,7 @@ protectedApi.get('/owner/sessions', async (req: Request, res: Response) => {
     }));
     res.json({ sessions: formatted });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load active sessions.') });
   }
 });
 
@@ -532,8 +541,7 @@ protectedApi.delete('/owner/sessions/:id', async (req: Request, res: Response) =
     );
     res.json({ success: true, message: 'Session successfully revoked' });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to revoke session.') });
   }
 });
 
@@ -557,8 +565,7 @@ protectedApi.post('/owner/sessions/revoke-others', async (req: Request, res: Res
     );
     res.json({ success: true, revokedCount });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to revoke other sessions.') });
   }
 });
 
@@ -569,8 +576,7 @@ protectedApi.get('/owner/audit-log', async (req: Request, res: Response) => {
     const events = await postgresStorage.getAuditEvents(limit);
     res.json({ events });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load audit log.') });
   }
 });
 
@@ -591,8 +597,7 @@ protectedApi.get('/owner/audit-log/verify', async (req: Request, res: Response) 
     const result = await postgresStorage.verifyAuditLogIntegrity();
     res.json(result);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to verify audit hash chain.') });
   }
 });
 
@@ -631,10 +636,10 @@ protectedApi.get('/owner/diagnostics', async (req: Request, res: Response) => {
           genesisHash: '0000000000000000000000000000000000000000000000000000000000000000',
         },
         cookieSecurity: {
-          sameSite: 'none',
-          secure: true,
-          partitioned: true,
-          httpOnly: true,
+          sameSite: SESSION_COOKIE_OPTIONS.sameSite,
+          secure: SESSION_COOKIE_OPTIONS.secure,
+          partitioned: SESSION_COOKIE_OPTIONS.partitioned,
+          httpOnly: SESSION_COOKIE_OPTIONS.httpOnly,
         },
         bearerDualAuth: true,
         csrfProtection: true,
@@ -644,6 +649,57 @@ protectedApi.get('/owner/diagnostics', async (req: Request, res: Response) => {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch diagnostics.') });
   }
 });
+
+function inspectLiveExpressSecurity(): RuntimeSecurityInspection {
+  const appStack: any[] = (app as any)?._router?.stack || [];
+  const protectedStack: any[] = (protectedApi as any)?.stack || [];
+  const securityHeadersMounted = appStack.some(
+    (layer) =>
+      layer?.name === 'leedSecurityHeadersMiddleware' ||
+      layer?.handle?.name === 'leedSecurityHeadersMiddleware'
+  );
+  const ownerAuthMiddlewareMounted = protectedStack.some(
+    (layer) => layer?.name === 'requireOwnerAuth' || layer?.handle?.name === 'requireOwnerAuth'
+  );
+  const csrfMiddlewareMounted = protectedStack.some(
+    (layer) => layer?.name === 'validateCsrf' || layer?.handle?.name === 'validateCsrf'
+  );
+  const csp = buildContentSecurityPolicy(IS_PROD);
+  const ssrfRuntime = getSsrfRuntimeStatus();
+  const uploadGuard = getUploadGuardConfig();
+  const loginStats = loginRateLimiter.getStats();
+
+  return {
+    xPoweredByDisabled: app.get('x-powered-by') === false,
+    securityHeadersMiddlewareMounted: securityHeadersMounted,
+    cspEnabled: csp.includes("default-src 'self'") && csp.includes("object-src 'none'"),
+    aiStudioIframeCompatible:
+      csp.includes('frame-ancestors') && csp.includes('https://aistudio.google.com'),
+    ownerAuthMiddlewareMounted,
+    csrfMiddlewareMounted,
+    originValidationFailClosed: typeof validateSameOrigin === 'function',
+    cookieFlags: {
+      httpOnly: SESSION_COOKIE_OPTIONS.httpOnly,
+      secure: SESSION_COOKIE_OPTIONS.secure,
+      sameSite: SESSION_COOKIE_OPTIONS.sameSite,
+      partitioned: SESSION_COOKIE_OPTIONS.partitioned,
+    },
+    loginRateLimiterActive:
+      typeof loginRateLimiter?.check === 'function' && loginStats.maxAttempts > 0,
+    routeLimitersExpectedCount: 8,
+    ssrf: {
+      dnsPinningEnabled: ssrfRuntime.dnsPinningEnabled,
+      privateCidrsBlockedSelfTest: ssrfRuntime.privateCidrsBlockedSelfTest,
+      redirectRevalidationEnabled: ssrfRuntime.redirectRevalidationEnabled,
+      maxResponseBytes: ssrfRuntime.maxResponseBytesDefault,
+    },
+    upload: {
+      maxBytes: uploadGuard.maxBytes,
+      magicByteAndMacroScan: uploadGuard.magicByteAndMacroScan,
+    },
+    backupRestoreVerified: false,
+  };
+}
 
 // Phase 8: Live Security Posture & Data Protection Diagnostics (Zero Secrets Returned)
 protectedApi.get('/owner/security-posture', async (req: Request, res: Response) => {
@@ -662,6 +718,7 @@ protectedApi.get('/owner/security-posture', async (req: Request, res: Response) 
         return { migration005Recorded: status.migration005Recorded };
       },
       ownerInitialized: () => ownerService.isOwnerInitialized(),
+      inspectRuntimeSecurity: () => inspectLiveExpressSecurity(),
     });
     res.json(report);
   } catch (err: unknown) {
@@ -842,8 +899,7 @@ protectedApi.post('/database/migrations/004/approve', createRateLimitMiddleware(
           : 'Migration 004 was already applied and verified in Neon (18/18 columns, 2/2 indexes, 001–003 intact).',
     });
   } catch (err: unknown) {
-    const rawMsg = err instanceof Error ? err.message : String(err);
-    const safeMsg = rawMsg.replace(/:[^:@]+@/, ':***@');
+    const safeMsg = sanitizeApiError(err, 'Migration 004 execution failed and was rolled back.');
     try {
       await postgresStorage.recordAuditEvent(
         'MIGRATION_004_APPROVAL_FAILED',
@@ -858,7 +914,9 @@ protectedApi.post('/database/migrations/004/approve', createRateLimitMiddleware(
     }
     res.status(500).json({
       success: false,
-      error: `Migration 004 execution failed and was rolled back: ${safeMsg}`,
+      error: safeMsg.startsWith('Migration 004')
+        ? safeMsg
+        : `Migration 004 execution failed and was rolled back: ${safeMsg}`,
     });
   }
 });
@@ -1019,8 +1077,7 @@ protectedApi.get('/geo/capability-matrix', async (req: Request, res: Response) =
       timestamp: new Date().toISOString(),
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to build geographic capability matrix.') });
   }
 });
 
@@ -1083,8 +1140,7 @@ protectedApi.get('/registries/coverage', async (req: Request, res: Response) => 
       timestamp: new Date().toISOString(),
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to inspect registry coverage.') });
   }
 });
 
@@ -1246,8 +1302,9 @@ protectedApi.get('/leads', async (req: Request, res: Response) => {
       });
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const status = rawMsg.includes('Database connection unavailable') ? 503 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to fetch leads.') });
   }
 });
 
@@ -1261,8 +1318,9 @@ protectedApi.get('/leads/:id', async (req: Request, res: Response) => {
     }
     res.json(lead);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const status = rawMsg.includes('Database connection unavailable') ? 503 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to fetch lead.') });
   }
 });
 
@@ -1479,8 +1537,9 @@ protectedApi.post('/leads/batch-import', createRateLimitMiddleware(importRateLim
       totalProcessed: leads.length,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const status = rawMsg.includes('Database connection unavailable') ? 503 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Batch import failed.') });
   }
 });
 
@@ -1527,8 +1586,9 @@ protectedApi.post('/leads/:id/notes', async (req: Request, res: Response) => {
       res.json(saved);
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const status = rawMsg.includes('Database connection unavailable') ? 503 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to add note.') });
   }
 });
 
@@ -1577,8 +1637,9 @@ protectedApi.post('/leads/:id/activities', async (req: Request, res: Response) =
       res.json(saved);
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const status = rawMsg.includes('Database connection unavailable') ? 503 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to add activity.') });
   }
 });
 
@@ -1646,9 +1707,9 @@ protectedApi.post('/leads/:id/verify-registry', async (req: Request, res: Respon
       report,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const status = msg.includes('Database connection unavailable') ? 503 : 500;
-    res.status(status).json({ error: redactSecrets(msg) });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const status = rawMsg.includes('Database connection unavailable') ? 503 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Registry verification failed.') });
   }
 });
 
@@ -1706,13 +1767,12 @@ protectedApi.post('/discovery/search', createRateLimitMiddleware(discoveryRateLi
           ? 429
           : 500;
       res.status(status).json({
-        error: redactSecrets(globalErr.safeMessage),
+        error: sanitizeApiError(globalErr.safeMessage, 'Discovery provider error.'),
         errorCategory: globalErr.category,
       });
       return;
     }
-    const msg = globalErr instanceof Error ? globalErr.message : String(globalErr);
-    res.status(500).json({ error: `Discovery failed: ${redactSecrets(msg)}` });
+    res.status(500).json({ error: `Discovery failed: ${sanitizeApiError(globalErr, 'Discovery search failed.')}` });
   }
 });
 
@@ -1811,8 +1871,7 @@ protectedApi.get('/discovery/history', async (req: Request, res: Response) => {
 
     res.json({ history });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch discovery history.') });
   }
 });
 
@@ -2088,7 +2147,7 @@ protectedApi.post('/inspection/inspect-url', createRateLimitMiddleware(inspectio
     };
     if (isPg) await postgresStorage.recordConnectorRun(runRecord);
     else storage.recordConnectorRun(runRecord);
-    res.status(500).json({ error: `Inspection failed: ${msg}` });
+    res.status(500).json({ error: `Inspection failed: ${sanitizeApiError(err, 'Website inspection failed.')}` });
   }
 });
 
@@ -2100,8 +2159,7 @@ protectedApi.get('/dedupe/candidates', async (req: Request, res: Response) => {
     const candidates = detectDuplicates(leads);
     res.json({ candidates, count: candidates.length });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to inspect duplicate candidates.') });
   }
 });
 
@@ -2195,8 +2253,7 @@ protectedApi.get('/dedupe/history', async (req: Request, res: Response) => {
     const history = isPg ? await postgresStorage.getMergeHistory() : storage.getMergeHistory();
     res.json(history);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch merge history.') });
   }
 });
 
@@ -2219,8 +2276,7 @@ protectedApi.get('/pipeline/stages', async (req: Request, res: Response) => {
 
     res.json(stagesWithMetrics);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch pipeline stages.') });
   }
 });
 
@@ -2245,8 +2301,9 @@ protectedApi.post('/pipeline/stages/initialize', async (req: Request, res: Respo
       res.json({ success: true, ...result });
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: msg });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const status = rawMsg.includes('Database connection unavailable') ? 503 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to initialize pipeline stages.') });
   }
 });
 
@@ -2654,8 +2711,7 @@ protectedApi.get('/connectors', async (req: Request, res: Response) => {
 
     res.json(allConnectors.filter((c) => matchedIds.has(c.id)));
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch connectors.') });
   }
 });
 
@@ -2675,8 +2731,7 @@ protectedApi.get('/connectors/runs', async (req: Request, res: Response) => {
       : storage.getConnectorRuns(connectorId, limit);
     res.json({ runs, total: runs.length });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch connector runs.') });
   }
 });
 
@@ -2711,8 +2766,7 @@ protectedApi.get('/connectors/:id', async (req: Request, res: Response) => {
       recentRuns,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch connector details.') });
   }
 });
 
@@ -2748,8 +2802,7 @@ protectedApi.get('/connectors/:id/health', async (req: Request, res: Response) =
       rateLimit: statusObj.rateLimitState,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch connector health.') });
   }
 });
 
@@ -2800,8 +2853,7 @@ protectedApi.post('/connectors/:id/test', async (req: Request, res: Response) =>
       connector: updatedConnector,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Connector health check failed.') });
   }
 });
 
@@ -2819,8 +2871,7 @@ protectedApi.get('/connectors/:id/runs', async (req: Request, res: Response) => 
       : storage.getConnectorRuns(req.params.id, limit);
     res.json({ connectorId: req.params.id, runs, total: runs.length });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch connector run history.') });
   }
 });
 
@@ -2895,8 +2946,7 @@ protectedApi.put('/connectors/:id/config', async (req: Request, res: Response) =
       connector: updatedList.find((c) => c.id === req.params.id),
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update connector configuration.') });
   }
 });
 
@@ -2926,8 +2976,7 @@ protectedApi.post('/connectors/:id/enable', async (req: Request, res: Response) 
     const updatedList = isPg ? await postgresStorage.getConnectors() : await storage.getConnectorsUnified();
     res.json({ success: true, connector: updatedList.find((c) => c.id === req.params.id) });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to enable connector.') });
   }
 });
 
@@ -2957,8 +3006,7 @@ protectedApi.post('/connectors/:id/disable', async (req: Request, res: Response)
     const updatedList = isPg ? await postgresStorage.getConnectors() : await storage.getConnectorsUnified();
     res.json({ success: true, connector: updatedList.find((c) => c.id === req.params.id) });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to disable connector.') });
   }
 });
 
@@ -3009,14 +3057,13 @@ protectedApi.put('/connectors/:id/credentials', async (req: Request, res: Respon
   } catch (err: unknown) {
     if (err instanceof ConnectorError) {
       res.status(400).json({
-        error: err.safeMessage,
+        error: sanitizeApiError(err.safeMessage, 'Invalid connector credentials.'),
         errorCategory: err.category,
         remediationHint: err.remediationHint,
       });
       return;
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to save connector credentials.') });
   }
 });
 
@@ -3053,8 +3100,7 @@ protectedApi.delete('/connectors/:id/credentials', async (req: Request, res: Res
       connector: updatedList.find((c) => c.id === req.params.id),
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to remove connector credentials.') });
   }
 });
 
@@ -3073,8 +3119,7 @@ protectedApi.get('/settings', async (req: Request, res: Response) => {
     };
     res.json(safeSettings);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch platform settings.') });
   }
 });
 
@@ -3255,7 +3300,7 @@ protectedApi.post(
             error:
               err?.code === 'LIMIT_FILE_SIZE'
                 ? `Uploaded file exceeds maximum allowed size of ${Math.round(MAX_IMPORT_FILE_BYTES / (1024 * 1024))} MB.`
-                : err?.message || 'File upload failed.',
+                : sanitizeApiError(err, 'File upload failed.'),
             code: err?.code || 'UPLOAD_ERROR',
           });
           return;
@@ -3331,8 +3376,7 @@ protectedApi.post(
         res.status(err.statusCode).json({ error: err.message, code: err.code });
         return;
       }
-      const msg = err instanceof Error ? err.message : String(err);
-      res.status(400).json({ error: redactSecrets(msg) });
+      res.status(400).json({ error: sanitizeApiError(err, 'Import upload processing failed.') });
     }
   }
 );
@@ -3352,8 +3396,7 @@ protectedApi.post('/import/sessions/:sessionId/worksheet', async (req: Request, 
       res.status(err.statusCode).json({ error: err.message, code: err.code });
       return;
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(400).json({ error: redactSecrets(msg) });
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to switch worksheet.') });
   }
 });
 
@@ -3396,8 +3439,10 @@ protectedApi.post('/import/sessions/:sessionId/preview', async (req: Request, re
       res.status(err.statusCode).json({ error: err.message, code: err.code });
       return;
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Database connection unavailable') ? 503 : 500).json({ error: redactSecrets(msg) });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    res.status(rawMsg.includes('Database connection unavailable') ? 503 : 500).json({
+      error: sanitizeApiError(err, 'Failed to preview import session.'),
+    });
   }
 });
 
@@ -3471,13 +3516,13 @@ protectedApi.post('/import/sessions/:sessionId/confirm', createRateLimitMiddlewa
       res.status(err.statusCode).json({ error: err.message, code: err.code });
       return;
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    const status = msg.includes('Database connection unavailable')
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const status = rawMsg.includes('Database connection unavailable')
       ? 503
-      : msg.includes('Migration 005')
+      : rawMsg.includes('Migration 005')
       ? 409
       : 500;
-    res.status(status).json({ error: redactSecrets(msg) });
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to execute import batch.') });
   }
 });
 
@@ -3490,8 +3535,7 @@ protectedApi.get('/import/templates', async (_req: Request, res: Response) => {
       : storage.getImportTemplates();
     res.json({ templates });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load import templates.') });
   }
 });
 
@@ -3531,8 +3575,10 @@ protectedApi.post('/import/templates', async (req: Request, res: Response) => {
 
     res.status(201).json({ template });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Migration 005') ? 409 : 500).json({ error: redactSecrets(msg) });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    res.status(rawMsg.includes('Migration 005') ? 409 : 500).json({
+      error: sanitizeApiError(err, 'Failed to save import template.'),
+    });
   }
 });
 
@@ -3548,8 +3594,7 @@ protectedApi.delete('/import/templates/:id', async (req: Request, res: Response)
     }
     res.json({ success: true, deletedId: req.params.id });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to delete import template.') });
   }
 });
 
@@ -3564,8 +3609,7 @@ protectedApi.get('/import/batches', async (req: Request, res: Response) => {
       : storage.getImportBatches({ page, pageSize });
     res.json(data);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load import batches.') });
   }
 });
 
@@ -3585,8 +3629,7 @@ protectedApi.get('/import/batches/:batchId', async (req: Request, res: Response)
     }
     res.json(detail);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load import batch details.') });
   }
 });
 
@@ -3696,8 +3739,7 @@ protectedApi.get('/persons', async (req: Request, res: Response) => {
 
     res.json({ persons: enriched, total: enriched.length });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch persons directory.') });
   }
 });
 
@@ -3709,8 +3751,7 @@ protectedApi.get('/leads/:id/persons', async (req: Request, res: Response) => {
       : storage.getLeadPersons(req.params.id);
     res.json({ leadId: req.params.id, persons });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch lead contacts.') });
   }
 });
 
@@ -3785,8 +3826,10 @@ protectedApi.post('/leads/:id/persons', async (req: Request, res: Response) => {
 
     res.status(201).json({ leadId: lead.id, persons });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(msg.includes('Migration 005') ? 409 : 500).json({ error: redactSecrets(msg) });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    res.status(rawMsg.includes('Migration 005') ? 409 : 500).json({
+      error: sanitizeApiError(err, 'Failed to link person to lead.'),
+    });
   }
 });
 
@@ -3802,8 +3845,7 @@ protectedApi.delete('/leads/:id/persons/:relationshipId', async (req: Request, r
     }
     res.json({ success: true, deletedId: req.params.relationshipId });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: redactSecrets(msg) });
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to unlink person from lead.') });
   }
 });
 

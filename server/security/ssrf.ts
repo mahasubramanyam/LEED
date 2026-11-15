@@ -1,4 +1,7 @@
 import dns from 'dns/promises';
+import type dnsTypes from 'node:dns';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import { recordSecurityEvent } from './securityEvents.js';
 
@@ -13,8 +16,15 @@ export interface SsrfValidationResult {
   allowed: boolean;
   url?: URL;
   resolvedIps?: string[];
+  resolvedRecords?: DnsAddressRecord[];
   reason?: string;
 }
+
+export type PinnedLookupFn = (
+  hostname: string,
+  options: dnsTypes.LookupOptions,
+  callback: (err: NodeJS.ErrnoException | null, address: string | dnsTypes.LookupAddress[], family?: number) => void
+) => void;
 
 const INTERNAL_HOSTNAMES = new Set([
   'localhost',
@@ -261,11 +271,192 @@ export async function validateOutboundUrl(
       }
     }
 
-    return { allowed: true, url: targetUrl, resolvedIps };
+    return { allowed: true, url: targetUrl, resolvedIps, resolvedRecords: records };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { allowed: false, reason: `DNS lookup failed for hostname: ${msg}` };
   }
+}
+
+export function createPinnedLookup(
+  expectedHostname: string,
+  pinnedRecords: DnsAddressRecord[]
+): PinnedLookupFn {
+  const normalizedExpected = expectedHostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
+  const safeRecords = pinnedRecords.filter((rec) => !isDisallowedIpAddress(rec.address));
+  if (safeRecords.length === 0) {
+    throw new SsrfBlockedError(`No safe public IP addresses available to pin for ${normalizedExpected}`);
+  }
+
+  return (hostname, opts, callback) => {
+    const reqHost = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
+    if (reqHost !== normalizedExpected) {
+      callback(
+        new SsrfBlockedError(`Pinned DNS lookup rejected unexpected host "${reqHost}"`) as NodeJS.ErrnoException,
+        '',
+        4
+      );
+      return;
+    }
+
+    const familyFilter = typeof opts === 'object' && opts ? Number(opts.family) || 0 : 0;
+    const matching = familyFilter ? safeRecords.filter((r) => r.family === familyFilter) : safeRecords;
+    const chosen = matching.length > 0 ? matching : safeRecords;
+
+    if (typeof opts === 'object' && opts && opts.all) {
+      callback(
+        null,
+        chosen.map((r) => ({ address: r.address, family: r.family }))
+      );
+      return;
+    }
+
+    callback(null, chosen[0].address, chosen[0].family);
+  };
+}
+
+async function requestWithPinnedDns(
+  targetUrl: URL,
+  pinnedRecords: DnsAddressRecord[],
+  options: {
+    headers?: Record<string, string>;
+    timeoutMs: number;
+    maxBytes: number;
+  }
+): Promise<{
+  response: globalThis.Response;
+  bodyText: string;
+  truncated: boolean;
+}> {
+  const isHttps = targetUrl.protocol === 'https:';
+  const cleanHost = targetUrl.hostname.replace(/^\[|\]$/g, '');
+  const lookup = createPinnedLookup(cleanHost, pinnedRecords);
+  const port = targetUrl.port ? Number(targetUrl.port) : isHttps ? 443 : 80;
+  const pathWithQuery = `${targetUrl.pathname || '/'}${targetUrl.search || ''}`;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let deliberatelyClosed = false;
+    let truncated = false;
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+
+    const finishResolve = (
+      status: number,
+      statusText: string,
+      rawHeaders: http.IncomingHttpHeaders,
+      bodyText: string
+    ) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(rawHeaders)) {
+        if (!k || v === undefined) continue;
+        if (Array.isArray(v)) {
+          for (const item of v) headers.append(k, String(item));
+        } else {
+          headers.set(k, String(v));
+        }
+      }
+
+      // 304/204/3xx statuses don't need body in Response wrapper; bodyText carries bounded content
+      const response = new Response(null, { status, statusText, headers });
+      resolve({ response, bodyText, truncated });
+    };
+
+    const finishReject = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    };
+
+    const reqOptions: https.RequestOptions = {
+      protocol: targetUrl.protocol,
+      hostname: cleanHost,
+      port,
+      path: pathWithQuery,
+      method: 'GET',
+      headers: options.headers,
+      agent: false,
+      lookup: lookup as any,
+      ...(isHttps
+        ? {
+            rejectUnauthorized: true,
+            servername: net.isIP(cleanHost) ? undefined : cleanHost,
+          }
+        : {}),
+    };
+
+    const transport = isHttps ? https : http;
+    const req = transport.request(reqOptions, (res) => {
+      const status = res.statusCode || 0;
+      const statusText = res.statusMessage || '';
+
+      if (status >= 300 && status < 400) {
+        deliberatelyClosed = true;
+        res.resume();
+        req.destroy();
+        finishResolve(status, statusText, res.headers, '');
+        return;
+      }
+
+      if (status < 200 || status >= 300) {
+        deliberatelyClosed = true;
+        res.resume();
+        req.destroy();
+        finishResolve(status, statusText, res.headers, '');
+        return;
+      }
+
+      res.on('data', (chunk: Buffer | string) => {
+        if (settled) return;
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        if (totalBytes + buf.length > options.maxBytes) {
+          const remaining = options.maxBytes - totalBytes;
+          if (remaining > 0) {
+            chunks.push(buf.subarray(0, remaining));
+            totalBytes += remaining;
+          }
+          truncated = true;
+          deliberatelyClosed = true;
+          res.destroy();
+          req.destroy();
+          finishResolve(status, statusText, res.headers, Buffer.concat(chunks).toString('utf8'));
+          return;
+        }
+        chunks.push(buf);
+        totalBytes += buf.length;
+      });
+
+      res.on('end', () => {
+        finishResolve(status, statusText, res.headers, Buffer.concat(chunks).toString('utf8'));
+      });
+
+      res.on('error', (err) => {
+        if (deliberatelyClosed) {
+          finishResolve(status, statusText, res.headers, Buffer.concat(chunks).toString('utf8'));
+          return;
+        }
+        finishReject(err);
+      });
+    });
+
+    const timer = setTimeout(() => {
+      const timeoutErr = new Error(`Outbound request timed out after ${options.timeoutMs}ms`);
+      req.destroy(timeoutErr);
+      finishReject(timeoutErr);
+    }, options.timeoutMs);
+
+    req.on('error', (err) => {
+      if (deliberatelyClosed) return;
+      finishReject(err);
+    });
+
+    req.end();
+  });
 }
 
 export async function readBoundedResponseText(
@@ -337,7 +528,7 @@ export async function fetchWithSsrfProtection(
   const maxRedirects = options?.maxRedirects ?? 3;
   const timeoutMs = options?.timeoutMs ?? 6000;
   const maxBytes = options?.maxBytes ?? 350 * 1024;
-  const fetchImpl = options?.fetchFn || fetch;
+  const customFetchFn = options?.fetchFn;
 
   let currentUrl = rawUrl;
   let hops = 0;
@@ -351,61 +542,130 @@ export async function fetchWithSsrfProtection(
       throw new SsrfBlockedError(validation.reason || 'Outbound request blocked by SSRF guard', validation.resolvedIps?.[0]);
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
     let response: globalThis.Response;
-    try {
-      response = await fetchImpl(validation.url.toString(), {
-        method: 'GET',
-        headers: options?.headers,
-        signal: controller.signal,
-        redirect: 'manual',
-      });
-    } finally {
-      clearTimeout(timer);
-    }
+    let bodyText = '';
+    let truncated = false;
 
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      await response.body?.cancel?.().catch(() => {});
-      if (!location) {
-        throw new Error(`HTTP ${response.status} redirect missing Location header`);
-      }
-      if (hops >= maxRedirects) {
-        recordSecurityEvent({
-          category: 'ssrf_blocked',
-          severity: 'warning',
-          summary: `Blocked outbound redirect chain exceeding ${maxRedirects} hops`,
+    if (customFetchFn) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        response = await customFetchFn(validation.url.toString(), {
+          method: 'GET',
+          headers: options?.headers,
+          signal: controller.signal,
+          redirect: 'manual',
         });
-        throw new SsrfBlockedError(`Exceeded maximum allowed redirects (${maxRedirects})`, validation.resolvedIps?.[0]);
+      } finally {
+        clearTimeout(timer);
       }
-      const nextUrl = new URL(location, validation.url);
-      currentUrl = nextUrl.toString();
-      hops += 1;
-      continue;
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        await response.body?.cancel?.().catch(() => {});
+        if (!location) {
+          throw new Error(`HTTP ${response.status} redirect missing Location header`);
+        }
+        if (hops >= maxRedirects) {
+          recordSecurityEvent({
+            category: 'ssrf_blocked',
+            severity: 'warning',
+            summary: `Blocked outbound redirect chain exceeding ${maxRedirects} hops`,
+          });
+          throw new SsrfBlockedError(`Exceeded maximum allowed redirects (${maxRedirects})`, validation.resolvedIps?.[0]);
+        }
+        const nextUrl = new URL(location, validation.url);
+        currentUrl = nextUrl.toString();
+        hops += 1;
+        continue;
+      }
+
+      if (!response.ok) {
+        await response.body?.cancel?.().catch(() => {});
+        return {
+          response,
+          finalUrl: validation.url,
+          resolvedIps: validation.resolvedIps || [],
+          bodyText: '',
+          truncated: false,
+        };
+      }
+
+      const bounded = await readBoundedResponseText(response, maxBytes);
+      bodyText = bounded.text;
+      truncated = bounded.truncated;
+    } else {
+      const pinnedRecords =
+        validation.resolvedRecords && validation.resolvedRecords.length > 0
+          ? validation.resolvedRecords
+          : (validation.resolvedIps || []).map((ip) => ({ address: ip, family: net.isIP(ip) || 4 }));
+
+      const pinnedResult = await requestWithPinnedDns(validation.url, pinnedRecords, {
+        headers: options?.headers,
+        timeoutMs,
+        maxBytes,
+      });
+      response = pinnedResult.response;
+      bodyText = pinnedResult.bodyText;
+      truncated = pinnedResult.truncated;
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (!location) {
+          throw new Error(`HTTP ${response.status} redirect missing Location header`);
+        }
+        if (hops >= maxRedirects) {
+          recordSecurityEvent({
+            category: 'ssrf_blocked',
+            severity: 'warning',
+            summary: `Blocked outbound redirect chain exceeding ${maxRedirects} hops`,
+          });
+          throw new SsrfBlockedError(`Exceeded maximum allowed redirects (${maxRedirects})`, validation.resolvedIps?.[0]);
+        }
+        const nextUrl = new URL(location, validation.url);
+        currentUrl = nextUrl.toString();
+        hops += 1;
+        continue;
+      }
+
+      if (!response.ok) {
+        return {
+          response,
+          finalUrl: validation.url,
+          resolvedIps: validation.resolvedIps || [],
+          bodyText: '',
+          truncated: false,
+        };
+      }
     }
 
-    if (!response.ok) {
-      await response.body?.cancel?.().catch(() => {});
-      return {
-        response,
-        finalUrl: validation.url,
-        resolvedIps: validation.resolvedIps || [],
-        bodyText: '',
-        truncated: false,
-      };
-    }
-
-    const { text, truncated } = await readBoundedResponseText(response, maxBytes);
     return {
       response,
       finalUrl: validation.url,
       resolvedIps: validation.resolvedIps || [],
-      bodyText: text,
+      bodyText,
       truncated,
     };
   }
+}
+
+export function getSsrfRuntimeStatus() {
+  const selfChecks = {
+    loopbackV4Blocked: isDisallowedIpAddress('127.0.0.1'),
+    metadataV4Blocked: isDisallowedIpAddress('169.254.169.254'),
+    mappedV6Blocked: isDisallowedIpAddress('::ffff:127.0.0.1'),
+    ulaV6Blocked: isDisallowedIpAddress('fc00::1'),
+    publicV4Allowed: !isDisallowedIpAddress('93.184.216.34'),
+  };
+  return {
+    dnsPinningEnabled: typeof createPinnedLookup === 'function',
+    pinnedTransport: 'node_http_https_pinned_lookup',
+    privateCidrsBlockedSelfTest: Object.values(selfChecks).every(Boolean),
+    redirectRevalidationEnabled: true,
+    maxRedirectsDefault: 3,
+    maxResponseBytesDefault: 350 * 1024,
+    standardPortsOnlyDefault: true,
+  };
 }
 
 export class SsrfBlockedError extends Error {
