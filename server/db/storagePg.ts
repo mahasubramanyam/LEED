@@ -2256,6 +2256,46 @@ export class PostgresStorage {
     return this.getLeadPersons(input.leadId);
   }
 
+  public async setPrimaryContact(leadId: string, relationshipId: string): Promise<LinkedPersonWithRelationship[]> {
+    const pool = this.getClient();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await this.ensureMigration005Tables(client);
+
+      await client.query(`SELECT id FROM leads WHERE id = $1 FOR UPDATE`, [leadId]);
+      const targetRes = await client.query(
+        `SELECT id FROM company_person_relationships WHERE id = $1 AND lead_id = $2`,
+        [relationshipId, leadId]
+      );
+      if (targetRes.rows.length === 0) {
+        throw new Error(`Relationship "${relationshipId}" not found for company "${leadId}".`);
+      }
+
+      await client.query(
+        `UPDATE company_person_relationships
+         SET is_primary_contact = FALSE, updated_at = NOW()
+         WHERE lead_id = $1 AND is_primary_contact = TRUE AND id <> $2`,
+        [leadId, relationshipId]
+      );
+
+      await client.query(
+        `UPDATE company_person_relationships
+         SET is_primary_contact = TRUE, updated_at = NOW()
+         WHERE id = $1 AND lead_id = $2`,
+        [relationshipId, leadId]
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+    return this.getLeadPersons(leadId);
+  }
+
   public async unlinkPersonFromLead(leadId: string, relationshipId: string): Promise<boolean> {
     const pool = this.getClient();
     const client = await pool.connect();
@@ -2505,6 +2545,17 @@ export class PostgresStorage {
         await this.ensureMigration005Tables(client);
       }
 
+      // Enforce batch row_number uniqueness before persisting any row
+      const seenRowNumbers = new Set<number>();
+      for (const r of plan.rows) {
+        if (seenRowNumbers.has(r.rowNumber)) {
+          throw new Error(
+            `Duplicate row_number ${r.rowNumber} detected in import batch "${plan.batchId}". Each row number within a batch must be unique.`
+          );
+        }
+        seenRowNumbers.add(r.rowNumber);
+      }
+
       const defaultStageId = await this.resolvePipelineStageId(client, undefined, true);
 
       // Insert pending batch record first so FK from import_batch_rows is satisfied
@@ -2695,6 +2746,17 @@ export class PostgresStorage {
                   updatedAt: now,
                 };
                 await this.upsertRelationshipInTransaction(client, updatedRel, now);
+                if (updatedRel.isPrimaryContact) {
+                  for (let i = 0; i < relsList.length; i++) {
+                    if (
+                      relsList[i].leadId === targetLeadId &&
+                      !(relsList[i].personId === persistedPersonId && relsList[i].relationshipType === relType) &&
+                      relsList[i].isPrimaryContact
+                    ) {
+                      relsList[i] = { ...relsList[i], isPrimaryContact: false, updatedAt: now };
+                    }
+                  }
+                }
                 const rIdx = relsList.findIndex((r) => r.id === updatedRel.id);
                 if (rIdx >= 0) relsList[rIdx] = updatedRel;
                 persistedRelationshipId = updatedRel.id;
@@ -2709,6 +2771,13 @@ export class PostgresStorage {
                   now,
                 });
                 await this.upsertRelationshipInTransaction(client, newRel, now);
+                if (newRel.isPrimaryContact) {
+                  for (let i = 0; i < relsList.length; i++) {
+                    if (relsList[i].leadId === targetLeadId && relsList[i].isPrimaryContact) {
+                      relsList[i] = { ...relsList[i], isPrimaryContact: false, updatedAt: now };
+                    }
+                  }
+                }
                 relsList.unshift(newRel);
                 persistedRelationshipId = newRel.id;
                 createdRelationships++;
@@ -3155,6 +3224,19 @@ export class PostgresStorage {
     rel: CompanyPersonRelationship,
     now: string
   ): Promise<void> {
+    const relType = rel.relationshipType || 'contact';
+    if (rel.isPrimaryContact) {
+      await client.query(`SELECT id FROM leads WHERE id = $1 FOR UPDATE`, [rel.leadId]);
+      await client.query(
+        `UPDATE company_person_relationships
+         SET is_primary_contact = FALSE, updated_at = NOW()
+         WHERE lead_id = $1
+           AND is_primary_contact = TRUE
+           AND NOT (person_id = $2 AND relationship_type = $3)`,
+        [rel.leadId, rel.personId, relType]
+      );
+    }
+
     await client.query(
       `INSERT INTO company_person_relationships (
         id, lead_id, person_id, relationship_type, job_title, designation,
@@ -3174,7 +3256,7 @@ export class PostgresStorage {
         rel.id,
         rel.leadId,
         rel.personId,
-        rel.relationshipType || 'contact',
+        relType,
         rel.jobTitle || null,
         rel.designation || null,
         rel.department || null,

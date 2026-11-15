@@ -7,6 +7,10 @@ import { dbManager } from './server/db/pool.js';
 import { postgresStorage } from './server/db/storagePg.js';
 import { storage } from './server/storage.js';
 import { migrator } from './server/db/migrator.js';
+import {
+  executeMigration005ApprovalWorkflow,
+  handleLegacyRunMigrationsBlocked,
+} from './server/db/migrationWorkflow.js';
 import { jsonMigrator } from './server/db/migrateJsonToSql.js';
 import { searchBrreg } from './server/connectors/brreg.js';
 import { searchCompaniesHouse } from './server/connectors/companiesHouse.js';
@@ -603,27 +607,20 @@ protectedApi.get('/database/status', async (req: Request, res: Response) => {
   }
 });
 
-// Run Schema Migrations (DDL) - Owner Role Enforced
+// Legacy Bulk Migration Route — Locked down to prevent bypassing version-specific owner approval
 protectedApi.post('/database/run-migrations', async (req: Request, res: Response) => {
-  if (!req.owner || req.owner.role !== 'owner') {
-    res.status(403).json({ error: 'Owner authorization required to run schema migrations.', code: 'FORBIDDEN' });
-    return;
-  }
-  try {
-    const result = await migrator.runMigrations();
-    await postgresStorage.recordAuditEvent(
-      result.success ? 'SCHEMA_MIGRATIONS_EXECUTED' : 'SCHEMA_MIGRATIONS_FAILED',
-      req.owner.email,
-      'schema_migration',
-      result.applied.join(',') || 'none',
-      { applied: result.applied, alreadyApplied: result.alreadyApplied, error: result.error },
-      normalizeClientIp(req)
-    );
-    res.json(result);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `Schema migration failed: ${msg}` });
-  }
+  const outcome = await handleLegacyRunMigrationsBlocked(
+    {
+      owner: req.owner,
+      clientIp: normalizeClientIp(req),
+    },
+    {
+      isDbConnected: () => dbManager.isDbConnected(),
+      recordAuditEvent: (action, actorEmail, entityType, entityId, details, ipAddress) =>
+        postgresStorage.recordAuditEvent(action, actorEmail, entityType, entityId, details, ipAddress),
+    }
+  );
+  res.status(outcome.status).json(outcome.body);
 });
 
 // Dedicated Owner-Only Approval Action for Migration 004 Only
@@ -749,103 +746,21 @@ protectedApi.post('/database/migrations/004/approve', async (req: Request, res: 
 
 // Dedicated Owner-Only Approval Action for Migration 005 Only
 protectedApi.post('/database/migrations/005/approve', async (req: Request, res: Response) => {
-  if (!req.owner || req.owner.role !== 'owner') {
-    res.status(403).json({
-      error: 'Owner authorization required to approve and execute Migration 005.',
-      code: 'FORBIDDEN',
-    });
-    return;
-  }
-
-  const { confirmMigration } = req.body || {};
-  if (confirmMigration !== '005') {
-    res.status(400).json({
-      error: 'Explicit owner confirmation is required (confirmMigration must equal "005").',
-      code: 'CONFIRMATION_REQUIRED',
-    });
-    return;
-  }
-
-  if (!dbManager.isDbConnected()) {
-    res.status(503).json({
-      error: 'PostgreSQL database is not connected. Cannot apply Migration 005.',
-      code: 'DATABASE_UNAVAILABLE',
-    });
-    return;
-  }
-
-  const clientIp = normalizeClientIp(req);
-  try {
-    const result = await migrator.runMigrations(undefined, { targetVersion: '005' });
-    const inspection = await migrator.inspectMigrationStatus();
-
-    const verified =
-      result.success &&
-      inspection.migration005Recorded &&
-      inspection.missingMigration005Tables.length === 0 &&
-      inspection.migration005SchemaReady;
-
-    const verification = {
-      migration005Recorded: inspection.migration005Recorded,
-      migration005Tables: inspection.migration005Tables,
-      missingMigration005Tables: inspection.missingMigration005Tables,
-      migration005SchemaReady: inspection.migration005SchemaReady,
-      verified,
-    };
-
-    try {
-      await postgresStorage.recordAuditEvent(
-        verified ? 'MIGRATION_005_APPROVED_AND_APPLIED' : 'MIGRATION_005_APPROVAL_FAILED',
-        req.owner.email,
-        'schema_migration',
-        '005_import_and_relationships.sql',
-        {
-          applied: result.applied,
-          alreadyApplied: result.alreadyApplied,
-          verification,
-          error: result.error,
-        },
-        clientIp
-      );
-    } catch (auditErr) {
-      console.warn('[Migration 005] Could not record audit event:', auditErr);
+  const outcome = await executeMigration005ApprovalWorkflow(
+    {
+      owner: req.owner,
+      confirmMigration: req.body?.confirmMigration,
+      clientIp: normalizeClientIp(req),
+    },
+    {
+      isDbConnected: () => dbManager.isDbConnected(),
+      runTargetMigration005: () => migrator.runMigrations(undefined, { targetVersion: '005' }),
+      inspectMigrationStatus: () => migrator.inspectMigrationStatus(),
+      recordAuditEvent: (action, actorEmail, entityType, entityId, details, ipAddress) =>
+        postgresStorage.recordAuditEvent(action, actorEmail, entityType, entityId, details, ipAddress),
     }
-
-    if (!result.success || !verified) {
-      res.status(500).json({
-        success: false,
-        migration: '005_import_and_relationships.sql',
-        applied: result.applied,
-        alreadyApplied: result.alreadyApplied,
-        verification,
-        inspection,
-        error:
-          result.error ||
-          'Migration 005 executed but post-execution schema verification did not pass.',
-      });
-      return;
-    }
-
-    res.json({
-      success: true,
-      migration: '005_import_and_relationships.sql',
-      applied: result.applied,
-      alreadyApplied: result.alreadyApplied,
-      verification,
-      inspection,
-      message:
-        result.applied.length > 0
-          ? 'Migration 005 approved, applied transactionally, and verified (5/5 Phase 7 tables ready).'
-          : 'Migration 005 was already applied and verified in Neon (5/5 Phase 7 tables ready).',
-    });
-  } catch (err: unknown) {
-    const rawMsg = err instanceof Error ? err.message : String(err);
-    const safeMsg = rawMsg.replace(/:[^:@]+@/, ':***@');
-    res.status(500).json({
-      success: false,
-      error: `Migration 005 execution failed and was rolled back: ${safeMsg}`,
-    });
-  }
+  );
+  res.status(outcome.status).json(outcome.body);
 });
 
 // Migrate JSON Store into PostgreSQL (Supports Dry-Run)
@@ -3603,19 +3518,35 @@ async function startServer() {
     if (check.connected) {
       const preInspection = await migrator.inspectMigrationStatus();
       if (process.env.AUTO_RUN_MIGRATIONS === 'true') {
-        console.log(`[Startup] PostgreSQL connected successfully (${check.latencyMs}ms). Running schema migrations...`);
-        const migResult = await migrator.runMigrations();
+        console.log(`[Startup] PostgreSQL connected successfully (${check.latencyMs}ms). Running baseline schema migrations (001–004 only; 005+ require explicit owner approval)...`);
+        const baselineVersions = ['001', '002', '003', '004'];
+        const applied: string[] = [];
+        const alreadyAppliedSet = new Set<string>();
+        let success = true;
+        let error: string | undefined;
+
+        for (const targetVersion of baselineVersions) {
+          const stepRes = await migrator.runMigrations(undefined, { targetVersion });
+          applied.push(...stepRes.applied);
+          for (const prev of stepRes.alreadyApplied) alreadyAppliedSet.add(prev);
+          if (!stepRes.success) {
+            success = false;
+            error = stepRes.error;
+            break;
+          }
+        }
+
         lastStartupMigrationResult = {
           attempted: true,
-          success: migResult.success,
-          applied: migResult.applied,
-          alreadyApplied: migResult.alreadyApplied,
-          error: migResult.error,
+          success,
+          applied,
+          alreadyApplied: Array.from(alreadyAppliedSet),
+          error,
         };
-        if (!migResult.success) {
-          console.error(`[Startup] Schema migrations FAILED: ${migResult.error || 'Unknown error'}`);
+        if (!success) {
+          console.error(`[Startup] Baseline schema migrations FAILED: ${error || 'Unknown error'}`);
         } else {
-          console.log(`[Startup] Migrations succeeded — applied: ${migResult.applied.length}, already applied: ${migResult.alreadyApplied.length}`);
+          console.log(`[Startup] Baseline migrations succeeded — applied: ${applied.length}, already applied: ${alreadyAppliedSet.size}`);
         }
       } else {
         console.log(`[Startup] PostgreSQL connected successfully (${check.latencyMs}ms). Read-only schema inspection (pending migrations require explicit approval).`);

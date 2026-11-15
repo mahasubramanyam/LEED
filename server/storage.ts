@@ -1081,8 +1081,17 @@ export class StorageManager implements ImportStorageAdapter {
     };
   }
 
-  public async runSchemaMigrations() {
-    return migrator.runMigrations();
+  public async runSchemaMigrations(options?: { targetVersion?: '004' | '005'; confirmMigration?: string }) {
+    if (
+      !options?.targetVersion ||
+      !['004', '005'].includes(options.targetVersion) ||
+      options.confirmMigration !== options.targetVersion
+    ) {
+      throw new Error(
+        'Unrestricted bulk migration execution is disabled. Explicit allowlisted targetVersion and confirmMigration are required.'
+      );
+    }
+    return migrator.runMigrations(undefined, { targetVersion: options.targetVersion });
   }
 
   public async runJsonMigration(dryRun = false): Promise<MigrationSummary> {
@@ -1176,6 +1185,20 @@ export class StorageManager implements ImportStorageAdapter {
       (r) => r.leadId === input.leadId && r.personId === personId && r.relationshipType === relType
     );
 
+    const promoteToPrimary = Boolean(input.person.isPrimaryContact);
+    if (promoteToPrimary) {
+      for (let i = 0; i < this.db.companyPersonRelationships.length; i++) {
+        const cur = this.db.companyPersonRelationships[i];
+        if (
+          cur.leadId === input.leadId &&
+          !(cur.personId === personId && cur.relationshipType === relType) &&
+          cur.isPrimaryContact
+        ) {
+          this.db.companyPersonRelationships[i] = { ...cur, isPrimaryContact: false, updatedAt: now };
+        }
+      }
+    }
+
     if (relIdx >= 0) {
       const cur = this.db.companyPersonRelationships[relIdx];
       this.db.companyPersonRelationships[relIdx] = {
@@ -1184,7 +1207,7 @@ export class StorageManager implements ImportStorageAdapter {
         designation: input.person.designation || cur.designation,
         department: input.person.department || cur.department,
         decisionMakerCategory: input.person.decisionMakerCategory || cur.decisionMakerCategory,
-        isPrimaryContact: cur.isPrimaryContact || Boolean(input.person.isPrimaryContact),
+        isPrimaryContact: cur.isPrimaryContact || promoteToPrimary,
         updatedAt: now,
       };
     } else {
@@ -1202,6 +1225,28 @@ export class StorageManager implements ImportStorageAdapter {
 
     this.saveDatabase(this.db);
     return this.getLeadPersons(input.leadId);
+  }
+
+  public setPrimaryContact(leadId: string, relationshipId: string): LinkedPersonWithRelationship[] {
+    if (!this.db.companyPersonRelationships) this.db.companyPersonRelationships = [];
+    const targetIdx = this.db.companyPersonRelationships.findIndex(
+      (r) => r.id === relationshipId && r.leadId === leadId
+    );
+    if (targetIdx < 0) {
+      throw new Error(`Relationship "${relationshipId}" not found for company "${leadId}".`);
+    }
+    const now = new Date().toISOString();
+    for (let i = 0; i < this.db.companyPersonRelationships.length; i++) {
+      const cur = this.db.companyPersonRelationships[i];
+      if (cur.leadId !== leadId) continue;
+      if (cur.id === relationshipId) {
+        this.db.companyPersonRelationships[i] = { ...cur, isPrimaryContact: true, updatedAt: now };
+      } else if (cur.isPrimaryContact) {
+        this.db.companyPersonRelationships[i] = { ...cur, isPrimaryContact: false, updatedAt: now };
+      }
+    }
+    this.saveDatabase(this.db);
+    return this.getLeadPersons(leadId);
   }
 
   public unlinkPersonFromLead(leadId: string, relationshipId: string): boolean {
@@ -1360,6 +1405,16 @@ export class StorageManager implements ImportStorageAdapter {
     let invalidRows = 0;
 
     try {
+      const seenRowNumbers = new Set<number>();
+      for (const r of plan.rows) {
+        if (seenRowNumbers.has(r.rowNumber)) {
+          throw new Error(
+            `Duplicate row_number ${r.rowNumber} detected in import batch "${plan.batchId}". Each row number within a batch must be unique.`
+          );
+        }
+        seenRowNumbers.add(r.rowNumber);
+      }
+
       for (let i = 0; i < plan.rows.length; i++) {
         const row = plan.rows[i];
 
@@ -1526,12 +1581,36 @@ export class StorageManager implements ImportStorageAdapter {
           }
 
           if (targetLeadId && persistedPersonId) {
+            const relType = row.person!.relationshipType || 'contact';
             const existingRelIdx = this.db.companyPersonRelationships.findIndex(
               (r) =>
                 r.leadId === targetLeadId &&
                 r.personId === persistedPersonId &&
-                r.relationshipType === (row.person!.relationshipType || 'contact')
+                r.relationshipType === relType
             );
+            const willBePrimary =
+              existingRelIdx >= 0
+                ? this.db.companyPersonRelationships[existingRelIdx].isPrimaryContact ||
+                  Boolean(row.person.isPrimaryContact)
+                : Boolean(row.person.isPrimaryContact);
+
+            if (willBePrimary) {
+              for (let rIdx = 0; rIdx < this.db.companyPersonRelationships.length; rIdx++) {
+                const curRel = this.db.companyPersonRelationships[rIdx];
+                if (
+                  curRel.leadId === targetLeadId &&
+                  !(curRel.personId === persistedPersonId && curRel.relationshipType === relType) &&
+                  curRel.isPrimaryContact
+                ) {
+                  this.db.companyPersonRelationships[rIdx] = {
+                    ...curRel,
+                    isPrimaryContact: false,
+                    updatedAt: now,
+                  };
+                }
+              }
+            }
+
             if (existingRelIdx >= 0) {
               const cur = this.db.companyPersonRelationships[existingRelIdx];
               const nextRel: CompanyPersonRelationship = {

@@ -107,10 +107,17 @@ interface DiagnosticsData {
       migration004ExpectedIndexesCount?: number;
       migration004PresentIndexesCount?: number;
       missingMigration004Indexes?: string[];
+      migrations001To004Recorded?: boolean;
       migration005Recorded?: boolean;
       migration005SchemaReady?: boolean;
       migration005Tables?: string[];
       missingMigration005Tables?: string[];
+      migration005ExpectedTablesCount?: number;
+      migration005PresentTablesCount?: number;
+      migration005ExpectedIndexesCount?: number;
+      migration005PresentIndexesCount?: number;
+      missingMigration005Indexes?: string[];
+      existingCrmTablesIntact?: boolean;
     } | null;
   };
   security: {
@@ -233,8 +240,12 @@ export function OwnerControlCentre({
     message: string;
     verification?: {
       migration005Recorded: boolean;
+      migrations001To004Recorded: boolean;
+      schemaReady: boolean;
       tablesPresentCount: number;
       expectedTablesCount: number;
+      indexesPresentCount: number;
+      expectedIndexesCount: number;
     };
   } | null>(null);
 
@@ -1053,15 +1064,20 @@ export function OwnerControlCentre({
                   <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
                     <span className="text-slate-400 block text-[10px]">PHASE 7 TABLES PRESENT</span>
                     <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
-                      {diagData.migrations.inspection.migration005Tables?.length ?? 0} / 5 Present
+                      {diagData.migrations.inspection.migration005PresentTablesCount ??
+                        diagData.migrations.inspection.migration005Tables?.length ??
+                        0}{' '}
+                      / {diagData.migrations.inspection.migration005ExpectedTablesCount ?? 5} Present
                     </span>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
-                    <span className="text-slate-400 block text-[10px]">MISSING TABLES (005)</span>
-                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 truncate block">
+                    <span className="text-slate-400 block text-[10px]">PHASE 7 INDEXES &amp; MISSING</span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 truncate block tabular-nums">
+                      {diagData.migrations.inspection.migration005PresentIndexesCount ?? 0} /{' '}
+                      {diagData.migrations.inspection.migration005ExpectedIndexesCount ?? 13} Indexes
                       {diagData.migrations.inspection.missingMigration005Tables?.length
-                        ? diagData.migrations.inspection.missingMigration005Tables.join(', ')
-                        : 'None'}
+                        ? ` · Missing: ${diagData.migrations.inspection.missingMigration005Tables.join(', ')}`
+                        : ''}
                     </span>
                   </div>
                 </div>
@@ -1144,7 +1160,13 @@ export function OwnerControlCentre({
                       <p className="font-semibold">{migration005Feedback.message}</p>
                       {migration005Feedback.verification && (
                         <p className="font-mono text-[11px]">
-                          005 recorded={String(migration005Feedback.verification.migration005Recorded)} · tables={migration005Feedback.verification.tablesPresentCount}/{migration005Feedback.verification.expectedTablesCount}
+                          005 recorded={String(migration005Feedback.verification.migration005Recorded)} · 001–004 intact=
+                          {String(migration005Feedback.verification.migrations001To004Recorded)} · tables=
+                          {migration005Feedback.verification.tablesPresentCount}/
+                          {migration005Feedback.verification.expectedTablesCount} · indexes=
+                          {migration005Feedback.verification.indexesPresentCount}/
+                          {migration005Feedback.verification.expectedIndexesCount} · schemaReady=
+                          {String(migration005Feedback.verification.schemaReady)}
                         </p>
                       )}
                     </div>

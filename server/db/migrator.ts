@@ -250,10 +250,22 @@ export class Migrator {
     migration004ExpectedIndexesCount: number;
     migration004PresentIndexesCount: number;
     missingMigration004Indexes: string[];
+    migrations001To004Recorded: boolean;
     migration005Recorded: boolean;
     migration005SchemaReady: boolean;
     migration005Tables: string[];
     missingMigration005Tables: string[];
+    migration005ExpectedTablesCount: number;
+    migration005PresentTablesCount: number;
+    migration005ExpectedIndexes: string[];
+    migration005PresentIndexes: string[];
+    missingMigration005Indexes: string[];
+    migration005ExpectedIndexesCount: number;
+    migration005PresentIndexesCount: number;
+    existingCrmTablesExpectedCount: number;
+    existingCrmTablesPresentCount: number;
+    missingExistingCrmTables: string[];
+    existingCrmTablesIntact: boolean;
     error?: string;
   }> {
     const expectedCols = ['country_code', 'normalized_value', 'issuing_authority', 'source', 'status'];
@@ -302,6 +314,43 @@ export class Migrator {
       'import_batches',
       'import_batch_rows',
     ];
+    const expected005OriginalIndexes = [
+      'idx_persons_email',
+      'idx_persons_linkedin_slug',
+      'idx_persons_phone_normalized',
+      'idx_persons_normalized_name',
+      'idx_cpr_lead_id',
+      'idx_cpr_person_id',
+      'idx_cpr_decision_category',
+      'idx_import_templates_name',
+      'idx_import_batches_created_at',
+      'idx_import_batches_status',
+      'idx_import_batch_rows_outcome',
+    ];
+    const expected005UniqueIndexes = [
+      'uq_cpr_single_primary_per_lead',
+      'uq_import_batch_rows_batch_row',
+    ];
+    const expected005Indexes = [...expected005OriginalIndexes, ...expected005UniqueIndexes];
+    const expectedExistingCrmTables = [
+      'owner_users',
+      'owner_sessions',
+      'pipeline_stages',
+      'leads',
+      'lead_sources',
+      'lead_identifiers',
+      'lead_notes',
+      'activities',
+      'tasks',
+      'lead_merge_history',
+      'campaigns',
+      'campaign_messages',
+      'connector_credentials',
+      'connector_runs',
+      'audit_events',
+      'app_settings',
+      'country_source_capabilities',
+    ];
 
     const pool = clientOrPool || dbManager.getPool();
     if (!pool) {
@@ -328,10 +377,22 @@ export class Migrator {
         migration004ExpectedIndexesCount: expected004Indexes.length,
         migration004PresentIndexesCount: 0,
         missingMigration004Indexes: expected004Indexes,
+        migrations001To004Recorded: false,
         migration005Recorded: false,
         migration005SchemaReady: false,
         migration005Tables: [],
         missingMigration005Tables: expected005Tables,
+        migration005ExpectedTablesCount: expected005Tables.length,
+        migration005PresentTablesCount: 0,
+        migration005ExpectedIndexes: expected005Indexes,
+        migration005PresentIndexes: [],
+        missingMigration005Indexes: expected005Indexes,
+        migration005ExpectedIndexesCount: expected005Indexes.length,
+        migration005PresentIndexesCount: 0,
+        existingCrmTablesExpectedCount: expectedExistingCrmTables.length,
+        existingCrmTablesPresentCount: 0,
+        missingExistingCrmTables: expectedExistingCrmTables,
+        existingCrmTablesIntact: false,
         error: 'Database connection pool not available',
       };
     }
@@ -398,9 +459,14 @@ export class Migrator {
       const existingTableSet = new Set(tblRes.rows.map((r: { table_name: string }) => r.table_name));
       const migration005Tables = expected005Tables.filter((t) => existingTableSet.has(t));
       const missingMigration005Tables = expected005Tables.filter((t) => !existingTableSet.has(t));
+      const migration005PresentIndexes = expected005Indexes.filter((idx) => idxSet.has(idx));
+      const missingMigration005Indexes = expected005Indexes.filter((idx) => !idxSet.has(idx));
+      const existingCrmTablesPresent = expectedExistingCrmTables.filter((t) => existingTableSet.has(t));
+      const missingExistingCrmTables = expectedExistingCrmTables.filter((t) => !existingTableSet.has(t));
 
       const recordedSet = new Set(appliedVersions.map((v) => v.version));
       const migrations001To003Recorded = ['001', '002', '003'].every((v) => recordedSet.has(v));
+      const migrations001To004Recorded = ['001', '002', '003', '004'].every((v) => recordedSet.has(v));
       const migration003Recorded = recordedSet.has('003');
       const migration004Recorded = recordedSet.has('004');
       const migration005Recorded = recordedSet.has('005');
@@ -436,10 +502,25 @@ export class Migrator {
         migration004ExpectedIndexesCount: expected004Indexes.length,
         migration004PresentIndexesCount: expected004Indexes.length - missingMigration004Indexes.length,
         missingMigration004Indexes,
+        migrations001To004Recorded,
         migration005Recorded,
-        migration005SchemaReady: migration005Recorded && missingMigration005Tables.length === 0,
+        migration005SchemaReady:
+          migration005Recorded &&
+          missingMigration005Tables.length === 0 &&
+          missingMigration005Indexes.length === 0,
         migration005Tables,
         missingMigration005Tables,
+        migration005ExpectedTablesCount: expected005Tables.length,
+        migration005PresentTablesCount: migration005Tables.length,
+        migration005ExpectedIndexes: expected005Indexes,
+        migration005PresentIndexes,
+        missingMigration005Indexes,
+        migration005ExpectedIndexesCount: expected005Indexes.length,
+        migration005PresentIndexesCount: migration005PresentIndexes.length,
+        existingCrmTablesExpectedCount: expectedExistingCrmTables.length,
+        existingCrmTablesPresentCount: existingCrmTablesPresent.length,
+        missingExistingCrmTables,
+        existingCrmTablesIntact: missingExistingCrmTables.length === 0,
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -466,10 +547,22 @@ export class Migrator {
         migration004ExpectedIndexesCount: expected004Indexes.length,
         migration004PresentIndexesCount: 0,
         missingMigration004Indexes: expected004Indexes,
+        migrations001To004Recorded: false,
         migration005Recorded: false,
         migration005SchemaReady: false,
         migration005Tables: [],
         missingMigration005Tables: expected005Tables,
+        migration005ExpectedTablesCount: expected005Tables.length,
+        migration005PresentTablesCount: 0,
+        migration005ExpectedIndexes: expected005Indexes,
+        migration005PresentIndexes: [],
+        missingMigration005Indexes: expected005Indexes,
+        migration005ExpectedIndexesCount: expected005Indexes.length,
+        migration005PresentIndexesCount: 0,
+        existingCrmTablesExpectedCount: expectedExistingCrmTables.length,
+        existingCrmTablesPresentCount: 0,
+        missingExistingCrmTables: expectedExistingCrmTables,
+        existingCrmTablesIntact: false,
         error: msg.replace(/:[^:@]+@/, ':***@'),
       };
     } finally {

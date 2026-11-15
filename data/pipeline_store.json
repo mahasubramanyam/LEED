@@ -578,5 +578,10 @@
       "test.com",
       "spamdomain.org"
     ]
-  }
+  },
+  "persons": [],
+  "companyPersonRelationships": [],
+  "importMappingTemplates": [],
+  "importBatches": [],
+  "importBatchRows": []
 }

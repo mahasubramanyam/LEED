@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS company_person_relationships (
 CREATE INDEX IF NOT EXISTS idx_cpr_lead_id ON company_person_relationships (lead_id);
 CREATE INDEX IF NOT EXISTS idx_cpr_person_id ON company_person_relationships (person_id);
 CREATE INDEX IF NOT EXISTS idx_cpr_decision_category ON company_person_relationships (decision_maker_category);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cpr_single_primary_per_lead ON company_person_relationships (lead_id) WHERE is_primary_contact = TRUE;
 
 -- ============================================================================
 -- 3. IMPORT MAPPING TEMPLATES (Owner Reusable Column & Normalization Presets)
@@ -140,5 +141,5 @@ CREATE TABLE IF NOT EXISTS import_batch_rows (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_import_batch_rows_batch_row ON import_batch_rows (batch_id, row_number);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_import_batch_rows_batch_row ON import_batch_rows (batch_id, row_number);
 CREATE INDEX IF NOT EXISTS idx_import_batch_rows_outcome ON import_batch_rows (batch_id, outcome);

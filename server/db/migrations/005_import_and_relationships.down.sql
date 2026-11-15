@@ -2,7 +2,7 @@
 -- Reverts Phase 7 additive tables safely without affecting Phases 1-6 tables.
 
 DROP INDEX IF EXISTS idx_import_batch_rows_outcome;
-DROP INDEX IF EXISTS idx_import_batch_rows_batch_row;
+DROP INDEX IF EXISTS uq_import_batch_rows_batch_row;
 DROP TABLE IF EXISTS import_batch_rows;
 
 DROP INDEX IF EXISTS idx_import_batches_status;
@@ -12,6 +12,7 @@ DROP TABLE IF EXISTS import_batches;
 DROP INDEX IF EXISTS idx_import_templates_name;
 DROP TABLE IF EXISTS import_mapping_templates;
 
+DROP INDEX IF EXISTS uq_cpr_single_primary_per_lead;
 DROP INDEX IF EXISTS idx_cpr_decision_category;
 DROP INDEX IF EXISTS idx_cpr_person_id;
 DROP INDEX IF EXISTS idx_cpr_lead_id;
