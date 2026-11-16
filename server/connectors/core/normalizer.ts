@@ -1,10 +1,16 @@
-import { CanonicalLead, LeadIdentifier, LeadSource } from '../../types.js';
+import {
+  AttributeProvenanceEntry,
+  AttributeProvenanceType,
+  CanonicalLead,
+  LeadIdentifier,
+  LeadSource,
+} from '../../types.js';
 import { getCountryByCode } from '../../geo/countries.js';
 import { formatInternationalAddress } from '../../geo/addressUtils.js';
 import { normalizePhoneNumber } from '../../geo/phoneUtils.js';
 import { normalizeIdentifierValue, validateIdentifier } from '../../identifiers/identifierEngine.js';
 import { canonicalizeIdentifierType } from '../../../shared/identifierRegistry.js';
-import { StandardizedConnectorResult, VerificationStatus } from './types.js';
+import { SourceCategory, StandardizedConnectorResult, VerificationStatus } from './types.js';
 
 export interface NormalizationBatchSummary {
   leads: CanonicalLead[];
@@ -24,6 +30,69 @@ const VERIFICATION_RANK: Record<VerificationStatus | 'user_provided' | 'discover
   unverified: 0,
   offline_reference: 0,
 };
+
+export const PROVENANCE_RANK: Record<AttributeProvenanceType, number> = {
+  official_registry: 6,
+  official_website: 5,
+  business_directory: 4,
+  search_provider: 3,
+  ai_extracted: 2,
+  inferred: 1,
+  not_verified: 0,
+};
+
+export function resolveProvenanceType(
+  sourceCategory: SourceCategory,
+  verificationStatus: VerificationStatus
+): AttributeProvenanceType {
+  if (verificationStatus === 'officially_verified' || sourceCategory === 'government_registry') {
+    return 'official_registry';
+  }
+  if (verificationStatus === 'web_observed' || sourceCategory === 'website_intelligence') {
+    return 'official_website';
+  }
+  if (
+    verificationStatus === 'directory_listed' ||
+    sourceCategory === 'business_directory' ||
+    sourceCategory === 'maps_geo'
+  ) {
+    return 'business_directory';
+  }
+  if (sourceCategory === 'search_engine') {
+    return 'search_provider';
+  }
+  if (sourceCategory === 'ai_engine') {
+    return 'inferred';
+  }
+  return 'not_verified';
+}
+
+export function computeEvidenceConfidence(result: StandardizedConnectorResult): number {
+  const baseByVerification: Record<VerificationStatus, number> = {
+    officially_verified: 82,
+    syntax_validated: 70,
+    web_observed: 52,
+    directory_listed: 48,
+    unverified: 32,
+    offline_reference: 20,
+  };
+  let score = baseByVerification[result.verificationStatus] ?? 32;
+  if (result.company.registrationNumber) score += 8;
+  if (result.company.website || result.company.domain) score += 4;
+  if (result.company.address?.city || result.company.address?.street) score += 4;
+  if (result.company.phone) score += 3;
+  if (result.company.email) score += 3;
+
+  const cap =
+    result.verificationStatus === 'officially_verified'
+      ? 98
+      : result.verificationStatus === 'web_observed'
+      ? 78
+      : result.verificationStatus === 'directory_listed'
+      ? 74
+      : 48;
+  return Math.min(cap, Math.max(0, score));
+}
 
 export function normalizeLegalCompanyStatus(
   rawStatus?: string | null,
@@ -290,6 +359,40 @@ export function normalizeConnectorResult(result: StandardizedConnectorResult): {
 
   const deterministicLeadId = buildDeterministicLeadId(result.providerId, result.externalSourceId);
   const now = result.retrievedAt || new Date().toISOString();
+  const baseProvType = resolveProvenanceType(result.sourceCategory, result.verificationStatus);
+  const baseSourceUrl = result.company.rawSource?.url || result.sourceUrl;
+  const existingProv = result.company.webMetadata?.attributeProvenance || {};
+  const attrProv: Record<string, AttributeProvenanceEntry> = { ...existingProv };
+
+  const addProv = (attribute: string, value: string | undefined) => {
+    if (!value || !value.trim() || attrProv[attribute]) return;
+    attrProv[attribute] = {
+      attribute,
+      value: value.trim().slice(0, 240),
+      sourceType: baseProvType,
+      sourceName: result.providerName,
+      sourceUrl: baseSourceUrl,
+      retrievedAt: now,
+      connectorId: result.providerId,
+    };
+  };
+
+  addProv('companyName', companyName);
+  addProv('legalName', cleanText(result.company.legalName));
+  addProv('registrationNumber', regNumber);
+  addProv('website', website);
+  addProv('email', cleanText(result.company.email));
+  addProv('phone', rawPhone);
+  addProv('address', formattedAddress);
+  addProv('description', result.company.webMetadata?.description);
+
+  const mergedWebMeta =
+    result.company.webMetadata || Object.keys(attrProv).length > 0
+      ? {
+          ...(result.company.webMetadata || {}),
+          attributeProvenance: attrProv,
+        }
+      : undefined;
 
   const lead: CanonicalLead = {
     id: deterministicLeadId,
@@ -323,7 +426,7 @@ export function normalizeConnectorResult(result: StandardizedConnectorResult): {
     sources: [source],
     identifiers: Array.from(identMap.values()),
     socialLinks: result.company.socialLinks,
-    webMetadata: result.company.webMetadata,
+    webMetadata: mergedWebMeta,
     status: 'new',
     currency: countryRef?.currency || 'USD',
     tags: Array.from(new Set(result.company.tags || [])),
@@ -377,6 +480,10 @@ function buildDeterministicLeadId(providerId: string, externalSourceId: string):
   if (providerId === 'conn-nz-companies') return `nz-nzbn-${cleanExt}`;
   if (providerId === 'conn-ch-zefix') return `ch-uid-${cleanExt}`;
   if (providerId === 'conn-ie-cro') return `ie-cro-${cleanExt}`;
+  if (providerId === 'conn-wikidata') return `wd-${cleanExt}`;
+  if (providerId === 'conn-opencorporates') return `oc-${cleanExt}`;
+  if (providerId === 'conn-brave-search') return `brave-${cleanExt}`;
+  if (providerId === 'conn-google-cse') return `gcse-${cleanExt}`;
   if (providerId === 'conn-osm') {
     const osmNumeric = cleanExt.replace(/^osm-(?:node|way|relation)-/, '');
     return `osm-${osmNumeric}`;
@@ -546,7 +653,7 @@ export function mergeProviderObservationIntoLead(
     confidenceSignals: Array.from(new Set([...(existing.confidenceSignals || []), ...(incoming.confidenceSignals || [])])),
     sources: combinedSources,
     identifiers: Array.from(identMap.values()),
-    webMetadata: incoming.webMetadata || existing.webMetadata,
+    webMetadata: mergeWebMetadata(existing.webMetadata, incoming.webMetadata),
     socialLinks: { ...(incoming.socialLinks || {}), ...(existing.socialLinks || {}) },
     tags: Array.from(new Set([...(existing.tags || []), ...(incoming.tags || [])])),
     customFields: {
@@ -555,6 +662,39 @@ export function mergeProviderObservationIntoLead(
       lastVerifiedRank: String(Math.max(existingRank, incomingRank)),
     },
     updatedAt: new Date().toISOString(),
+  };
+}
+
+function mergeWebMetadata(
+  existingMeta?: CanonicalLead['webMetadata'],
+  incomingMeta?: CanonicalLead['webMetadata']
+): CanonicalLead['webMetadata'] | undefined {
+  if (!existingMeta && !incomingMeta) return undefined;
+  const e = existingMeta || {};
+  const i = incomingMeta || {};
+  const mergedProv: Record<string, AttributeProvenanceEntry> = { ...(e.attributeProvenance || {}) };
+  for (const [key, incEntry] of Object.entries(i.attributeProvenance || {})) {
+    const prev = mergedProv[key];
+    if (!prev || PROVENANCE_RANK[incEntry.sourceType] >= PROVENANCE_RANK[prev.sourceType]) {
+      mergedProv[key] = incEntry;
+    }
+  }
+  const uniqArr = (a?: string[], b?: string[]) => {
+    const combined = Array.from(new Set([...(a || []), ...(b || [])]));
+    return combined.length > 0 ? combined : undefined;
+  };
+  return {
+    ...e,
+    ...i,
+    title: e.title || i.title,
+    description: e.description || i.description,
+    pagesVisited: uniqArr(e.pagesVisited, i.pagesVisited),
+    productsServices: uniqArr(e.productsServices, i.productsServices),
+    locationsServed: uniqArr(e.locationsServed, i.locationsServed),
+    addressesFound: uniqArr(e.addressesFound, i.addressesFound),
+    phonesFound: uniqArr(e.phonesFound, i.phonesFound),
+    emailsFound: uniqArr(e.emailsFound, i.emailsFound),
+    attributeProvenance: Object.keys(mergedProv).length > 0 ? mergedProv : undefined,
   };
 }
 

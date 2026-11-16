@@ -261,6 +261,7 @@ function compareLeadPair(candidate: CanonicalLead, target: CanonicalLead): PairC
       note: `Exact registration number match (${target.registrationNumber || regB})`,
     };
   }
+  const hasConflictingRegNumbers = Boolean(regA.length >= 4 && regB.length >= 4 && regA !== regB);
 
   // 2. Canonical identifiers (VAT, LEI, ORG, CRN, CIK, SIREN, UEN, etc.)
   for (const idA of candidate.identifiers || []) {
@@ -283,8 +284,32 @@ function compareLeadPair(candidate: CanonicalLead, target: CanonicalLead): PairC
     }
   }
 
-  // 3. Domain match
+  // 3. Domain match (preserve subsidiaries/branches with distinct reg numbers or distinct city+street addresses as ambiguous review)
   if (candidate.domain && target.domain && candidate.domain.toLowerCase() === target.domain.toLowerCase()) {
+    if (hasConflictingRegNumbers) {
+      return {
+        classification: 'ambiguous',
+        matchType: 'domain',
+        matchedValue: target.domain,
+        similarityScore: 0.88,
+        note: `Shared domain (${target.domain}) with distinct registration numbers (${candidate.registrationNumber} vs ${target.registrationNumber}) — separate legal entity or subsidiary; review before merging.`,
+      };
+    }
+
+    const candCity = candidate.address?.city?.trim().toLowerCase();
+    const targCity = target.address?.city?.trim().toLowerCase();
+    const candStreet = candidate.address?.street?.trim().toLowerCase();
+    const targStreet = target.address?.street?.trim().toLowerCase();
+    if (candCity && targCity && candCity !== targCity && candStreet && targStreet && candStreet !== targStreet) {
+      return {
+        classification: 'ambiguous',
+        matchType: 'domain',
+        matchedValue: target.domain,
+        similarityScore: 0.86,
+        note: `Shared domain (${target.domain}) across distinct physical offices (${candidate.address?.city} vs ${target.address?.city}) — possible branch location; review before merging.`,
+      };
+    }
+
     return {
       classification: 'exact',
       matchType: 'domain',

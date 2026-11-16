@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {
+  AttributeProvenanceEntry,
   CanonicalLead,
   DiscoveryConnectorSummary,
   DiscoveryDuplicateInfo,
@@ -24,10 +25,11 @@ import {
   ConnectorConfigRecord,
   ConnectorRunRecord,
   IConnector,
+  SourceCategory,
 } from '../connectors/core/types.js';
 import { detectDiscoveryDuplicates } from '../connectors/dedupeEngine.js';
 import { inspectWebsite, WebInspectionResult } from '../connectors/webInspector.js';
-import { analyzeLeadWithAi } from '../gemini.js';
+import { analyzeLeadWithAi, extractBusinessIntelFromWebEvidence } from '../gemini.js';
 import { buildCsvDocument } from '../../shared/csvUtils.js';
 import { canonicalizeIdentifierType } from '../../shared/identifierRegistry.js';
 
@@ -35,11 +37,13 @@ export interface DiscoveryExecutionDeps {
   registry?: ConnectorRegistry;
   executionEngine?: ConnectorExecutionEngine;
   configs?: Record<string, ConnectorConfigRecord>;
+  configuredConnectorIds?: Set<string>;
   userAgent?: string;
   existingCrmLeads?: CanonicalLead[];
   onRecordRun?: RunRecorderFn;
   inspectWebsiteFn?: typeof inspectWebsite;
   analyzeLeadWithAiFn?: typeof analyzeLeadWithAi;
+  extractWebIntelFn?: typeof extractBusinessIntelFromWebEvidence;
 }
 
 export interface SearchSessionRecord {
@@ -100,6 +104,11 @@ function normalizeSearchTaskQueries(req: DiscoverySearchRequest): string[] {
       if (typeof q === 'string' && q.trim()) candidates.push(q.trim());
     }
   }
+  if (Array.isArray(req.keywords)) {
+    for (const kw of req.keywords) {
+      if (typeof kw === 'string' && kw.trim()) candidates.push(kw.trim());
+    }
+  }
   if (typeof req.query === 'string' && req.query.trim()) {
     // Support newline/semicolon separated query input transparently if passed inside query
     for (const line of req.query.split(/[\r\n;]+/)) {
@@ -109,6 +118,7 @@ function normalizeSearchTaskQueries(req: DiscoverySearchRequest): string[] {
   }
   if (candidates.length === 0) {
     const fallbackTerm =
+      req.productsServices?.trim() ||
       req.industry?.trim() ||
       req.category?.trim() ||
       req.businessType?.trim() ||
@@ -200,7 +210,8 @@ export class DiscoveryService {
     countryCode: string | undefined,
     req: DiscoverySearchRequest,
     registry: ConnectorRegistry,
-    configs: Record<string, ConnectorConfigRecord>
+    configs: Record<string, ConnectorConfigRecord>,
+    configuredConnectorIds?: Set<string>
   ): {
     selected: IConnector[];
     skipped: Array<{ connectorId: string; connectorName: string; reason: string }>;
@@ -255,11 +266,16 @@ export class DiscoveryService {
       return { selected, skipped };
     }
 
-    // Dynamic auto-selection based on country coverage, capabilities, enabled state, and search filters
+    // Dynamic auto-selection based on country coverage, source categories, credentials, and search filters
     const searchable = registry.filter({
       country: countryCode,
       capability: 'company_search',
     });
+
+    const categoryFilter =
+      Array.isArray(req.sourceCategories) && req.sourceCategories.length > 0
+        ? new Set<SourceCategory>(req.sourceCategories)
+        : null;
 
     const selected: IConnector[] = [];
     const seen = new Set<string>();
@@ -271,10 +287,21 @@ export class DiscoveryService {
         req.category?.trim() ||
         req.businessType?.trim()
     );
+    const preferWebOrDirectory = Boolean(
+      req.productsServices?.trim() ||
+        (Array.isArray(req.keywords) && req.keywords.length > 0) ||
+        req.industry?.trim() ||
+        req.website?.trim() ||
+        req.domain?.trim() ||
+        !countryCode ||
+        categoryFilter?.has('search_engine') ||
+        categoryFilter?.has('business_directory')
+    );
 
     // 1. Prioritize dedicated country registry connectors
     for (const conn of searchable) {
       const meta = conn.getMetadata();
+      if (categoryFilter && !categoryFilter.has(meta.sourceCategory)) continue;
       if (!meta.supportsAllCountries && countryCode && meta.supportedCountries.includes(countryCode)) {
         if (!isEnabled(conn.id)) {
           skipped.push({
@@ -284,18 +311,54 @@ export class DiscoveryService {
           });
           continue;
         }
+        if (
+          meta.credentialRequirements.required &&
+          configuredConnectorIds &&
+          !configuredConnectorIds.has(conn.id)
+        ) {
+          skipped.push({
+            connectorId: conn.id,
+            connectorName: meta.name,
+            reason: `${meta.shortName} requires API credentials in the Credential Vault.`,
+          });
+          continue;
+        }
         selected.push(conn);
         seen.add(conn.id);
       }
     }
 
-    // 2. Include global POI/directory connectors (conn-osm) when needed or when geo/industry filters apply
+    // 2. Include global web search, business directories, and POI connectors when configured & relevant
     for (const conn of searchable) {
       if (seen.has(conn.id)) continue;
       const meta = conn.getMetadata();
-      const shouldIncludeOsm =
-        selected.length === 0 || preferGeoPoi || !countryCode;
-      if (meta.supportsAllCountries && shouldIncludeOsm) {
+      if (categoryFilter && !categoryFilter.has(meta.sourceCategory)) continue;
+      if (!meta.supportsAllCountries) continue;
+
+      const isCredentialGated = meta.credentialRequirements.required;
+      const hasCredential = !isCredentialGated || Boolean(configuredConnectorIds?.has(conn.id));
+
+      // Skip unconfigured credentialed global search/directory connectors in auto mode unless user explicitly filtered to that category
+      if (isCredentialGated && !hasCredential) {
+        if (categoryFilter?.has(meta.sourceCategory)) {
+          skipped.push({
+            connectorId: conn.id,
+            connectorName: meta.name,
+            reason: `${meta.shortName} requires API credentials in the Credential Vault.`,
+          });
+        }
+        continue;
+      }
+
+      const shouldIncludeGlobal =
+        categoryFilter !== null ||
+        selected.length === 0 ||
+        !countryCode ||
+        (meta.sourceCategory === 'maps_geo' && preferGeoPoi) ||
+        ((meta.sourceCategory === 'search_engine' || meta.sourceCategory === 'business_directory') &&
+          preferWebOrDirectory);
+
+      if (shouldIncludeGlobal) {
         if (!isEnabled(conn.id)) {
           skipped.push({
             connectorId: conn.id,
@@ -386,7 +449,13 @@ export class DiscoveryService {
 
       // Resolve selected connectors per target country
       for (const cCode of targetCountries) {
-        const { selected, skipped } = this.selectConnectorsForTarget(cCode, req, registry, configs);
+        const { selected, skipped } = this.selectConnectorsForTarget(
+          cCode,
+          req,
+          registry,
+          configs,
+          deps.configuredConnectorIds
+        );
 
         for (const s of skipped) {
           notes.push(s.reason);
@@ -460,6 +529,11 @@ export class DiscoveryService {
               pageSize: typeof req.pageSize === 'number' ? req.pageSize : undefined,
               fetchAllPages: Boolean(req.fetchAllPages),
               maxPages: typeof req.maxPages === 'number' ? req.maxPages : undefined,
+              filters: {
+                ...(req.productsServices?.trim() ? { productsServices: req.productsServices.trim() } : {}),
+                ...(req.language?.trim() ? { language: req.language.trim() } : {}),
+                ...(req.companySize?.trim() ? { companySize: req.companySize.trim() } : {}),
+              },
             },
             {
               config: cfg,
@@ -564,9 +638,33 @@ export class DiscoveryService {
           uniqueByRecordId.set(lead.id, lead);
         }
       }
-      const leads = Array.from(uniqueByRecordId.values()).sort(
+      let leads = Array.from(uniqueByRecordId.values()).sort(
         (a, b) => (b.confidenceScore || 0) - (a.confidenceScore || 0)
       );
+
+      if (req.verificationFilter && req.verificationFilter !== 'all') {
+        leads = leads.filter((l) => {
+          const status = l.customFields?.lastVerificationStatus || '';
+          const cat = l.customFields?.lastConnectorId || '';
+          if (req.verificationFilter === 'officially_verified') {
+            return status === 'officially_verified';
+          }
+          if (req.verificationFilter === 'official_website') {
+            return status === 'web_observed' || Boolean(l.webMetadata?.inspectedAt);
+          }
+          if (req.verificationFilter === 'directory_listed') {
+            return status === 'directory_listed' || cat === 'conn-wikidata' || cat === 'conn-osm' || cat === 'conn-opencorporates';
+          }
+          if (req.verificationFilter === 'search_engine') {
+            return cat === 'conn-brave-search' || cat === 'conn-google-cse';
+          }
+          return true;
+        });
+      }
+
+      if (typeof req.limit === 'number' && req.limit > 0) {
+        leads = leads.slice(0, Math.min(250, req.limit));
+      }
 
       const dedupeAnalysis = detectDiscoveryDuplicates(leads, existingCrmLeads);
       const durationMs = Date.now() - startMs;
@@ -578,6 +676,7 @@ export class DiscoveryService {
       const appliedFilters: DiscoverySearchResponse['appliedFilters'] = {
         query: queries.join('; '),
         queries: queries.length > 1 ? queries : undefined,
+        keywords: req.keywords?.length ? req.keywords : undefined,
         countryCode: targetCountries[0],
         countryCodes: targetCountries.filter((c): c is string => Boolean(c)),
         region: req.region?.trim() || undefined,
@@ -585,9 +684,14 @@ export class DiscoveryService {
         postalCode: req.postalCode?.trim() || undefined,
         industry: req.industry?.trim() || undefined,
         category: req.category?.trim() || undefined,
+        productsServices: req.productsServices?.trim() || undefined,
         businessType: req.businessType?.trim() || undefined,
+        companySize: req.companySize?.trim() || undefined,
         website: req.website?.trim() || undefined,
         domain: req.domain?.trim() || undefined,
+        language: req.language?.trim() || undefined,
+        sourceCategories: req.sourceCategories?.length ? req.sourceCategories : undefined,
+        verificationFilter: req.verificationFilter || undefined,
         radiusKm: req.radiusKm,
         coordinates: req.coordinates,
         regionSupportedByConnector,
@@ -759,16 +863,21 @@ export class DiscoveryService {
       runWebInspector?: boolean;
       runAi?: boolean;
     },
-    deps: Pick<DiscoveryExecutionDeps, 'configs' | 'onRecordRun' | 'inspectWebsiteFn' | 'analyzeLeadWithAiFn'> = {}
+    deps: Pick<
+      DiscoveryExecutionDeps,
+      'configs' | 'onRecordRun' | 'inspectWebsiteFn' | 'analyzeLeadWithAiFn' | 'extractWebIntelFn' | 'userAgent'
+    > = {}
   ): Promise<{
     lead: CanonicalLead;
     inspection?: WebInspectionResult;
     aiAnalysis?: Awaited<ReturnType<typeof analyzeLeadWithAi>>;
+    webIntelExtraction?: Awaited<ReturnType<typeof extractBusinessIntelFromWebEvidence>>;
     notes: string[];
   }> {
     const configs = deps.configs || {};
     const doInspect = deps.inspectWebsiteFn || inspectWebsite;
     const doAi = deps.analyzeLeadWithAiFn || analyzeLeadWithAi;
+    const doWebExtract = deps.extractWebIntelFn || extractBusinessIntelFromWebEvidence;
     const notes: string[] = [];
 
     let updatedLead: CanonicalLead = {
@@ -781,6 +890,7 @@ export class DiscoveryService {
 
     let inspection: WebInspectionResult | undefined;
     let aiAnalysis: Awaited<ReturnType<typeof analyzeLeadWithAi>> | undefined;
+    let webIntelExtraction: Awaited<ReturnType<typeof extractBusinessIntelFromWebEvidence>> | undefined;
 
     if (params.runWebInspector && (updatedLead.website || updatedLead.domain)) {
       const cfg = configs['conn-web-inspector'];
@@ -790,7 +900,10 @@ export class DiscoveryService {
         const targetUrl = updatedLead.website || `https://${updatedLead.domain}`;
         const startedAt = new Date().toISOString();
         const startMs = Date.now();
-        inspection = await doInspect(targetUrl);
+        inspection = await doInspect(targetUrl, {
+          userAgent: deps.userAgent,
+          checkRobots: doInspect === inspectWebsite,
+        });
 
         if (deps.onRecordRun) {
           const run: ConnectorRunRecord = {
@@ -812,35 +925,66 @@ export class DiscoveryService {
               : undefined,
             diagnosticSummary:
               inspection.securityCheck.reason ||
-              (inspection.isOnline ? `HTTP ${inspection.httpStatus} (${inspection.serverLatencyMs}ms)` : 'Host unreachable'),
+              (inspection.isOnline
+                ? `HTTP ${inspection.httpStatus} (${inspection.serverLatencyMs}ms, ${inspection.pagesVisited?.length || 1} page(s))`
+                : 'Host unreachable'),
           };
           await deps.onRecordRun(run);
         }
 
         if (inspection.isOnline && inspection.securityCheck.passed) {
+          const inspectedAt = new Date().toISOString();
+          const mergedProv: Record<string, AttributeProvenanceEntry> = {
+            ...(updatedLead.webMetadata?.attributeProvenance || {}),
+            ...(inspection.attributeProvenance || {}),
+          };
+
           updatedLead.webMetadata = {
-            title: inspection.title,
-            description: inspection.description,
+            ...(updatedLead.webMetadata || {}),
+            title: inspection.title || updatedLead.webMetadata?.title,
+            description: inspection.description || updatedLead.webMetadata?.description,
             httpStatus: inspection.httpStatus,
             isHttps: inspection.isHttps,
             serverLatencyMs: inspection.serverLatencyMs,
-            inspectedAt: new Date().toISOString(),
+            inspectedAt,
+            aboutPageUrl: inspection.aboutPageUrl,
+            productsPageUrl: inspection.productsPageUrl,
+            contactPageUrl: inspection.contactPageUrl,
+            locationsPageUrl: inspection.locationsPageUrl,
+            imprintPageUrl: inspection.imprintPageUrl,
+            pagesVisited: inspection.pagesVisited,
+            productsServices: inspection.productsServices,
+            locationsServed: inspection.locationsServed,
+            operatingInfo: inspection.operatingInfo,
+            addressesFound: inspection.addressesFound,
+            phonesFound: inspection.phonesFound,
+            emailsFound: inspection.emailsFound,
+            attributeProvenance: Object.keys(mergedProv).length > 0 ? mergedProv : undefined,
           };
+
           if (inspection.emailsFound?.length && !updatedLead.email) {
             updatedLead.email = inspection.emailsFound[0];
             updatedLead.emailStatus = 'syntax_valid';
             updatedLead.confidenceScore = Math.min(100, (updatedLead.confidenceScore || 0) + 10);
-            updatedLead.confidenceSignals.push('Public Email Discovered via Safe Website Inspection');
+            updatedLead.confidenceSignals.push('Public Business Email Discovered via Safe Website Inspection');
+          }
+          if (inspection.phonesFound?.length && !updatedLead.phone) {
+            updatedLead.phone = inspection.phonesFound[0];
+            updatedLead.confidenceScore = Math.min(100, (updatedLead.confidenceScore || 0) + 6);
+            updatedLead.confidenceSignals.push('Public Phone Discovered via Safe Website Inspection');
           }
           if (inspection.socialLinks) {
             updatedLead.socialLinks = { ...(updatedLead.socialLinks || {}), ...inspection.socialLinks };
           }
+          if (inspection.industry && (!updatedLead.industry || updatedLead.industry === 'General Commerce & Services' || updatedLead.industry === 'Web-Discovered Business')) {
+            updatedLead.industry = inspection.industry;
+          }
           updatedLead.activities.unshift({
             id: `act-${Date.now()}-web`,
             type: 'enrichment',
-            title: 'Live Website Inspected (SSRF Protected)',
+            title: `Live Website Inspected (${inspection.pagesVisited?.length || 1} page(s), SSRF Protected)`,
             outcome: `HTTP ${inspection.httpStatus} (${inspection.serverLatencyMs}ms)`,
-            date: new Date().toISOString(),
+            date: inspectedAt,
             actor: 'Web Inspector',
           });
         } else if (!inspection.securityCheck.passed) {
@@ -859,6 +1003,53 @@ export class DiscoveryService {
         const startedAt = new Date().toISOString();
         const startMs = Date.now();
         aiAnalysis = await doAi(updatedLead);
+
+        if (inspection?.isOnline && inspection.pageExcerpts && inspection.pageExcerpts.length > 0) {
+          webIntelExtraction = await doWebExtract({
+            companyName: updatedLead.companyName,
+            url: inspection.url,
+            pageExcerpts: inspection.pageExcerpts,
+            existingIndustry: updatedLead.industry,
+          });
+          const aiNow = new Date().toISOString();
+          const provMap: Record<string, AttributeProvenanceEntry> = {
+            ...(updatedLead.webMetadata?.attributeProvenance || {}),
+          };
+          provMap.aiBusinessSummary = {
+            attribute: 'aiBusinessSummary',
+            value: webIntelExtraction.businessSummary.slice(0, 240),
+            sourceType: webIntelExtraction.provenanceClassification,
+            sourceName: `Gemini Web Extraction (${webIntelExtraction.engine})`,
+            sourceUrl: inspection.url,
+            retrievedAt: aiNow,
+            connectorId: 'conn-gemini',
+          };
+          provMap.inferredIndustry = {
+            attribute: 'inferredIndustry',
+            value: webIntelExtraction.inferredIndustry,
+            sourceType: 'inferred',
+            sourceName: `Gemini Classification (${webIntelExtraction.engine})`,
+            sourceUrl: inspection.url,
+            retrievedAt: aiNow,
+            connectorId: 'conn-gemini',
+          };
+          updatedLead.webMetadata = {
+            ...(updatedLead.webMetadata || {}),
+            productsServices: Array.from(
+              new Set([
+                ...(updatedLead.webMetadata?.productsServices || []),
+                ...(webIntelExtraction.extractedProductsServices || []),
+              ])
+            ).slice(0, 12),
+            locationsServed: Array.from(
+              new Set([
+                ...(updatedLead.webMetadata?.locationsServed || []),
+                ...(webIntelExtraction.extractedLocationsServed || []),
+              ])
+            ).slice(0, 12),
+            attributeProvenance: provMap,
+          };
+        }
 
         if (deps.onRecordRun) {
           await deps.onRecordRun({
@@ -882,7 +1073,13 @@ export class DiscoveryService {
           aiFitScore: String(aiAnalysis.fitScore),
           aiQualification: aiAnalysis.qualificationStatus,
           aiEngine: aiAnalysis.engine,
-          aiSummary: aiAnalysis.summary.slice(0, 400),
+          aiSummary: (webIntelExtraction?.businessSummary || aiAnalysis.summary).slice(0, 400),
+          ...(webIntelExtraction
+            ? {
+                aiInferredIndustry: webIntelExtraction.inferredIndustry,
+                aiProvenance: webIntelExtraction.provenanceClassification,
+              }
+            : {}),
         };
         updatedLead.activities.unshift({
           id: `act-${Date.now()}-ai`,
@@ -907,7 +1104,31 @@ export class DiscoveryService {
       }
     }
 
-    return { lead: updatedLead, inspection, aiAnalysis, notes };
+    return { lead: updatedLead, inspection, aiAnalysis, webIntelExtraction, notes };
+  }
+
+  public exportSessionJson(searchId: string, selectedLeadIds?: string[]): string | null {
+    const session = this.getSession(searchId);
+    if (!session) return null;
+
+    const filterSet = selectedLeadIds && selectedLeadIds.length > 0 ? new Set(selectedLeadIds) : null;
+    const leads = filterSet ? session.leads.filter((l) => filterSet.has(l.id)) : session.leads;
+
+    return JSON.stringify(
+      {
+        searchId: session.searchId,
+        exportedAt: new Date().toISOString(),
+        appliedFilters: session.appliedFilters,
+        counts: session.counts,
+        totalExported: leads.length,
+        leads: leads.map((l) => ({
+          ...l,
+          duplicateStatus: session.duplicateInfoByLeadId[l.id] || { status: 'unique' },
+        })),
+      },
+      null,
+      2
+    );
   }
 
   public exportSessionCsv(searchId: string, selectedLeadIds?: string[]): string | null {
@@ -939,11 +1160,13 @@ export class DiscoveryService {
       'Confidence Score',
       'Industry',
       'Category',
+      'Products & Services',
       'Website',
       'Domain',
       'Email',
       'Phone',
       'Phone Normalized',
+      'Pages Inspected',
       'Source URL',
       'Retrieved At',
     ];
@@ -974,11 +1197,13 @@ export class DiscoveryService {
         `${l.confidenceScore}%`,
         l.industry || '',
         l.category || '',
+        (l.webMetadata?.productsServices || []).join('; '),
         l.website || '',
         l.domain || '',
         l.email || '',
         l.phone || '',
         l.phoneNormalized || '',
+        (l.webMetadata?.pagesVisited || []).join('; '),
         primarySource?.url || '',
         primarySource?.retrievedAt || l.createdAt,
       ];

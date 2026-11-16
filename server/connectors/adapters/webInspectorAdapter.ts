@@ -119,7 +119,10 @@ export class WebInspectorConnector implements IConnector {
       });
     }
 
-    const inspection = await inspectWebsite(targetUrl);
+    const inspection = await inspectWebsite(targetUrl, {
+      userAgent: _context.userAgent,
+      checkRobots: true,
+    });
     const retrievedAt = new Date().toISOString();
     const normalized = this.normalizeResult(inspection, retrievedAt);
 
@@ -155,12 +158,13 @@ export class WebInspectorConnector implements IConnector {
       countryCode: 'US',
       externalSourceId: res.domain,
       company: {
-        companyName: res.title || res.domain,
+        companyName: res.businessName || res.title || res.domain,
         website: res.url,
         domain: res.domain,
         email: res.emailsFound?.[0],
         emailStatus: res.emailsFound?.[0] ? 'syntax_valid' : 'unavailable',
         phone: res.phonesFound?.[0],
+        industry: res.industry,
         socialLinks: res.socialLinks,
         webMetadata: {
           title: res.title,
@@ -169,6 +173,19 @@ export class WebInspectorConnector implements IConnector {
           isHttps: res.isHttps,
           serverLatencyMs: res.serverLatencyMs,
           inspectedAt: retrievedAt,
+          aboutPageUrl: res.aboutPageUrl,
+          productsPageUrl: res.productsPageUrl,
+          contactPageUrl: res.contactPageUrl,
+          locationsPageUrl: res.locationsPageUrl,
+          imprintPageUrl: res.imprintPageUrl,
+          pagesVisited: res.pagesVisited,
+          productsServices: res.productsServices,
+          locationsServed: res.locationsServed,
+          operatingInfo: res.operatingInfo,
+          addressesFound: res.addressesFound,
+          phonesFound: res.phonesFound,
+          emailsFound: res.emailsFound,
+          attributeProvenance: res.attributeProvenance,
         },
         identifiers: [
           {
@@ -191,7 +208,7 @@ export class WebInspectorConnector implements IConnector {
       retrievedAt,
       dataFreshness: {
         lastUpdatedAt: retrievedAt,
-        freshnessNote: 'Live HTTP website metadata inspection',
+        freshnessNote: 'Live multi-page HTTP website intelligence inspection',
         isRealtime: true,
       },
       verificationStatus: res.isOnline ? 'web_observed' : 'unverified',
@@ -202,6 +219,8 @@ export class WebInspectorConnector implements IConnector {
         httpStatus: res.httpStatus,
         isHttps: res.isHttps,
         emailsFound: res.emailsFound,
+        phonesFound: res.phonesFound,
+        pagesVisited: res.pagesVisited,
         securityCheck: res.securityCheck,
       },
     };

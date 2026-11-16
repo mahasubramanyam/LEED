@@ -322,3 +322,248 @@ Provide an actionable market intelligence brief in JSON:
     engine: 'deterministic-pipeline',
   };
 }
+
+export async function generateDiscoveryQueriesWithAi(params: {
+  query?: string;
+  industry?: string;
+  productsServices?: string;
+  countryCode?: string;
+  region?: string;
+  city?: string;
+  businessType?: string;
+}): Promise<{
+  suggestedQueries: string[];
+  industryKeywords: string[];
+  recommendedFollowUp: string[];
+  rationale: string;
+  provenanceType: 'inferred';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
+}> {
+  const ai = getAiClient();
+  const baseTerms = [
+    params.query?.trim(),
+    params.industry?.trim(),
+    params.productsServices?.trim(),
+    params.businessType?.trim(),
+  ].filter(Boolean) as string[];
+  const locationSuffix = [params.city?.trim(), params.region?.trim(), params.countryCode?.trim()]
+    .filter((v) => v && v !== 'GLOBAL')
+    .join(' ');
+
+  if (ai && baseTerms.length > 0) {
+    try {
+      const prompt = `You are a B2B Global Business Discovery Planner.
+Given the owner's targeting parameters below, generate focused search engine and business directory queries to discover genuine companies (not individuals).
+Do NOT invent company names or fake URLs. Only propose search queries and industry keyword variations.
+
+INPUT:
+Query: ${params.query || 'N/A'}
+Industry: ${params.industry || 'N/A'}
+Products/Services: ${params.productsServices || 'N/A'}
+Business Type: ${params.businessType || 'N/A'}
+Location: ${locationSuffix || 'Global'}
+
+Return JSON:
+{
+  "suggestedQueries": ["3 to 5 concise search queries suitable for Brave Search / Wikidata / business directories"],
+  "industryKeywords": ["3 to 6 industry/product keyword terms"],
+  "recommendedFollowUp": ["2 to 3 recommended verification steps (e.g. inspect official website, verify in GLEIF or national registry)"],
+  "rationale": "1-2 sentences explaining the query strategy"
+}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      if (Array.isArray(parsed.suggestedQueries) && parsed.suggestedQueries.length > 0) {
+        return {
+          suggestedQueries: parsed.suggestedQueries.slice(0, 6).map(String),
+          industryKeywords: Array.isArray(parsed.industryKeywords)
+            ? parsed.industryKeywords.slice(0, 8).map(String)
+            : baseTerms,
+          recommendedFollowUp: Array.isArray(parsed.recommendedFollowUp)
+            ? parsed.recommendedFollowUp.slice(0, 4).map(String)
+            : [],
+          rationale: String(parsed.rationale || 'AI-generated search query expansion.'),
+          provenanceType: 'inferred',
+          engine: 'gemini-4-hydrogen',
+        };
+      }
+    } catch (err) {
+      console.warn('Gemini query planner fallback:', err);
+    }
+  }
+
+  const core = baseTerms[0] || 'B2B supplier';
+  const loc = locationSuffix ? ` ${locationSuffix}` : '';
+  const prod = params.productsServices?.trim();
+  const ind = params.industry?.trim();
+
+  const queries = Array.from(
+    new Set(
+      [
+        `${core}${loc}`.trim(),
+        ind && prod ? `${ind} ${prod}${loc}`.trim() : `${core} company${loc}`.trim(),
+        params.businessType ? `${core} ${params.businessType}${loc}`.trim() : `${core} official website${loc}`.trim(),
+        ind ? `${ind} manufacturer OR provider${loc}`.trim() : `${core} services${loc}`.trim(),
+      ].filter(Boolean)
+    )
+  ).slice(0, 5);
+
+  return {
+    suggestedQueries: queries,
+    industryKeywords: Array.from(new Set([...baseTerms, ...(prod ? prod.split(/[,\s]+/).filter((w) => w.length > 3) : [])])).slice(0, 6),
+    recommendedFollowUp: [
+      'Inspect discovered official websites to verify public business addresses, phones, and offerings.',
+      'Cross-verify candidate companies against national registries or GLEIF LEI before CRM qualification.',
+    ],
+    rationale: 'Deterministic keyword and location query expansion combining industry, product, and geographic terms.',
+    provenanceType: 'inferred',
+    engine: 'deterministic-pipeline',
+  };
+}
+
+export async function extractBusinessIntelFromWebEvidence(params: {
+  companyName: string;
+  url: string;
+  pageExcerpts: Array<{ url: string; pageType: string; textExcerpt: string }>;
+  existingIndustry?: string;
+}): Promise<{
+  businessSummary: string;
+  inferredIndustry: string;
+  inferredCategory: string;
+  extractedProductsServices: string[];
+  extractedLocationsServed: string[];
+  confidenceNote: string;
+  provenanceClassification: 'ai_extracted' | 'inferred';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
+}> {
+  const combinedEvidence = params.pageExcerpts
+    .map((p) => `[${p.pageType.toUpperCase()} - ${p.url}]\n${p.textExcerpt.slice(0, 1400)}`)
+    .join('\n\n')
+    .slice(0, 5000);
+
+  const ai = getAiClient();
+  if (ai && combinedEvidence.trim().length > 40) {
+    try {
+      const prompt = `Analyze the retrieved official company website text below.
+CRITICAL RULES:
+- Base EVERY extracted fact strictly on the provided webpage text.
+- NEVER invent registration numbers, revenue, employee counts, emails, phone numbers, or addresses not present in the text.
+- Distinguish concise company summary and product/service extraction from inferred industry classification.
+
+COMPANY: ${params.companyName}
+WEBSITE: ${params.url}
+
+RETRIEVED PAGE EVIDENCE:
+${combinedEvidence}
+
+Return JSON:
+{
+  "businessSummary": "2 concise factual sentences describing what the company states it does",
+  "inferredIndustry": "Concise B2B industry label",
+  "inferredCategory": "Concise business category",
+  "extractedProductsServices": ["up to 6 concrete products or services explicitly named in the text"],
+  "extractedLocationsServed": ["countries or cities explicitly mentioned as served or office locations"],
+  "confidenceNote": "Brief note citing which page types provided evidence"
+}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      return {
+        businessSummary: String(parsed.businessSummary || '').trim() || `Public website observed at ${params.url}.`,
+        inferredIndustry: String(parsed.inferredIndustry || params.existingIndustry || 'Commercial Enterprise'),
+        inferredCategory: String(parsed.inferredCategory || 'Web-Observed Business'),
+        extractedProductsServices: Array.isArray(parsed.extractedProductsServices)
+          ? parsed.extractedProductsServices.slice(0, 8).map(String)
+          : [],
+        extractedLocationsServed: Array.isArray(parsed.extractedLocationsServed)
+          ? parsed.extractedLocationsServed.slice(0, 8).map(String)
+          : [],
+        confidenceNote: String(
+          parsed.confidenceNote ||
+            `Extracted from ${params.pageExcerpts.length} crawled company page(s); industry classification is AI-inferred.`
+        ),
+        provenanceClassification: 'ai_extracted',
+        engine: 'gemini-4-hydrogen',
+      };
+    } catch (err) {
+      console.warn('Gemini web extraction fallback:', err);
+    }
+  }
+
+  const firstSnippet = params.pageExcerpts[0]?.textExcerpt?.slice(0, 260).replace(/\s+/g, ' ').trim();
+  return {
+    businessSummary: firstSnippet
+      ? `Observed on ${params.url}: ${firstSnippet}${firstSnippet.length >= 260 ? '...' : ''}`
+      : `Company website inspected at ${params.url}.`,
+    inferredIndustry: params.existingIndustry || 'General Commerce & Services',
+    inferredCategory: 'Web-Observed Business',
+    extractedProductsServices: [],
+    extractedLocationsServed: [],
+    confidenceNote: `Grounded strictly in ${params.pageExcerpts.length} fetched page(s) (${params.pageExcerpts.map((p) => p.pageType).join(', ') || 'homepage'}).`,
+    provenanceClassification: 'inferred',
+    engine: 'deterministic-pipeline',
+  };
+}
+
+export async function assessDuplicatePairWithAi(params: {
+  candidate: CanonicalLead;
+  existing: CanonicalLead;
+  matchReason: string;
+}): Promise<{
+  assessment: 'likely_same_entity' | 'possible_branch_or_subsidiary' | 'likely_distinct';
+  explanation: string;
+  provenanceType: 'inferred';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
+}> {
+  const ai = getAiClient();
+  if (ai) {
+    try {
+      const prompt = `Compare two business records flagged for duplicate review. Never recommend auto-merging if registration numbers differ or branches are distinct.
+Record A: ${params.candidate.companyName} | Reg: ${params.candidate.registrationNumber || 'N/A'} | Domain: ${params.candidate.domain || 'N/A'} | City: ${params.candidate.address?.city || 'N/A'}, ${params.candidate.address?.countryCode || 'N/A'}
+Record B: ${params.existing.companyName} | Reg: ${params.existing.registrationNumber || 'N/A'} | Domain: ${params.existing.domain || 'N/A'} | City: ${params.existing.address?.city || 'N/A'}, ${params.existing.address?.countryCode || 'N/A'}
+Signal: ${params.matchReason}
+
+Return JSON:
+{
+  "assessment": "likely_same_entity" | "possible_branch_or_subsidiary" | "likely_distinct",
+  "explanation": "1-2 factual sentences for the owner"
+}`;
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      return {
+        assessment: parsed.assessment || 'possible_branch_or_subsidiary',
+        explanation: String(parsed.explanation || params.matchReason),
+        provenanceType: 'inferred',
+        engine: 'gemini-4-hydrogen',
+      };
+    } catch {
+      // Fall through cleanly
+    }
+  }
+
+  const diffReg =
+    params.candidate.registrationNumber &&
+    params.existing.registrationNumber &&
+    params.candidate.registrationNumber !== params.existing.registrationNumber;
+
+  return {
+    assessment: diffReg ? 'possible_branch_or_subsidiary' : 'likely_same_entity',
+    explanation: diffReg
+      ? `Different registration numbers (${params.candidate.registrationNumber} vs ${params.existing.registrationNumber}) indicate separate legal entities or subsidiaries.`
+      : params.matchReason,
+    provenanceType: 'inferred',
+    engine: 'deterministic-pipeline',
+  };
+}

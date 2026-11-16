@@ -1,3 +1,23 @@
+export type AttributeProvenanceType =
+  | 'official_registry'
+  | 'official_website'
+  | 'business_directory'
+  | 'search_provider'
+  | 'ai_extracted'
+  | 'inferred'
+  | 'not_verified';
+
+export interface AttributeProvenanceEntry {
+  attribute: string;
+  value?: string;
+  sourceType: AttributeProvenanceType;
+  sourceName: string;
+  sourceUrl?: string;
+  retrievedAt: string;
+  connectorId?: string;
+  method?: string;
+}
+
 export interface LeadSource {
   sourceName: string;
   providerId?: string;
@@ -210,6 +230,19 @@ export interface CanonicalLead {
     isHttps?: boolean;
     serverLatencyMs?: number;
     inspectedAt?: string;
+    aboutPageUrl?: string;
+    productsPageUrl?: string;
+    contactPageUrl?: string;
+    locationsPageUrl?: string;
+    imprintPageUrl?: string;
+    pagesVisited?: string[];
+    productsServices?: string[];
+    locationsServed?: string[];
+    operatingInfo?: string;
+    addressesFound?: string[];
+    phonesFound?: string[];
+    emailsFound?: string[];
+    attributeProvenance?: Record<string, AttributeProvenanceEntry>;
   };
   status: LeadStatus;
   pipelineStageId?: string;
@@ -515,6 +548,7 @@ export interface DiscoverySearchResponse {
   appliedFilters: {
     query: string;
     queries?: string[];
+    keywords?: string[];
     countryCode?: string;
     countryCodes?: string[];
     region?: string;
@@ -522,9 +556,14 @@ export interface DiscoverySearchResponse {
     postalCode?: string;
     industry?: string;
     category?: string;
+    productsServices?: string;
     businessType?: string;
+    companySize?: string;
     website?: string;
     domain?: string;
+    language?: string;
+    sourceCategories?: SourceCategory[];
+    verificationFilter?: string;
     radiusKm?: number;
     coordinates?: { lat: number; lon: number };
     regionSupportedByConnector: boolean;
@@ -532,6 +571,31 @@ export interface DiscoverySearchResponse {
   coalesced?: boolean;
   cancelled?: boolean;
   durationMs: number;
+}
+
+export interface SearchDirectoryProviderDoc {
+  id: string;
+  connectorId?: string;
+  name: string;
+  category: SourceCategory | 'retired_search_engine';
+  availability:
+    | 'available_configured'
+    | 'available_configuration_required'
+    | 'available_open'
+    | 'restricted_legacy_sunsetting'
+    | 'retired_unavailable';
+  officialEndpoint: string;
+  documentationUrl: string;
+  authentication: string;
+  pricingAndQuota: string;
+  supportedCountriesAndLanguages: string;
+  queryAndPagination: string;
+  rateLimits: string;
+  commercialUsage: string;
+  honestStatusNote: string;
+  configuredInVault?: boolean;
+  operational?: boolean;
+  healthState?: string;
 }
 
 export interface DiscoveryHistoryItem {

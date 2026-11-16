@@ -1,3 +1,23 @@
+export type AttributeProvenanceType =
+  | 'official_registry'
+  | 'official_website'
+  | 'business_directory'
+  | 'search_provider'
+  | 'ai_extracted'
+  | 'inferred'
+  | 'not_verified';
+
+export interface AttributeProvenanceEntry {
+  attribute: string;
+  value?: string;
+  sourceType: AttributeProvenanceType;
+  sourceName: string;
+  sourceUrl?: string;
+  retrievedAt: string;
+  connectorId?: string;
+  method?: string;
+}
+
 export interface LeadSource {
   sourceName: string;
   providerId?: string;
@@ -117,6 +137,19 @@ export interface CanonicalLead {
     isHttps?: boolean;
     serverLatencyMs?: number;
     inspectedAt?: string;
+    aboutPageUrl?: string;
+    productsPageUrl?: string;
+    contactPageUrl?: string;
+    locationsPageUrl?: string;
+    imprintPageUrl?: string;
+    pagesVisited?: string[];
+    productsServices?: string[];
+    locationsServed?: string[];
+    operatingInfo?: string;
+    addressesFound?: string[];
+    phonesFound?: string[];
+    emailsFound?: string[];
+    attributeProvenance?: Record<string, AttributeProvenanceEntry>;
   };
   status: LeadStatus;
   pipelineStageId?: string;
@@ -238,6 +271,7 @@ export interface AppSettings {
 export interface DiscoverySearchRequest {
   query?: string;
   queries?: string[];
+  keywords?: string[];
   countryCode?: string;
   countryCodes?: string[];
   region?: string;
@@ -245,9 +279,13 @@ export interface DiscoverySearchRequest {
   postalCode?: string;
   industry?: string;
   category?: string;
+  productsServices?: string;
   businessType?: string;
+  companySize?: string;
   website?: string;
   domain?: string;
+  language?: string;
+  limit?: number;
   radiusKm?: number;
   coordinates?: {
     lat: number;
@@ -255,6 +293,8 @@ export interface DiscoverySearchRequest {
   };
   connectorId?: string;
   connectorIds?: string[];
+  sourceCategories?: SourceCategory[];
+  verificationFilter?: 'all' | 'officially_verified' | 'official_website' | 'directory_listed' | 'search_engine';
   selectionMode?: 'auto' | 'manual';
   autoSave?: boolean;
   duplicatePolicy?: 'skip' | 'merge_preserve_crm';
@@ -332,6 +372,7 @@ export interface DiscoverySearchResponse {
   appliedFilters: {
     query: string;
     queries?: string[];
+    keywords?: string[];
     countryCode?: string;
     countryCodes?: string[];
     region?: string;
@@ -339,9 +380,14 @@ export interface DiscoverySearchResponse {
     postalCode?: string;
     industry?: string;
     category?: string;
+    productsServices?: string;
     businessType?: string;
+    companySize?: string;
     website?: string;
     domain?: string;
+    language?: string;
+    sourceCategories?: SourceCategory[];
+    verificationFilter?: string;
     radiusKm?: number;
     coordinates?: { lat: number; lon: number };
     regionSupportedByConnector: boolean;

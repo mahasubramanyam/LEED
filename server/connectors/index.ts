@@ -1,4 +1,5 @@
 import { AbnConnector } from './adapters/abnAdapter.js';
+import { BraveSearchConnector } from './adapters/braveSearchAdapter.js';
 import { BrregConnector } from './adapters/brregAdapter.js';
 import { ChZefixConnector } from './adapters/chZefixAdapter.js';
 import { CompaniesHouseConnector } from './adapters/companiesHouseAdapter.js';
@@ -7,15 +8,18 @@ import { FiPrhConnector } from './adapters/fiPrhAdapter.js';
 import { FrSireneConnector } from './adapters/frSireneAdapter.js';
 import { GeminiConnector } from './adapters/geminiAdapter.js';
 import { GleifConnector } from './adapters/gleifAdapter.js';
+import { GoogleCseConnector } from './adapters/googleSearchAdapter.js';
 import { IeCroConnector } from './adapters/ieCroAdapter.js';
 import { JpNtaConnector } from './adapters/jpNtaAdapter.js';
 import { NlKvkConnector } from './adapters/nlKvkAdapter.js';
 import { NzCompaniesConnector } from './adapters/nzCompaniesAdapter.js';
+import { OpenCorporatesConnector } from './adapters/openCorporatesAdapter.js';
 import { OsmConnector } from './adapters/osmAdapter.js';
 import { PlKrsConnector } from './adapters/plKrsAdapter.js';
 import { SgAcraConnector } from './adapters/sgAcraAdapter.js';
 import { UsSecEdgarConnector } from './adapters/usSecEdgarAdapter.js';
 import { WebInspectorConnector } from './adapters/webInspectorAdapter.js';
+import { WikidataConnector } from './adapters/wikidataAdapter.js';
 import { credentialManager, CredentialManager } from './core/credentialManager.js';
 import { connectorExecutionEngine, ConnectorExecutionEngine } from './core/executionEngine.js';
 import { connectorRegistry, ConnectorRegistry, mapHealthStateToLegacyStatus } from './core/registry.js';
@@ -50,6 +54,10 @@ export function ensureConnectorsRegistered(registry: ConnectorRegistry = connect
     new ChZefixConnector(),
     new IeCroConnector(),
     new OsmConnector(),
+    new WikidataConnector(),
+    new OpenCorporatesConnector(),
+    new BraveSearchConnector(),
+    new GoogleCseConnector(),
     new WebInspectorConnector(),
     new GeminiConnector(),
   ];
@@ -271,6 +279,10 @@ export {
   ChZefixConnector,
   IeCroConnector,
   OsmConnector,
+  WikidataConnector,
+  OpenCorporatesConnector,
+  BraveSearchConnector,
+  GoogleCseConnector,
   WebInspectorConnector,
   GeminiConnector,
 };

@@ -25,8 +25,13 @@ import {
   CheckSquare,
   Square,
   RefreshCw,
+  Database,
+  Play,
+  FileJson,
+  ShieldCheck,
 } from 'lucide-react';
 import {
+  AttributeProvenanceType,
   CanonicalLead,
   CountryReference,
   AdministrativeDivision,
@@ -37,6 +42,8 @@ import {
   DiscoveryHistoryItem,
   DiscoveryPagination,
   DiscoverySearchResponse,
+  SearchDirectoryProviderDoc,
+  SourceCategory,
 } from '../types.js';
 import { apiFetch } from '../utils/apiFetch.ts';
 
@@ -92,10 +99,52 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
   const [query, setQuery] = useState('Semiconductor');
   const [bulkQueriesText, setBulkQueriesText] = useState('Semiconductor\nEnergy\nMarine Robotics');
   const [industry, setIndustry] = useState('');
+  const [productsServices, setProductsServices] = useState('');
+  const [businessType, setBusinessType] = useState('');
+  const [companySize, setCompanySize] = useState('');
+  const [languageFilter, setLanguageFilter] = useState('');
+  const [resultLimit, setResultLimit] = useState<number>(50);
+  const [verificationFilter, setVerificationFilter] = useState<'all' | 'officially_verified' | 'official_website' | 'directory_listed' | 'search_engine'>('all');
+  const [selectedSourceCategories, setSelectedSourceCategories] = useState<SourceCategory[]>([]);
   const [websiteDomain, setWebsiteDomain] = useState('');
   const [radiusKm, setRadiusKm] = useState('');
   const [coordInput, setCoordInput] = useState('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  const [showProvidersMatrix, setShowProvidersMatrix] = useState(false);
+  const [providerDocs, setProviderDocs] = useState<SearchDirectoryProviderDoc[]>([]);
+  const [isLoadingProviders, setIsLoadingProviders] = useState(false);
+
+  const [aiQueryPlan, setAiQueryPlan] = useState<{
+    suggestedQueries: string[];
+    industryKeywords: string[];
+    recommendedFollowUp: string[];
+    rationale: string;
+    provenanceType: 'inferred';
+    engine: string;
+  } | null>(null);
+  const [isGeneratingQueries, setIsGeneratingQueries] = useState(false);
+
+  const [showUrlInspector, setShowUrlInspector] = useState(false);
+  const [directInspectUrl, setDirectInspectUrl] = useState('');
+  const [isDirectInspecting, setIsDirectInspecting] = useState(false);
+  const [directInspectResult, setDirectInspectResult] = useState<{
+    inspection: any;
+    aiIntel?: any;
+  } | null>(null);
+
+  const [duplicateAssessments, setDuplicateAssessments] = useState<
+    Record<
+      string,
+      {
+        assessment: string;
+        explanation: string;
+        provenanceType: string;
+        engine: string;
+      }
+    >
+  >({});
+  const [isAssessingDupId, setIsAssessingDupId] = useState<string | null>(null);
 
   const [selectionMode, setSelectionMode] = useState<'auto' | 'manual'>('auto');
   const [selectedConnectorIds, setSelectedConnectorIds] = useState<string[]>(['conn-brreg']);
@@ -262,21 +311,139 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     return undefined;
   };
 
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const toggleSourceCategory = (cat: SourceCategory) => {
+    setSelectedSourceCategories((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const loadProvidersMatrix = async () => {
+    const next = !showProvidersMatrix;
+    setShowProvidersMatrix(next);
+    if (next && providerDocs.length === 0) {
+      setIsLoadingProviders(true);
+      try {
+        const res = await apiFetch('/api/discovery/providers');
+        if (res.ok) {
+          const data = await res.json();
+          setProviderDocs(data.providers || []);
+        }
+      } catch (err) {
+        console.error('Failed to load discovery providers matrix:', err);
+      } finally {
+        setIsLoadingProviders(false);
+      }
+    }
+  };
+
+  const handleGenerateAiQueries = async () => {
+    setIsGeneratingQueries(true);
+    setErrors([]);
+    try {
+      const selectedDivisionObj = divisions.find((d) => d.code === selectedDivision);
+      const res = await apiFetch('/api/discovery/ai-queries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: query.trim() || undefined,
+          industry: industry.trim() || undefined,
+          productsServices: productsServices.trim() || undefined,
+          businessType: businessType.trim() || undefined,
+          countryCode: selectedCountry === 'GLOBAL' ? undefined : selectedCountry,
+          region: selectedDivisionObj?.name || selectedDivision || undefined,
+          city: city.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate query suggestions');
+      setAiQueryPlan(data);
+    } catch (err: unknown) {
+      setErrors([err instanceof Error ? err.message : String(err)]);
+    } finally {
+      setIsGeneratingQueries(false);
+    }
+  };
+
+  const handleDirectInspectWebsite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!directInspectUrl.trim()) return;
+    setIsDirectInspecting(true);
+    setDirectInspectResult(null);
+    setErrors([]);
+    try {
+      const res = await apiFetch('/api/discovery/inspect-website', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: directInspectUrl.trim(),
+          runAiExtraction: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Website inspection failed');
+      setDirectInspectResult(data);
+    } catch (err: unknown) {
+      setErrors([err instanceof Error ? err.message : String(err)]);
+    } finally {
+      setIsDirectInspecting(false);
+    }
+  };
+
+  const handleAssessDuplicateWithAi = async (candidate: CanonicalLead, dup: DiscoveryDuplicateInfo) => {
+    if (!dup.matchedLeadId) return;
+    setIsAssessingDupId(candidate.id);
+    try {
+      const res = await apiFetch('/api/discovery/duplicate-assess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidate,
+          matchedLeadId: dup.matchedLeadId,
+          matchReason: dup.note || dup.matchType || 'Ambiguous entity overlap',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to assess duplicate pair');
+      setDuplicateAssessments((prev) => ({ ...prev, [candidate.id]: data }));
+    } catch (err: unknown) {
+      setErrors([err instanceof Error ? err.message : String(err)]);
+    } finally {
+      setIsAssessingDupId(null);
+    }
+  };
+
+  const executeDiscoverySearch = async (overrideParams?: {
+    queryText?: string;
+    countryCode?: string;
+    cityName?: string;
+    regionName?: string;
+    industryName?: string;
+    domainFilter?: string;
+    connectorId?: string;
+  }) => {
+    const activeQuery = overrideParams?.queryText ?? query;
+    const activeCountry = overrideParams?.countryCode ?? selectedCountry;
+    const activeCity = overrideParams?.cityName ?? city;
+    const activeIndustry = overrideParams?.industryName ?? industry;
+    const activeDomain = overrideParams?.domainFilter ?? websiteDomain;
 
     const parsedQueries =
-      searchMode === 'bulk'
+      searchMode === 'bulk' && !overrideParams?.queryText
         ? bulkQueriesText
             .split(/[\r\n;]+/)
             .map((s) => s.trim())
             .filter(Boolean)
-        : query.trim()
-        ? [query.trim()]
+        : activeQuery.trim()
+        ? [activeQuery.trim()]
         : [];
 
-    if (parsedQueries.length === 0 && !industry.trim() && !websiteDomain.trim()) {
-      setErrors(['Enter a business name, keyword, industry category, or website domain to search.']);
+    if (
+      parsedQueries.length === 0 &&
+      !activeIndustry.trim() &&
+      !productsServices.trim() &&
+      !activeDomain.trim()
+    ) {
+      setErrors(['Enter a business name, keyword, products/services, industry category, or website domain to search.']);
       return;
     }
 
@@ -293,7 +460,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     setDuplicateFilter('all');
 
     const selectedDivisionObj = divisions.find((d) => d.code === selectedDivision);
-    const regionValue = selectedDivisionObj?.name || selectedDivision || undefined;
+    const regionValue =
+      overrideParams?.regionName ?? (selectedDivisionObj?.name || selectedDivision || undefined);
     const coords = parseCoordinates();
     const radiusNum = radiusKm.trim() ? parseFloat(radiusKm.trim()) : undefined;
 
@@ -302,23 +470,37 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
         query: parsedQueries[0] || undefined,
         queries: parsedQueries.length > 1 ? parsedQueries : undefined,
         countryCode:
-          searchMode === 'multi_country'
+          searchMode === 'multi_country' && !overrideParams?.countryCode
             ? undefined
-            : selectedCountry === 'GLOBAL'
+            : activeCountry === 'GLOBAL'
             ? undefined
-            : selectedCountry,
+            : activeCountry,
         countryCodes:
-          searchMode === 'multi_country' && multiCountries.length > 0 ? multiCountries : undefined,
+          searchMode === 'multi_country' && !overrideParams?.countryCode && multiCountries.length > 0
+            ? multiCountries
+            : undefined,
         region: regionValue,
-        city: city.trim() || undefined,
+        city: activeCity.trim() || undefined,
         postalCode: postalCode.trim() || undefined,
-        industry: industry.trim() || undefined,
-        website: websiteDomain.trim() || undefined,
-        domain: websiteDomain.trim() || undefined,
+        industry: activeIndustry.trim() || undefined,
+        productsServices: productsServices.trim() || undefined,
+        businessType: businessType.trim() || undefined,
+        companySize: companySize.trim() || undefined,
+        language: languageFilter.trim() || undefined,
+        website: activeDomain.trim() || undefined,
+        domain: activeDomain.trim() || undefined,
         radiusKm: radiusNum && Number.isFinite(radiusNum) ? radiusNum : undefined,
         coordinates: coords,
-        selectionMode,
-        connectorIds: selectionMode === 'manual' ? selectedConnectorIds : undefined,
+        selectionMode: overrideParams?.connectorId ? 'manual' : selectionMode,
+        connectorIds: overrideParams?.connectorId
+          ? [overrideParams.connectorId]
+          : selectionMode === 'manual'
+          ? selectedConnectorIds
+          : undefined,
+        sourceCategories:
+          selectedSourceCategories.length > 0 ? selectedSourceCategories : undefined,
+        verificationFilter: verificationFilter !== 'all' ? verificationFilter : undefined,
+        limit: resultLimit > 0 ? resultLimit : undefined,
         page: 1,
         pageSize: 25,
         fetchAllPages,
@@ -368,6 +550,37 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
       setIsLoading(false);
       setActiveRequestId(null);
     }
+  };
+
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    await executeDiscoverySearch();
+  };
+
+  const handleRerunHistory = async (h: DiscoveryHistoryItem) => {
+    const qp = h.queryParams || {};
+    const qText = typeof qp.query === 'string' ? qp.query : '';
+    const cCode = typeof qp.countryCode === 'string' && qp.countryCode ? qp.countryCode.toUpperCase() : 'GLOBAL';
+    const cityVal = typeof qp.city === 'string' ? qp.city : '';
+    const indVal = typeof qp.industry === 'string' ? qp.industry : '';
+    const domVal = typeof qp.domain === 'string' ? qp.domain : typeof qp.website === 'string' ? qp.website : '';
+
+    setSearchMode('single');
+    setSelectedCountry(cCode);
+    if (qText) setQuery(qText);
+    setCity(cityVal);
+    setIndustry(indVal);
+    setWebsiteDomain(domVal);
+    setShowHistory(false);
+
+    await executeDiscoverySearch({
+      queryText: qText,
+      countryCode: cCode,
+      cityName: cityVal,
+      industryName: indVal,
+      domainFilter: domVal,
+      connectorId: h.connectorId && h.connectorId !== 'conn-gemini' ? h.connectorId : undefined,
+    });
   };
 
   const handleCancelSearch = async () => {
@@ -522,21 +735,24 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     }
   };
 
-  const handleExportDiscoveryCsv = async () => {
+  const handleExportDiscovery = async (format: 'csv' | 'json') => {
     if (!searchId) return;
     try {
-      const selectedParam =
-        selectedIds.size > 0 ? `?ids=${encodeURIComponent(Array.from(selectedIds).join(','))}` : '';
-      const res = await apiFetch(`/api/discovery/export/${encodeURIComponent(searchId)}${selectedParam}`);
+      const params = new URLSearchParams();
+      params.set('format', format);
+      if (selectedIds.size > 0) {
+        params.set('ids', Array.from(selectedIds).join(','));
+      }
+      const res = await apiFetch(`/api/discovery/export/${encodeURIComponent(searchId)}?${params.toString()}`);
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `CSV export failed (HTTP ${res.status})`);
+        throw new Error(errData.error || `${format.toUpperCase()} export failed (HTTP ${res.status})`);
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `leed_discovery_${searchId}.csv`;
+      link.download = `leed_discovery_${searchId}.${format}`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -581,8 +797,28 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     }
   };
 
+  const provenanceLabel = (t?: AttributeProvenanceType): string => {
+    switch (t) {
+      case 'official_registry':
+        return 'Official Registry';
+      case 'official_website':
+        return 'Official Website';
+      case 'business_directory':
+        return 'Business Directory';
+      case 'search_provider':
+        return 'Search Provider';
+      case 'ai_extracted':
+        return 'AI Extracted';
+      case 'inferred':
+        return 'Inferred';
+      default:
+        return 'Not Verified';
+    }
+  };
+
   const verificationLabel = (lead: CanonicalLead): { text: string; tone: string } => {
     const v = lead.customFields?.lastVerificationStatus;
+    const connId = lead.customFields?.lastConnectorId;
     if (v === 'officially_verified') {
       return { text: 'Officially Verified', tone: 'text-emerald-700 dark:text-emerald-400' };
     }
@@ -594,6 +830,9 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     }
     if (v === 'web_observed') {
       return { text: 'Web Observed', tone: 'text-indigo-700 dark:text-indigo-400' };
+    }
+    if (connId === 'conn-brave-search' || connId === 'conn-google-cse') {
+      return { text: 'Search Result (Unverified)', tone: 'text-slate-600 dark:text-slate-400' };
     }
     return { text: 'Unverified', tone: 'text-slate-500 dark:text-slate-400' };
   };
@@ -651,7 +890,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                   key={m.id}
                   type="button"
                   onClick={() => setSearchMode(m.id)}
-                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition ${
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition whitespace-nowrap shrink-0 ${
                     searchMode === m.id
                       ? 'bg-blue-600 text-white'
                       : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
@@ -664,8 +903,26 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
 
             <button
               type="button"
+              onClick={loadProvidersMatrix}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>Search &amp; Directory Matrix</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowUrlInspector((v) => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Inspect Website URL</span>
+            </button>
+
+            <button
+              type="button"
               onClick={loadHistory}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
             >
               <History className="w-3.5 h-3.5" />
               <span>Execution History</span>
@@ -927,6 +1184,111 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                 />
               </div>
 
+              <div className="md:col-span-3">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Products &amp; Services
+                </label>
+                <input
+                  type="text"
+                  value={productsServices}
+                  onChange={(e) => setProductsServices(e.target.value)}
+                  placeholder="e.g. BLE SoC, CNC machining, solar inverter"
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Business Type
+                </label>
+                <input
+                  type="text"
+                  value={businessType}
+                  onChange={(e) => setBusinessType(e.target.value)}
+                  placeholder="e.g. Manufacturer, B2B SaaS, Consultancy"
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Company Size
+                </label>
+                <input
+                  type="text"
+                  value={companySize}
+                  onChange={(e) => setCompanySize(e.target.value)}
+                  placeholder="e.g. SME, 50-250"
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Language
+                </label>
+                <input
+                  type="text"
+                  value={languageFilter}
+                  onChange={(e) => setLanguageFilter(e.target.value)}
+                  placeholder="e.g. en, de, no"
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Result Limit
+                </label>
+                <select
+                  value={resultLimit}
+                  onChange={(e) => setResultLimit(Number(e.target.value))}
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500 tabular-nums"
+                >
+                  <option value={25}>25 results</option>
+                  <option value={50}>50 results</option>
+                  <option value={100}>100 results</option>
+                  <option value={250}>250 results</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-4">
+                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Verification / Source Provenance Filter
+                </label>
+                <select
+                  value={verificationFilter}
+                  onChange={(e) => setVerificationFilter(e.target.value as any)}
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">All Sources &amp; Verification Tiers</option>
+                  <option value="officially_verified">Official Registry Verified Only</option>
+                  <option value="official_website">Official Website Observed</option>
+                  <option value="directory_listed">Business Directory Listed</option>
+                  <option value="search_engine">Web Search Results</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-8">
+                <span className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                  Source Categories (optional — leave unchecked for automatic smart routing)
+                </span>
+                <div className="flex items-center gap-3 flex-wrap text-xs">
+                  {([
+                    { id: 'government_registry', label: 'Government Registries' },
+                    { id: 'search_engine', label: 'Web Search APIs' },
+                    { id: 'business_directory', label: 'Business Directories' },
+                    { id: 'maps_geo', label: 'Maps & Geo POI' },
+                  ] as Array<{ id: SourceCategory; label: string }>).map((cat) => (
+                    <label key={cat.id} className="flex items-center gap-1.5 cursor-pointer text-slate-700 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={selectedSourceCategories.includes(cat.id)}
+                        onChange={() => toggleSourceCategory(cat.id)}
+                        className="rounded border-slate-300 dark:border-slate-700 text-blue-600"
+                      />
+                      <span>{cat.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               {/* Explicit Connector Routing */}
               <div className="md:col-span-12 pt-1">
                 <div className="flex items-center justify-between mb-1.5">
@@ -981,6 +1343,43 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
             </div>
           )}
 
+          {/* AI Suggested Queries Banner */}
+          {aiQueryPlan && (
+            <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium text-slate-800 dark:text-slate-200">
+                  Query Suggestions ({aiQueryPlan.engine} · Inferred — not yet verified)
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAiQueryPlan(null)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">{aiQueryPlan.rationale}</p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {aiQueryPlan.suggestedQueries.map((sq, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      if (searchMode === 'bulk') {
+                        setBulkQueriesText((prev) => (prev ? `${prev}\n${sq}` : sq));
+                      } else {
+                        setQuery(sq);
+                      }
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-medium rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-blue-500 transition"
+                  >
+                    {sq}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Presets & Action Row */}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-2">
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -1006,14 +1405,24 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
             <div className="flex items-center gap-2.5 flex-wrap shrink-0">
               <button
                 type="button"
+                disabled={isGeneratingQueries}
+                onClick={handleGenerateAiQueries}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0 disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isGeneratingQueries ? 'Planning...' : 'Suggest Queries'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowAdvancedFilters((v) => !v)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
               >
                 <SlidersHorizontal className="w-3.5 h-3.5" />
                 <span>{showAdvancedFilters ? 'Hide Filters' : 'Filters & Routing'}</span>
               </button>
 
-              <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+              <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer select-none whitespace-nowrap shrink-0">
                 <input
                   type="checkbox"
                   checked={fetchAllPages}
@@ -1028,7 +1437,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                 <button
                   type="button"
                   onClick={handleCancelSearch}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg transition"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg transition whitespace-nowrap shrink-0"
                 >
                   <StopCircle className="w-3.5 h-3.5" />
                   <span>Cancel Search</span>
@@ -1037,7 +1446,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50 whitespace-nowrap shrink-0"
                 >
                   <Search className="w-3.5 h-3.5" />
                   <span>Discover Businesses</span>
@@ -1048,11 +1457,176 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
         </form>
       </div>
 
+      {/* Search Engine & Public Business Directory Availability Matrix */}
+      {showProvidersMatrix && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xs font-semibold text-slate-900 dark:text-white">
+                Web Search &amp; Business Directory Provider Matrix
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Verified provider availability, Credential Vault requirements, rate limits, and commercial licensing terms.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowProvidersMatrix(false)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {isLoadingProviders ? (
+            <p className="text-xs text-slate-500">Loading provider matrix...</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th className="py-2 pr-3 font-medium">Provider</th>
+                    <th className="py-2 pr-3 font-medium">Availability</th>
+                    <th className="py-2 pr-3 font-medium">Authentication &amp; Quota</th>
+                    <th className="py-2 pr-3 font-medium">Coverage &amp; Rate Limits</th>
+                    <th className="py-2 font-medium">Commercial &amp; Status Note</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {providerDocs.map((p) => {
+                    const statusText =
+                      p.availability === 'available_configured'
+                        ? 'Configured in Vault'
+                        : p.availability === 'available_open'
+                        ? 'Open Access'
+                        : p.availability === 'restricted_legacy_sunsetting'
+                        ? 'Legacy (Sunsets Jan 2027)'
+                        : p.availability === 'retired_unavailable'
+                        ? 'Retired / Unavailable'
+                        : 'Config Required';
+                    const statusTone =
+                      p.availability === 'available_configured' || p.availability === 'available_open'
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : p.availability === 'retired_unavailable'
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-amber-700 dark:text-amber-400';
+                    return (
+                      <tr key={p.id} className="align-top text-slate-700 dark:text-slate-300">
+                        <td className="py-2 pr-3">
+                          <div className="font-semibold text-slate-900 dark:text-white">{p.name}</div>
+                          <div className="text-[11px] font-mono text-slate-500 break-all">{p.officialEndpoint}</div>
+                        </td>
+                        <td className={`py-2 pr-3 font-medium whitespace-nowrap ${statusTone}`}>{statusText}</td>
+                        <td className="py-2 pr-3 text-[11px] space-y-0.5">
+                          <div>{p.authentication}</div>
+                          <div className="text-slate-500">{p.pricingAndQuota}</div>
+                        </td>
+                        <td className="py-2 pr-3 text-[11px] space-y-0.5">
+                          <div>{p.supportedCountriesAndLanguages}</div>
+                          <div className="text-slate-500">{p.rateLimits}</div>
+                        </td>
+                        <td className="py-2 text-[11px] space-y-0.5">
+                          <div>{p.commercialUsage}</div>
+                          <div className="text-slate-500">{p.honestStatusNote}</div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Direct Website Intelligence Inspector */}
+      {showUrlInspector && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xs font-semibold text-slate-900 dark:text-white">
+                Safe Multi-Page Website Intelligence Inspector
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Inspects public homepage, about, products/services, contact, locations, and imprint pages with SSRF protection, robots.txt compliance, and per-attribute URL provenance (business info only — no personal contact harvesting).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowUrlInspector(false)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <form onSubmit={handleDirectInspectWebsite} className="flex items-center gap-2">
+            <input
+              type="url"
+              value={directInspectUrl}
+              onChange={(e) => setDirectInspectUrl(e.target.value)}
+              placeholder="https://www.nordicsemi.com"
+              className="flex-1 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+            />
+            <button
+              type="submit"
+              disabled={isDirectInspecting || !directInspectUrl.trim()}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 whitespace-nowrap shrink-0"
+            >
+              {isDirectInspecting ? 'Inspecting...' : 'Inspect Official Website'}
+            </button>
+          </form>
+
+          {directInspectResult?.inspection && (
+            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 text-xs space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-slate-700 dark:text-slate-300">
+                <span className="font-semibold text-slate-900 dark:text-white">
+                  {directInspectResult.inspection.businessName || directInspectResult.inspection.title || directInspectResult.inspection.domain}
+                </span>
+                <span className="text-slate-400">·</span>
+                <span className="tabular-nums">
+                  {directInspectResult.inspection.isOnline ? `HTTP ${directInspectResult.inspection.httpStatus}` : 'Offline'}
+                </span>
+                <span className="text-slate-400">·</span>
+                <span className="tabular-nums">
+                  {directInspectResult.inspection.pagesVisited?.length || 0} page(s) inspected
+                </span>
+              </div>
+              {directInspectResult.inspection.description && (
+                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                  {directInspectResult.inspection.description}
+                </p>
+              )}
+              {directInspectResult.aiIntel?.businessSummary && (
+                <p className="text-[11px] text-slate-700 dark:text-slate-200">
+                  <strong>{directInspectResult.aiIntel.provenanceClassification === 'ai_extracted' ? 'AI-Extracted' : 'Inferred'} Summary:</strong>{' '}
+                  {directInspectResult.aiIntel.businessSummary}
+                </p>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                <div>
+                  <span className="font-medium text-slate-800 dark:text-slate-200">General Emails:</span>{' '}
+                  {directInspectResult.inspection.emailsFound?.join(', ') || 'None published'}
+                </div>
+                <div>
+                  <span className="font-medium text-slate-800 dark:text-slate-200">Public Phones:</span>{' '}
+                  {directInspectResult.inspection.phonesFound?.join(', ') || 'None published'}
+                </div>
+                <div>
+                  <span className="font-medium text-slate-800 dark:text-slate-200">Products/Services:</span>{' '}
+                  {directInspectResult.inspection.productsServices?.join(', ') || 'Not listed'}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Execution History Panel */}
       {showHistory && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+            <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-300">
               Recent Discovery &amp; Enrichment Executions
             </h3>
             <button
@@ -1078,7 +1652,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                     <th className="py-1.5 pr-3 font-medium">Status</th>
                     <th className="py-1.5 pr-3 font-medium text-right">Records</th>
                     <th className="py-1.5 pr-3 font-medium text-right">Duration</th>
-                    <th className="py-1.5 font-medium">Timestamp</th>
+                    <th className="py-1.5 pr-3 font-medium">Timestamp</th>
+                    <th className="py-1.5 font-medium text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1106,8 +1681,22 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                       <td className="py-1.5 pr-3 text-right tabular-nums">
                         {h.durationMs !== undefined ? `${h.durationMs}ms` : '—'}
                       </td>
-                      <td className="py-1.5 text-[11px] text-slate-500 tabular-nums">
+                      <td className="py-1.5 pr-3 text-[11px] text-slate-500 tabular-nums">
                         {new Date(h.startedAt).toLocaleString()}
+                      </td>
+                      <td className="py-1.5 text-right">
+                        {h.operation === 'search' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRerunHistory(h)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap"
+                          >
+                            <Play className="w-2.5 h-2.5" />
+                            <span>Re-run</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1309,14 +1898,24 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
             </div>
 
             {searchId && results.length > 0 && (
-              <button
-                type="button"
-                onClick={handleExportDiscoveryCsv}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export CSV</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleExportDiscovery('csv')}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExportDiscovery('json')}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
+                >
+                  <FileJson className="w-3.5 h-3.5" />
+                  <span>Export JSON</span>
+                </button>
+              </>
             )}
 
             {results.length > 0 && (
@@ -1538,10 +2137,15 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                     </div>
 
                     <div className="col-span-2">
-                      <span className="text-slate-400 text-[10px] uppercase tracking-wide block">
-                        Industry &amp; Category
+                      <span className="text-slate-400 text-[10px] block">
+                        Industry &amp; Offerings
                       </span>
-                      <span className="text-slate-800 dark:text-slate-200">{lead.industry}</span>
+                      <span className="text-slate-800 dark:text-slate-200">
+                        {lead.industry}
+                        {lead.webMetadata?.productsServices?.length
+                          ? ` · ${lead.webMetadata.productsServices.slice(0, 3).join(', ')}`
+                          : ''}
+                      </span>
                     </div>
                   </div>
 
@@ -1687,13 +2291,40 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
             {/* Duplicate Comparison Alert if Present */}
             {duplicateInfoByLeadId[inspectedCandidate.id] &&
               duplicateInfoByLeadId[inspectedCandidate.id].status !== 'unique' && (
-                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 space-y-1">
-                  <div className="font-semibold">
-                    {duplicateInfoByLeadId[inspectedCandidate.id].requiresReview
-                      ? 'Ambiguous Match — Owner Review Recommended'
-                      : 'Duplicate / Corroboration Detected'}
+                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold">
+                      {duplicateInfoByLeadId[inspectedCandidate.id].requiresReview
+                        ? 'Ambiguous Match — Owner Review Recommended'
+                        : 'Duplicate / Corroboration Detected'}
+                    </span>
+                    {duplicateInfoByLeadId[inspectedCandidate.id].requiresReview &&
+                      duplicateInfoByLeadId[inspectedCandidate.id].matchedLeadId && (
+                        <button
+                          type="button"
+                          disabled={isAssessingDupId === inspectedCandidate.id}
+                          onClick={() =>
+                            handleAssessDuplicateWithAi(
+                              inspectedCandidate,
+                              duplicateInfoByLeadId[inspectedCandidate.id]
+                            )
+                          }
+                          className="px-2 py-1 text-[11px] font-medium rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-amber-900 dark:text-amber-200 hover:bg-amber-100/60 whitespace-nowrap"
+                        >
+                          {isAssessingDupId === inspectedCandidate.id ? 'Assessing...' : 'AI Duplicate Review'}
+                        </button>
+                      )}
                   </div>
                   <div>{duplicateInfoByLeadId[inspectedCandidate.id].note}</div>
+                  {duplicateAssessments[inspectedCandidate.id] && (
+                    <div className="pt-1.5 border-t border-amber-200/70 dark:border-amber-800/70 text-[11px] space-y-0.5">
+                      <div className="font-medium">
+                        Inferred Review ({duplicateAssessments[inspectedCandidate.id].engine}):{' '}
+                        {duplicateAssessments[inspectedCandidate.id].assessment.replace(/_/g, ' ')}
+                      </div>
+                      <div>{duplicateAssessments[inspectedCandidate.id].explanation}</div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1726,7 +2357,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
             {inspectedCandidate.customFields?.aiSummary && (
               <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs space-y-1.5">
                 <div className="font-semibold text-slate-900 dark:text-white flex items-center justify-between">
-                  <span>AI Qualification Brief</span>
+                  <span>AI Qualification Brief (Inferred)</span>
                   <span className="text-indigo-600 dark:text-indigo-400 tabular-nums">
                     {inspectedCandidate.customFields.aiQualification} · {inspectedCandidate.customFields.aiFitScore}%
                   </span>
@@ -1737,9 +2368,12 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
             )}
 
             {inspectedCandidate.webMetadata?.inspectedAt && (
-              <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs space-y-1">
-                <div className="font-semibold text-slate-900 dark:text-white">
-                  Website Observation (HTTP {inspectedCandidate.webMetadata.httpStatus})
+              <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs space-y-2">
+                <div className="font-semibold text-slate-900 dark:text-white flex items-center justify-between">
+                  <span>Website Observation (HTTP {inspectedCandidate.webMetadata.httpStatus})</span>
+                  <span className="text-[11px] font-normal text-slate-500 tabular-nums">
+                    {inspectedCandidate.webMetadata.pagesVisited?.length || 1} page(s)
+                  </span>
                 </div>
                 {inspectedCandidate.webMetadata.title && (
                   <div className="text-slate-700 dark:text-slate-300">{inspectedCandidate.webMetadata.title}</div>
@@ -1747,8 +2381,103 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                 {inspectedCandidate.webMetadata.description && (
                   <div className="text-slate-500 text-[11px]">{inspectedCandidate.webMetadata.description}</div>
                 )}
+                <div className="grid grid-cols-1 gap-1 text-[11px] text-slate-600 dark:text-slate-400 pt-1">
+                  {inspectedCandidate.webMetadata.productsServices?.length ? (
+                    <div>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">Products &amp; Services:</span>{' '}
+                      {inspectedCandidate.webMetadata.productsServices.join(', ')}
+                    </div>
+                  ) : null}
+                  {inspectedCandidate.webMetadata.locationsServed?.length ? (
+                    <div>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">Locations Served:</span>{' '}
+                      {inspectedCandidate.webMetadata.locationsServed.join(', ')}
+                    </div>
+                  ) : null}
+                  {inspectedCandidate.webMetadata.operatingInfo ? (
+                    <div>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">Operating Info:</span>{' '}
+                      {inspectedCandidate.webMetadata.operatingInfo}
+                    </div>
+                  ) : null}
+                  {inspectedCandidate.webMetadata.emailsFound?.length ? (
+                    <div>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">General Business Emails:</span>{' '}
+                      {inspectedCandidate.webMetadata.emailsFound.join(', ')}
+                    </div>
+                  ) : null}
+                  {inspectedCandidate.webMetadata.phonesFound?.length ? (
+                    <div>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">Public Phones:</span>{' '}
+                      {inspectedCandidate.webMetadata.phonesFound.join(', ')}
+                    </div>
+                  ) : null}
+                  {inspectedCandidate.webMetadata.addressesFound?.length ? (
+                    <div>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">Published Addresses:</span>{' '}
+                      {inspectedCandidate.webMetadata.addressesFound.join(' | ')}
+                    </div>
+                  ) : null}
+                </div>
+                {(inspectedCandidate.webMetadata.aboutPageUrl ||
+                  inspectedCandidate.webMetadata.productsPageUrl ||
+                  inspectedCandidate.webMetadata.contactPageUrl ||
+                  inspectedCandidate.webMetadata.locationsPageUrl ||
+                  inspectedCandidate.webMetadata.imprintPageUrl) && (
+                  <div className="flex items-center gap-3 flex-wrap pt-1 text-[11px]">
+                    {[
+                      { label: 'About', url: inspectedCandidate.webMetadata.aboutPageUrl },
+                      { label: 'Products', url: inspectedCandidate.webMetadata.productsPageUrl },
+                      { label: 'Contact', url: inspectedCandidate.webMetadata.contactPageUrl },
+                      { label: 'Locations', url: inspectedCandidate.webMetadata.locationsPageUrl },
+                      { label: 'Imprint', url: inspectedCandidate.webMetadata.imprintPageUrl },
+                    ]
+                      .filter((p) => sanitizeExternalUrl(p.url))
+                      .map((p) => (
+                        <a
+                          key={p.label}
+                          href={sanitizeExternalUrl(p.url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5"
+                        >
+                          <span>{p.label}</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      ))}
+                  </div>
+                )}
               </div>
             )}
+
+            {/* Attribute-Level Source Provenance Ledger */}
+            {inspectedCandidate.webMetadata?.attributeProvenance &&
+              Object.keys(inspectedCandidate.webMetadata.attributeProvenance).length > 0 && (
+                <div className="space-y-2 text-xs">
+                  <h4 className="font-semibold text-slate-800 dark:text-slate-200">
+                    Attribute Provenance &amp; Verification Tiers
+                  </h4>
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
+                    {Object.values(inspectedCandidate.webMetadata.attributeProvenance).map((prov, idx) => (
+                      <div key={idx} className="p-2.5 space-y-0.5 text-[11px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-slate-900 dark:text-white">{prov.attribute}</span>
+                          <span className="text-slate-600 dark:text-slate-300 font-medium">
+                            {provenanceLabel(prov.sourceType)}
+                          </span>
+                        </div>
+                        {prov.value && (
+                          <div className="text-slate-700 dark:text-slate-300 truncate">{prov.value}</div>
+                        )}
+                        <div className="text-slate-500 flex items-center justify-between gap-2 tabular-nums">
+                          <span className="truncate">{prov.sourceUrl || prov.sourceName}</span>
+                          <span className="shrink-0">{new Date(prov.retrievedAt).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             <div className="space-y-2 text-xs">
               <h4 className="font-semibold text-slate-800 dark:text-slate-200">Canonical Identifiers &amp; Provenance</h4>

@@ -20,10 +20,14 @@ import { inspectWebsite } from './server/connectors/webInspector.js';
 import { detectDuplicates, mergeLeads } from './server/connectors/dedupeEngine.js';
 import {
   analyzeLeadWithAi,
+  assessDuplicatePairWithAi,
+  extractBusinessIntelFromWebEvidence,
+  generateDiscoveryQueriesWithAi,
   generateSalesPitchWithAi,
   generateMeetingBriefWithAi,
   generateMarketReportWithAi,
 } from './server/gemini.js';
+import { buildSearchAndDirectoryProviderMatrix } from './server/connectors/searchProvidersCatalog.js';
 import { CanonicalLead, DiscoverySearchRequest } from './server/types.js';
 import { discoveryService } from './server/discovery/discoveryService.js';
 import {
@@ -1743,10 +1747,23 @@ protectedApi.post('/discovery/search', createRateLimitMiddleware(discoveryRateLi
       }
     }
 
+    const configuredConnectorIds = new Set<string>();
+    const allConnectors = connectorRegistry.listAll();
+    await Promise.all(
+      allConnectors.map(async (conn) => {
+        const credStatus = await credentialManager.getCredentialStatus(
+          conn.id,
+          conn.getMetadata().credentialRequirements
+        );
+        if (credStatus.configured) configuredConnectorIds.add(conn.id);
+      })
+    );
+
     const result = await discoveryService.executeSearch(payload, {
       registry: connectorRegistry,
       executionEngine: connectorExecutionEngine,
       configs,
+      configuredConnectorIds,
       userAgent: settings.userAgent,
       existingCrmLeads,
       onRecordRun: async (run) => {
@@ -2008,16 +2025,164 @@ protectedApi.post('/discovery/save', async (req: Request, res: Response) => {
   }
 });
 
-// Export genuine discovery results as RFC 4180 CSV
+// Phase 10: Search Engine & Public Business Directory Provider Matrix (with live credential & availability state)
+protectedApi.get('/discovery/providers', async (_req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  try {
+    const { isPg } = checkStorageEngine();
+    const [configs, runs] = await Promise.all([
+      isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+      isPg ? postgresStorage.getConnectorRuns(undefined, 200) : Promise.resolve(storage.getConnectorRuns(undefined, 200)),
+    ]);
+    const statsByConnector = aggregateRunsByConnector(runs);
+    const statuses = await Promise.all(
+      connectorRegistry.listAll().map((c) =>
+        buildUnifiedConnectorStatus(c, {
+          stats: statsByConnector.get(c.id),
+          config: configs[c.id],
+        })
+      )
+    );
+    const providers = buildSearchAndDirectoryProviderMatrix(statuses);
+    res.json({ providers });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to build search provider matrix.') });
+  }
+});
+
+// Phase 10: AI-assisted (with deterministic fallback) discovery search query generator
+protectedApi.post('/discovery/ai-queries', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const { query, industry, productsServices, countryCode, region, city, businessType } = req.body || {};
+  try {
+    const plan = await generateDiscoveryQueriesWithAi({
+      query: typeof query === 'string' ? query.slice(0, 200) : undefined,
+      industry: typeof industry === 'string' ? industry.slice(0, 120) : undefined,
+      productsServices: typeof productsServices === 'string' ? productsServices.slice(0, 200) : undefined,
+      countryCode: typeof countryCode === 'string' ? countryCode.slice(0, 12) : undefined,
+      region: typeof region === 'string' ? region.slice(0, 120) : undefined,
+      city: typeof city === 'string' ? city.slice(0, 120) : undefined,
+      businessType: typeof businessType === 'string' ? businessType.slice(0, 120) : undefined,
+    });
+    res.json(plan);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to generate discovery queries.') });
+  }
+});
+
+// Phase 10: Direct SSRF-protected multi-page company website intelligence inspection
+protectedApi.post('/discovery/inspect-website', createRateLimitMiddleware(inspectionRateLimiter), async (req: Request, res: Response) => {
+  const { url, companyName, runAiExtraction = true } = req.body || {};
+  if (!url || typeof url !== 'string' || url.trim().length > 2048) {
+    res.status(400).json({ error: 'Valid website URL string (max 2048 chars) is required.' });
+    return;
+  }
+
+  ensureConnectorsRegistered();
+  const { isPg } = checkStorageEngine();
+  const [settings, configs] = await Promise.all([
+    isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+    isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+  ]);
+
+  if (configs['conn-web-inspector'] && !configs['conn-web-inspector'].enabled) {
+    res.status(400).json({
+      error: 'Safe Website Inspector connector is disabled. Enable it in Connectors Hub first.',
+      errorCategory: 'configuration_error',
+    });
+    return;
+  }
+
+  const startedAt = new Date().toISOString();
+  const startMs = Date.now();
+  const inspection = await inspectWebsite(url.trim(), {
+    userAgent: settings.userAgent,
+    checkRobots: true,
+    maxPages: 5,
+  });
+
+  const runRecord: ConnectorRunRecord = {
+    id: `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    connectorId: 'conn-web-inspector',
+    operation: 'enrich',
+    queryParams: { url: url.trim().slice(0, 200) },
+    startedAt,
+    completedAt: new Date().toISOString(),
+    durationMs: Date.now() - startMs,
+    status: inspection.securityCheck.passed && inspection.isOnline ? 'success' : 'error',
+    recordsDiscovered: inspection.isOnline ? 1 : 0,
+    recordsNormalized: inspection.isOnline ? 1 : 0,
+    recordsRejected: inspection.isOnline ? 0 : 1,
+    errorCategory: !inspection.securityCheck.passed
+      ? 'invalid_request'
+      : !inspection.isOnline
+      ? 'network_failure'
+      : undefined,
+    diagnosticSummary:
+      inspection.securityCheck.reason ||
+      (inspection.isOnline ? `HTTP ${inspection.httpStatus} (${inspection.pagesVisited?.length || 1} page(s))` : 'Target offline'),
+  };
+  if (isPg) await postgresStorage.recordConnectorRun(runRecord);
+  else storage.recordConnectorRun(runRecord);
+
+  let aiIntel: Awaited<ReturnType<typeof extractBusinessIntelFromWebEvidence>> | undefined;
+  if (runAiExtraction && inspection.isOnline && inspection.securityCheck.passed && inspection.pageExcerpts?.length) {
+    aiIntel = await extractBusinessIntelFromWebEvidence({
+      companyName:
+        (typeof companyName === 'string' && companyName.trim()) ||
+        inspection.businessName ||
+        inspection.title ||
+        inspection.domain,
+      url: inspection.url,
+      pageExcerpts: inspection.pageExcerpts,
+      existingIndustry: inspection.industry,
+    });
+  }
+
+  res.json({
+    inspection,
+    aiIntel,
+  });
+});
+
+// Phase 10: AI-assisted assessment for flagged ambiguous duplicate / subsidiary pairs (never auto-merges)
+protectedApi.post('/discovery/duplicate-assess', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const { candidate, matchedLeadId, matchReason } = req.body || {};
+  if (!candidate || !candidate.companyName || !matchedLeadId) {
+    res.status(400).json({ error: 'candidate and matchedLeadId are required.' });
+    return;
+  }
+
+  const { isPg } = checkStorageEngine();
+  const leads = isPg ? await postgresStorage.getLeads() : storage.getLeads();
+  const existing = leads.find((l) => l.id === String(matchedLeadId));
+  if (!existing) {
+    res.status(404).json({ error: 'Matched CRM lead not found.' });
+    return;
+  }
+
+  const assessment = await assessDuplicatePairWithAi({
+    candidate,
+    existing,
+    matchReason: typeof matchReason === 'string' ? matchReason : 'Matched candidate in CRM',
+  });
+  res.json(assessment);
+});
+
+// Export genuine discovery results as RFC 4180 CSV or structured JSON
 protectedApi.get('/discovery/export/:searchId', createRateLimitMiddleware(exportRateLimiter), async (req: Request, res: Response) => {
   const { searchId } = req.params;
+  const format = String(req.query.format || 'csv').toLowerCase() === 'json' ? 'json' : 'csv';
   const idsParam = typeof req.query.ids === 'string' ? req.query.ids : undefined;
   const selectedIds = idsParam
     ? idsParam.split(',').map((s) => s.trim()).filter(Boolean)
     : undefined;
 
-  const csv = discoveryService.exportSessionCsv(searchId, selectedIds);
-  if (!csv) {
+  const payload =
+    format === 'json'
+      ? discoveryService.exportSessionJson(searchId, selectedIds)
+      : discoveryService.exportSessionCsv(searchId, selectedIds);
+
+  if (!payload) {
     res.status(404).json({ error: 'Discovery search session expired or not found.' });
     return;
   }
@@ -2025,20 +2190,25 @@ protectedApi.get('/discovery/export/:searchId', createRateLimitMiddleware(export
   if (dbManager.isDbConnected() && req.owner) {
     await postgresStorage
       .recordAuditEvent(
-        'DISCOVERY_CSV_EXPORTED',
+        format === 'json' ? 'DISCOVERY_JSON_EXPORTED' : 'DISCOVERY_CSV_EXPORTED',
         req.owner.email,
         'discovery_search',
         searchId,
-        { selectedCount: selectedIds?.length ?? 'all' },
+        { selectedCount: selectedIds?.length ?? 'all', format },
         normalizeClientIp(req)
       )
       .catch(() => {});
   }
 
   const safeSearchId = sanitizeExportFilenamePart(searchId, 'session');
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="leed_discovery_${safeSearchId}_${Date.now()}.csv"`);
-  res.send(csv);
+  if (format === 'json') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="leed_discovery_${safeSearchId}_${Date.now()}.json"`);
+  } else {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="leed_discovery_${safeSearchId}_${Date.now()}.csv"`);
+  }
+  res.send(payload);
 });
 
 // SSRF-Safe Web Inspector
