@@ -65,7 +65,7 @@ export type IntegrationStatus =
   | 'restricted_manual_only'
   | 'unavailable';
 
-export type AuthRequirement = 'none_open' | 'api_key' | 'environment' | 'manual_portal' | 'none';
+export type AuthRequirement = 'none_open' | 'api_key' | 'basic_auth' | 'oauth2' | 'environment' | 'manual_portal' | 'none';
 
 import type { RegistryAuditCriteria, SevenStateRegistryStatus } from '../types.js';
 

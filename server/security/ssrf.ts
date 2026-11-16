@@ -319,7 +319,9 @@ async function requestWithPinnedDns(
   targetUrl: URL,
   pinnedRecords: DnsAddressRecord[],
   options: {
+    method?: 'GET' | 'POST';
     headers?: Record<string, string>;
+    body?: string;
     timeoutMs: number;
     maxBytes: number;
   }
@@ -373,13 +375,19 @@ async function requestWithPinnedDns(
       reject(err);
     };
 
+    const method = options.method === 'POST' ? 'POST' : 'GET';
+    const requestHeaders: Record<string, string> = { ...(options.headers || {}) };
+    if (options.body !== undefined && !Object.keys(requestHeaders).some((k) => k.toLowerCase() === 'content-length')) {
+      requestHeaders['Content-Length'] = String(Buffer.byteLength(options.body, 'utf8'));
+    }
+
     const reqOptions: https.RequestOptions = {
       protocol: targetUrl.protocol,
       hostname: cleanHost,
       port,
       path: pathWithQuery,
-      method: 'GET',
-      headers: options.headers,
+      method,
+      headers: requestHeaders,
       agent: false,
       lookup: lookup as any,
       ...(isHttps
@@ -455,6 +463,9 @@ async function requestWithPinnedDns(
       finishReject(err);
     });
 
+    if (options.body !== undefined && method === 'POST') {
+      req.write(options.body);
+    }
     req.end();
   });
 }
@@ -511,7 +522,9 @@ export async function readBoundedResponseText(
 export async function fetchWithSsrfProtection(
   rawUrl: string,
   options?: {
+    method?: 'GET' | 'POST';
     headers?: Record<string, string>;
+    body?: string;
     timeoutMs?: number;
     maxRedirects?: number;
     maxBytes?: number;
@@ -551,8 +564,9 @@ export async function fetchWithSsrfProtection(
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         response = await customFetchFn(validation.url.toString(), {
-          method: 'GET',
+          method: options?.method === 'POST' ? 'POST' : 'GET',
           headers: options?.headers,
+          body: options?.method === 'POST' ? options.body : undefined,
           signal: controller.signal,
           redirect: 'manual',
         });
@@ -601,7 +615,9 @@ export async function fetchWithSsrfProtection(
           : (validation.resolvedIps || []).map((ip) => ({ address: ip, family: net.isIP(ip) || 4 }));
 
       const pinnedResult = await requestWithPinnedDns(validation.url, pinnedRecords, {
+        method: options?.method,
         headers: options?.headers,
+        body: options?.body,
         timeoutMs,
         maxBytes,
       });

@@ -33,6 +33,7 @@ import {
   Briefcase,
 } from 'lucide-react';
 import {
+  AttributeSourceProvenance,
   CanonicalLead,
   PipelineStage,
   LeadIdentifier,
@@ -116,6 +117,20 @@ function parseVerificationHistory(customFields?: Record<string, string>): Verifi
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function parseAttributeSources(
+  customFields?: Record<string, string>
+): Record<string, AttributeSourceProvenance> {
+  if (!customFields?.attributeSources) return {};
+  try {
+    const parsed = JSON.parse(customFields.attributeSources);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, AttributeSourceProvenance>)
+      : {};
+  } catch {
+    return {};
   }
 }
 
@@ -341,6 +356,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   const storedConflicts = parseVerificationConflicts(lead.customFields);
   const activeConflicts = verificationReport?.conflicts ?? storedConflicts;
   const verificationHistory = parseVerificationHistory(lead.customFields);
+  const activeAttributeSources =
+    verificationReport?.attributeSources ?? parseAttributeSources(lead.customFields);
   const lastVerifiedAt = lead.customFields?.lastVerifiedAt;
   const lastVerificationSource = lead.customFields?.lastVerificationSource;
   const lastVerificationSourceUrl = lead.customFields?.lastVerificationSourceUrl;
@@ -1066,12 +1083,24 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 )}
 
                 {verificationReport && (
-                  <div className="p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-[11px] text-slate-200 space-y-1">
+                  <div className="p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-[11px] text-slate-200 space-y-1.5">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-semibold text-white">Latest Verification Run</span>
-                      {renderRegistryStateBadge(verificationReport.state)}
+                      <div className="flex items-center gap-1.5">
+                        {verificationReport.authRequired && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                            Credentials Required
+                          </span>
+                        )}
+                        {renderRegistryStateBadge(verificationReport.state)}
+                      </div>
                     </div>
                     <p className="text-slate-300">{verificationReport.summary}</p>
+                    {verificationReport.attemptedConnectors && verificationReport.attemptedConnectors.length > 0 && (
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        Attempted connectors: {verificationReport.attemptedConnectors.join(' -> ')}
+                      </div>
+                    )}
                     {verificationReport.notes && verificationReport.notes.length > 0 && (
                       <ul className="list-disc list-inside text-[10px] text-slate-400 space-y-0.5">
                         {verificationReport.notes.map((n, idx) => (
@@ -1150,6 +1179,27 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     </div>
                   </div>
                 </div>
+
+                {Object.keys(activeAttributeSources).length > 0 && (
+                  <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                    <div className="text-[10px] text-slate-500 uppercase font-semibold">
+                      Field-Level Official Provenance
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {Object.entries(activeAttributeSources).map(([field, meta]) => (
+                        <div
+                          key={field}
+                          className="p-2 bg-slate-900/80 border border-slate-800 rounded text-[10px] flex items-center justify-between gap-2"
+                        >
+                          <span className="font-mono text-slate-300">{field}</span>
+                          <span className="text-slate-400 truncate" title={meta.sourceName}>
+                            {meta.sourceName}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Conflicts / Outdated Information Alert Panel */}
                 {activeConflicts.length > 0 && (

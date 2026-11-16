@@ -108,7 +108,12 @@ function formatAccessMode(mode?: ConnectorAccessMode, authType?: string): {
   switch (mode) {
     case 'live_api':
       return {
-        label: authType === 'none_open' ? 'Live Open API' : 'Live API (Key)',
+        label:
+          authType === 'none_open'
+            ? 'Live Open API'
+            : authType === 'basic_auth'
+              ? 'Live API (Basic Auth)'
+              : 'Live API (Key)',
         toneClass:
           'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800',
       };
@@ -614,17 +619,35 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
               className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
             >
               <option value="ALL">All Countries</option>
+              <option value="GLOBAL">Global (GLEIF LEI / OSM)</option>
+              <option value="EU">European Union (EU VIES VAT)</option>
               <option value="NO">Norway (NO)</option>
               <option value="GB">United Kingdom (GB)</option>
               <option value="AU">Australia (AU)</option>
               <option value="US">United States (US)</option>
               <option value="FR">France (FR)</option>
+              <option value="FI">Finland (FI)</option>
+              <option value="PL">Poland (PL)</option>
+              <option value="NL">Netherlands (NL)</option>
+              <option value="NZ">New Zealand (NZ)</option>
+              <option value="CH">Switzerland (CH)</option>
+              <option value="IE">Ireland (IE)</option>
               <option value="JP">Japan (JP)</option>
               <option value="SG">Singapore (SG)</option>
               <option value="DE">Germany (DE)</option>
               <option value="CA">Canada (CA)</option>
+              <option value="SE">Sweden (SE)</option>
+              <option value="DK">Denmark (DK)</option>
+              <option value="BE">Belgium (BE)</option>
+              <option value="ES">Spain (ES)</option>
+              <option value="IT">Italy (IT)</option>
               <option value="IN">India (IN)</option>
-              <option value="GLOBAL">Global Providers</option>
+              <option value="KR">South Korea (KR)</option>
+              <option value="AE">United Arab Emirates (AE)</option>
+              <option value="SA">Saudi Arabia (SA)</option>
+              <option value="ZA">South Africa (ZA)</option>
+              <option value="BR">Brazil (BR)</option>
+              <option value="MX">Mexico (MX)</option>
             </select>
 
             <select

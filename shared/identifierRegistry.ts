@@ -18,6 +18,24 @@ export type CanonicalIdentifierType =
   | 'JP_CN'
   | 'IN_CIN'
   | 'SG_UEN'
+  | 'FI_YTUNNUS'
+  | 'PL_KRS'
+  | 'PL_NIP'
+  | 'NL_KVK'
+  | 'NZ_NZBN'
+  | 'CH_UID'
+  | 'IE_CRO'
+  | 'BE_KBO'
+  | 'SE_ORG'
+  | 'DK_CVR'
+  | 'ES_CIF'
+  | 'IT_CF'
+  | 'KR_BRN'
+  | 'AE_TRN'
+  | 'SA_CR'
+  | 'ZA_CIPC'
+  | 'BR_CNPJ'
+  | 'MX_RFC'
   | 'EU_VAT'
   | 'LEI'
   | 'TAX_ID'
@@ -181,13 +199,193 @@ export const CANONICAL_IDENTIFIER_TYPES: IdentifierTypeSpec[] = [
     aliases: ['SG_UEN', 'UEN', 'ACRA_UEN'],
   },
   {
+    code: 'FI_YTUNNUS',
+    label: 'FI Y-tunnus (Finnish Business ID)',
+    shortLabel: 'Y-tunnus (FI)',
+    countryCode: 'FI',
+    issuingAuthority: 'Finnish Patent and Registration Office (PRH)',
+    placeholder: 'e.g. 0112038-9',
+    selectableInUi: true,
+    aliases: ['FI_YTUNNUS', 'YTUNNUS', 'Y_TUNNUS', 'FI_BUSINESS_ID'],
+  },
+  {
+    code: 'PL_KRS',
+    label: 'PL KRS (National Court Register)',
+    shortLabel: 'KRS (PL)',
+    countryCode: 'PL',
+    issuingAuthority: 'Ministry of Justice Poland (KRS)',
+    placeholder: 'e.g. 0000028860',
+    selectableInUi: true,
+    aliases: ['PL_KRS', 'KRS'],
+  },
+  {
+    code: 'PL_NIP',
+    label: 'PL NIP (Tax Identification No)',
+    shortLabel: 'NIP (PL)',
+    countryCode: 'PL',
+    issuingAuthority: 'Ministry of Finance Poland (KAS / VAT White List)',
+    placeholder: 'e.g. 5260250995',
+    selectableInUi: true,
+    aliases: ['PL_NIP', 'NIP'],
+  },
+  {
+    code: 'NL_KVK',
+    label: 'NL KVK-nummer (8-digit Chamber of Commerce)',
+    shortLabel: 'KVK (NL)',
+    countryCode: 'NL',
+    issuingAuthority: 'Kamer van Koophandel (KVK)',
+    placeholder: 'e.g. 34108286',
+    selectableInUi: true,
+    aliases: ['NL_KVK', 'KVK', 'KVK_NUMMER'],
+  },
+  {
+    code: 'NZ_NZBN',
+    label: 'NZ NZBN (13-digit Business Number)',
+    shortLabel: 'NZBN (NZ)',
+    countryCode: 'NZ',
+    issuingAuthority: 'New Zealand Companies Office / MBIE',
+    placeholder: 'e.g. 9429041935243',
+    selectableInUi: true,
+    aliases: ['NZ_NZBN', 'NZBN'],
+  },
+  {
+    code: 'CH_UID',
+    label: 'CH UID (Swiss Enterprise ID CHE-xxx)',
+    shortLabel: 'UID (CH)',
+    countryCode: 'CH',
+    issuingAuthority: 'Federal Statistical Office / Zefix',
+    placeholder: 'e.g. CHE-105.815.320',
+    selectableInUi: true,
+    aliases: ['CH_UID', 'ZEFIX', 'ZEFIX_UID', 'UID_CHE', 'CHE'],
+  },
+  {
+    code: 'IE_CRO',
+    label: 'IE CRO (Irish Companies Registration No)',
+    shortLabel: 'CRO (IE)',
+    countryCode: 'IE',
+    issuingAuthority: 'Companies Registration Office (CRO)',
+    placeholder: 'e.g. 363390',
+    selectableInUi: true,
+    aliases: ['IE_CRO', 'CRO'],
+  },
+  {
+    code: 'BE_KBO',
+    label: 'BE KBO/BCE (10-digit Enterprise No)',
+    shortLabel: 'KBO/BCE (BE)',
+    countryCode: 'BE',
+    issuingAuthority: 'Crossroads Bank for Enterprises (FPS Economy)',
+    placeholder: 'e.g. 0403.170.701',
+    selectableInUi: true,
+    aliases: ['BE_KBO', 'BE_BCE', 'KBO', 'BCE'],
+  },
+  {
+    code: 'SE_ORG',
+    label: 'SE Organisationsnummer (10-digit)',
+    shortLabel: 'OrgNr (SE)',
+    countryCode: 'SE',
+    issuingAuthority: 'Bolagsverket / Skatteverket',
+    placeholder: 'e.g. 556000-0757',
+    selectableInUi: true,
+    aliases: ['SE_ORG', 'SE_ORGNR', 'ORGNR_SE'],
+  },
+  {
+    code: 'DK_CVR',
+    label: 'DK CVR-nummer (8-digit)',
+    shortLabel: 'CVR (DK)',
+    countryCode: 'DK',
+    issuingAuthority: 'Danish Business Authority (Erhvervsstyrelsen)',
+    placeholder: 'e.g. 10150817',
+    selectableInUi: true,
+    aliases: ['DK_CVR', 'CVR'],
+  },
+  {
+    code: 'ES_CIF',
+    label: 'ES NIF/CIF (Tax & Registry ID)',
+    shortLabel: 'NIF/CIF (ES)',
+    countryCode: 'ES',
+    issuingAuthority: 'Agencia Tributaria / Registro Mercantil',
+    placeholder: 'e.g. A28015865',
+    selectableInUi: true,
+    aliases: ['ES_CIF', 'ES_NIF', 'CIF'],
+  },
+  {
+    code: 'IT_CF',
+    label: 'IT Codice Fiscale / REA',
+    shortLabel: 'CF/PIVA (IT)',
+    countryCode: 'IT',
+    issuingAuthority: 'Registro Imprese / Agenzia delle Entrate',
+    placeholder: 'e.g. 00159560366',
+    selectableInUi: true,
+    aliases: ['IT_CF', 'IT_PIVA', 'CODICE_FISCALE'],
+  },
+  {
+    code: 'KR_BRN',
+    label: 'KR BRN (10-digit Business Reg No)',
+    shortLabel: 'BRN (KR)',
+    countryCode: 'KR',
+    issuingAuthority: 'National Tax Service of Korea (NTS)',
+    placeholder: 'e.g. 120-81-47521',
+    selectableInUi: true,
+    aliases: ['KR_BRN', 'KR_BNO'],
+  },
+  {
+    code: 'AE_TRN',
+    label: 'AE TRN / Commercial License',
+    shortLabel: 'TRN (AE)',
+    countryCode: 'AE',
+    issuingAuthority: 'UAE Federal Tax Authority / DED',
+    placeholder: 'e.g. 100234567890003',
+    selectableInUi: true,
+    aliases: ['AE_TRN', 'UAE_TRN'],
+  },
+  {
+    code: 'SA_CR',
+    label: 'SA Commercial Registration (10-digit)',
+    shortLabel: 'CR (SA)',
+    countryCode: 'SA',
+    issuingAuthority: 'Saudi Ministry of Commerce (MC / Wathq)',
+    placeholder: 'e.g. 1010000154',
+    selectableInUi: true,
+    aliases: ['SA_CR', 'CR_SA'],
+  },
+  {
+    code: 'ZA_CIPC',
+    label: 'ZA CIPC Registration No',
+    shortLabel: 'CIPC (ZA)',
+    countryCode: 'ZA',
+    issuingAuthority: 'Companies & Intellectual Property Commission (CIPC)',
+    placeholder: 'e.g. 2015/123456/07',
+    selectableInUi: true,
+    aliases: ['ZA_CIPC', 'CIPC'],
+  },
+  {
+    code: 'BR_CNPJ',
+    label: 'BR CNPJ (14-digit Entity ID)',
+    shortLabel: 'CNPJ (BR)',
+    countryCode: 'BR',
+    issuingAuthority: 'Receita Federal do Brasil',
+    placeholder: 'e.g. 00.000.000/0001-91',
+    selectableInUi: true,
+    aliases: ['BR_CNPJ', 'CNPJ'],
+  },
+  {
+    code: 'MX_RFC',
+    label: 'MX RFC (Taxpayer Registry ID)',
+    shortLabel: 'RFC (MX)',
+    countryCode: 'MX',
+    issuingAuthority: 'Servicio de Administración Tributaria (SAT)',
+    placeholder: 'e.g. BIM011108DJ1',
+    selectableInUi: true,
+    aliases: ['MX_RFC', 'RFC'],
+  },
+  {
     code: 'EU_VAT',
     label: 'VAT / Tax Identifier',
     shortLabel: 'VAT / Tax ID',
     issuingAuthority: 'European Commission VIES / National Tax Office',
     placeholder: 'e.g. GB123456789 or NO974760673MVA',
     selectableInUi: true,
-    aliases: ['EU_VAT', 'VAT'],
+    aliases: ['EU_VAT', 'VAT', 'VIES', 'EU_VIES'],
   },
   {
     code: 'LEI',
@@ -282,17 +480,7 @@ export function canonicalizeIdentifierType(type?: string, countryHint?: string):
   const raw = (type || '').toUpperCase().trim();
   if (!raw || raw === 'REG') {
     const c = (countryHint || '').toUpperCase().trim();
-    if (c === 'NO') return 'NO_ORG';
-    if (c === 'GB' || c === 'UK') return 'UK_CRN';
-    if (c === 'AU') return 'AU_ABN';
-    if (c === 'DE') return 'DE_HANDELSREGISTER';
-    if (c === 'FR') return 'FR_SIREN';
-    if (c === 'US') return 'US_EIN';
-    if (c === 'CA') return 'CA_BN';
-    if (c === 'JP') return 'JP_CN';
-    if (c === 'IN') return 'IN_CIN';
-    if (c === 'SG') return 'SG_UEN';
-    return raw || 'TAX_ID';
+    return getDefaultIdentifierTypeForCountry(c) || raw || 'TAX_ID';
   }
   return ALIAS_TO_CANONICAL.get(raw) || raw;
 }
@@ -304,6 +492,7 @@ export function getDefaultIdentifierTypeForCountry(countryCode?: string): Canoni
   const c = (countryCode || '').toUpperCase().trim();
   switch (c) {
     case 'GB':
+    case 'UK':
       return 'UK_CRN';
     case 'NO':
       return 'NO_ORG';
@@ -323,6 +512,40 @@ export function getDefaultIdentifierTypeForCountry(countryCode?: string): Canoni
       return 'IN_CIN';
     case 'SG':
       return 'SG_UEN';
+    case 'FI':
+      return 'FI_YTUNNUS';
+    case 'PL':
+      return 'PL_KRS';
+    case 'NL':
+      return 'NL_KVK';
+    case 'NZ':
+      return 'NZ_NZBN';
+    case 'CH':
+      return 'CH_UID';
+    case 'IE':
+      return 'IE_CRO';
+    case 'BE':
+      return 'BE_KBO';
+    case 'SE':
+      return 'SE_ORG';
+    case 'DK':
+      return 'DK_CVR';
+    case 'ES':
+      return 'ES_CIF';
+    case 'IT':
+      return 'IT_CF';
+    case 'KR':
+      return 'KR_BRN';
+    case 'AE':
+      return 'AE_TRN';
+    case 'SA':
+      return 'SA_CR';
+    case 'ZA':
+      return 'ZA_CIPC';
+    case 'BR':
+      return 'BR_CNPJ';
+    case 'MX':
+      return 'MX_RFC';
     default:
       return 'TAX_ID';
   }

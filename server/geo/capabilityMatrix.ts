@@ -1,7 +1,12 @@
-import { CountrySourceCapability, IntegrationStatus } from './types.js';
+import { AuthRequirement, CountrySourceCapability, IntegrationStatus } from './types.js';
 import { getAllCountries } from './countries.js';
 import { ConnectorStatus, SevenStateRegistryStatus } from '../types.js';
-import { resolveSevenStateRegistryStatus, TEN_COUNTRY_REGISTRY_AUDIT } from './registryAudit.js';
+import {
+  AuditedRegistryEntry,
+  INTERNATIONAL_REGISTRY_AUDIT,
+  PRIORITY_27_COUNTRIES,
+  resolveSevenStateRegistryStatus,
+} from './registryAudit.js';
 
 export interface CapabilityMatrixOptions {
   hasChKey?: boolean;
@@ -27,7 +32,9 @@ function mapSevenStateToLegacyIntegration(
 ): IntegrationStatus {
   switch (state) {
     case 'live_and_operational':
-      return authRequirement === 'api_key' ? 'configured_api_key' : 'live_open_api';
+      return authRequirement === 'api_key' || authRequirement === 'basic_auth'
+        ? 'configured_api_key'
+        : 'live_open_api';
     case 'live_auth_required':
       return 'requires_api_key';
     case 'configuration_required':
@@ -39,6 +46,78 @@ function mapSevenStateToLegacyIntegration(
     case 'public_access_unavailable':
       return 'restricted_manual_only';
   }
+}
+
+function resolveAuditedCapabilityEntry(
+  id: string,
+  audit: AuditedRegistryEntry,
+  connectorMap: Map<string, ConnectorStatus>,
+  options: CapabilityMatrixOptions
+): CountrySourceCapability {
+  const conn = audit.connectorId ? connectorMap.get(audit.connectorId) : undefined;
+  const override = options.overrides?.get(audit.countryCode);
+
+  let effectiveConn = conn;
+  if (audit.countryCode === 'GB' && options.hasChKey) {
+    if (conn && !conn.isConfigured) {
+      effectiveConn = { ...conn, isConfigured: true, healthState: 'operational', operational: true };
+    } else if (!conn) {
+      effectiveConn = {
+        id: 'conn-companies-house',
+        name: audit.authorityName,
+        category: 'government_registry',
+        countryCoverage: ['GB'],
+        status: 'configured',
+        healthState: 'operational',
+        operational: true,
+        authType: 'api_key',
+        isConfigured: true,
+        rateLimitNote: audit.auditDetails.rateLimitsAndPagination,
+        attribution: audit.authorityName,
+        totalCalls: 0,
+      };
+    }
+  }
+
+  const registryState = resolveSevenStateRegistryStatus(audit, effectiveConn);
+  const lastVerifiedAt = override?.lastCheckedAt || conn?.lastSuccessAt || undefined;
+
+  const authRequirement: AuthRequirement =
+    effectiveConn?.authType === 'basic_auth' ||
+    (!effectiveConn && (audit.countryCode === 'CH' || audit.countryCode === 'IE'))
+      ? 'basic_auth'
+      : effectiveConn?.authType === 'api_key' || audit.defaultState === 'live_auth_required'
+      ? 'api_key'
+      : effectiveConn?.authType === 'none_open' || audit.auditDetails.publicAccessPermitted
+      ? 'none_open'
+      : 'manual_portal';
+
+  const sourceType =
+    registryState === 'live_and_operational' && authRequirement === 'none_open'
+      ? 'official_open_registry'
+      : audit.connectorId
+      ? 'official_api_credentials'
+      : 'manual_registry_portal';
+
+  return {
+    id,
+    countryCode: audit.countryCode,
+    countryName: audit.countryName,
+    flag: audit.flag,
+    providerName: audit.authorityName,
+    sourceType,
+    integrationStatus: mapSevenStateToLegacyIntegration(registryState, authRequirement),
+    registryState,
+    connectorId: audit.connectorId,
+    authRequirement,
+    sourceUrl: audit.auditDetails.documentationUrl,
+    lastCheckedAt: lastVerifiedAt,
+    lastVerifiedAt,
+    notes: override?.notes || `${audit.auditDetails.officialApiSummary} ${audit.auditDetails.accessRestrictions}`,
+    licensingInfo: audit.auditDetails.commercialUseAndRedistribution,
+    coverageFeatures: audit.auditDetails.searchAndVerificationCapabilities,
+    auditDetails: audit.auditDetails,
+  };
 }
 
 export function buildCountryCapabilityMatrix(
@@ -53,76 +132,32 @@ export function buildCountryCapabilityMatrix(
   const overrides = options.overrides;
   const matrix: CountrySourceCapability[] = [];
 
-  // 1. Audited 10 Priority Countries
-  const priorityOrder = ['NO', 'GB', 'AU', 'US', 'FR', 'SG', 'JP', 'CA', 'DE', 'IN'];
-  for (const code of priorityOrder) {
-    const audit = TEN_COUNTRY_REGISTRY_AUDIT[code];
+  // 1. Audited 27 Priority Countries
+  for (const code of PRIORITY_27_COUNTRIES) {
+    const audit = INTERNATIONAL_REGISTRY_AUDIT[code];
     if (!audit) continue;
-    const conn = audit.connectorId ? connectorMap.get(audit.connectorId) : undefined;
-    const override = overrides?.get(code);
-
-    let effectiveConn = conn;
-    if (code === 'GB' && options.hasChKey) {
-      if (conn && !conn.isConfigured) {
-        effectiveConn = { ...conn, isConfigured: true, healthState: 'operational', operational: true };
-      } else if (!conn) {
-        effectiveConn = {
-          id: 'conn-companies-house',
-          name: audit.authorityName,
-          category: 'government_registry',
-          countryCoverage: ['GB'],
-          status: 'configured',
-          healthState: 'operational',
-          operational: true,
-          authType: 'api_key',
-          isConfigured: true,
-          rateLimitNote: audit.auditDetails.rateLimitsAndPagination,
-          attribution: audit.authorityName,
-          totalCalls: 0,
-        };
-      }
-    }
-
-    const registryState = resolveSevenStateRegistryStatus(audit, effectiveConn);
-    // Strict honesty: lastVerifiedAt comes ONLY from real successful connector execution (lastSuccessAt) or explicit verified override
-    const lastVerifiedAt = override?.lastCheckedAt || conn?.lastSuccessAt || undefined;
-
-    const authRequirement =
-      audit.defaultState === 'live_auth_required' || (audit.connectorId && effectiveConn?.authType === 'api_key')
-        ? 'api_key'
-        : audit.auditDetails.publicAccessPermitted
-        ? 'none_open'
-        : 'manual_portal';
-
-    const sourceType =
-      registryState === 'live_and_operational' && authRequirement === 'none_open'
-        ? 'official_open_registry'
-        : audit.connectorId
-        ? 'official_api_credentials'
-        : 'manual_registry_portal';
-
-    matrix.push({
-      id: LEGACY_CAPABILITY_IDS[code] || `cap-${code.toLowerCase()}-official`,
-      countryCode: audit.countryCode,
-      countryName: audit.countryName,
-      flag: audit.flag,
-      providerName: audit.authorityName,
-      sourceType,
-      integrationStatus: mapSevenStateToLegacyIntegration(registryState, authRequirement),
-      registryState,
-      connectorId: audit.connectorId,
-      authRequirement,
-      sourceUrl: audit.auditDetails.documentationUrl,
-      lastCheckedAt: lastVerifiedAt,
-      lastVerifiedAt,
-      notes: override?.notes || `${audit.auditDetails.officialApiSummary} ${audit.auditDetails.accessRestrictions}`,
-      licensingInfo: audit.auditDetails.commercialUseAndRedistribution,
-      coverageFeatures: audit.auditDetails.searchAndVerificationCapabilities,
-      auditDetails: audit.auditDetails,
-    });
+    const capId = LEGACY_CAPABILITY_IDS[code] || `cap-${code.toLowerCase()}-official`;
+    matrix.push(resolveAuditedCapabilityEntry(capId, audit, connectorMap, options));
   }
 
-  // 2. Multi-Jurisdiction Geospatial Directory: OpenStreetMap Overpass & Nominatim
+  // 2. Cross-Border Authoritative Official Registries (GLEIF LEI & EU VIES VAT)
+  if (INTERNATIONAL_REGISTRY_AUDIT.GLOBAL_LEI) {
+    matrix.push(
+      resolveAuditedCapabilityEntry(
+        'cap-global-gleif',
+        INTERNATIONAL_REGISTRY_AUDIT.GLOBAL_LEI,
+        connectorMap,
+        options
+      )
+    );
+  }
+  if (INTERNATIONAL_REGISTRY_AUDIT.EU) {
+    matrix.push(
+      resolveAuditedCapabilityEntry('cap-eu-vies', INTERNATIONAL_REGISTRY_AUDIT.EU, connectorMap, options)
+    );
+  }
+
+  // 3. Multi-Jurisdiction Geospatial Directory: OpenStreetMap Overpass & Nominatim
   const osmConn = connectorMap.get('conn-osm');
   const osmState: SevenStateRegistryStatus =
     osmConn?.healthState === 'disabled'
@@ -151,7 +186,7 @@ export function buildCountryCapabilityMatrix(
     coverageFeatures: ['Commercial POI Search', 'Global Coordinates', 'Street Addresses', 'Website & Phone discovery'],
   });
 
-  // 3. Public Website Sources Requiring Permitted Access: Safe Web Inspector
+  // 4. Public Website Sources Requiring Permitted Access: Safe Web Inspector
   const webConn = connectorMap.get('conn-web-inspector');
   const webState: SevenStateRegistryStatus =
     webConn?.healthState === 'disabled'
@@ -179,27 +214,6 @@ export function buildCountryCapabilityMatrix(
     coverageFeatures: ['Email Extraction', 'SSL Validation', 'Social Profiles', 'Server Latency', 'Homepage Metadata'],
   });
 
-  // 4. Switzerland Portal Note (Non-priority explicit portal entry)
-  matrix.push({
-    id: 'cap-ch-reg',
-    countryCode: 'CH',
-    countryName: 'Switzerland',
-    flag: '🇨🇭',
-    providerName: 'ZEFix (Central Business Name Index)',
-    sourceType: 'manual_registry_portal',
-    integrationStatus: 'restricted_manual_only',
-    registryState: 'public_access_unavailable',
-    authRequirement: 'manual_portal',
-    sourceUrl: 'https://www.zefix.ch',
-    lastCheckedAt: overrides?.get('CH')?.lastCheckedAt || undefined,
-    lastVerifiedAt: overrides?.get('CH')?.lastCheckedAt || undefined,
-    notes:
-      overrides?.get('CH')?.notes ||
-      'Cantonal commercial registers index. Web portal search available; bulk queries or automated API access require formal permit.',
-    licensingInfo: 'Jurisdictional Portal Terms of Use',
-    coverageFeatures: ['Company Name', 'UID Registration Number', 'Legal Status'],
-  });
-
   // 5. Offline geographic & identifier reference coverage for all remaining sovereign states
   const documentedCodes = new Set(matrix.map((m) => m.countryCode));
   for (const country of countries) {
@@ -219,7 +233,7 @@ export function buildCountryCapabilityMatrix(
         lastVerifiedAt: overrides?.get(country.code)?.lastCheckedAt || undefined,
         notes:
           overrides?.get(country.code)?.notes ||
-          `Offline reference only: ISO codes, postal rules, telephone dialing (+${country.callingCode.replace(/[^0-9]/g, '')}), currency (${country.currency}), and timezone specs verified. No official national business registry API connector integrated.`,
+          `Offline reference only: ISO codes, postal rules, telephone dialing (+${country.callingCode.replace(/[^0-9]/g, '')}), currency (${country.currency}), and timezone specs verified. Cross-border verification available via GLEIF LEI when company holds an ISO 17442 LEI.`,
         licensingInfo: 'ISO 3166 / ISO 4217 Open Reference Standards',
         coverageFeatures: ['ISO Alpha-2 / Alpha-3', 'Calling Code Normalization', 'Address Formatting Rules', 'Currency / Timezone Specs'],
       });

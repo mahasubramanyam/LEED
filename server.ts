@@ -54,7 +54,11 @@ import { normalizePhoneNumber } from './server/geo/phoneUtils.js';
 import { formatInternationalAddress, validatePostalCode } from './server/geo/addressUtils.js';
 import { validateIdentifier, normalizeIdentifierValue } from './server/identifiers/identifierEngine.js';
 import { buildCountryCapabilityMatrix } from './server/geo/capabilityMatrix.js';
-import { resolveSevenStateRegistryStatus, TEN_COUNTRY_REGISTRY_AUDIT } from './server/geo/registryAudit.js';
+import {
+  getAllAuditedRegistries,
+  PRIORITY_27_COUNTRIES,
+  resolveSevenStateRegistryStatus,
+} from './server/geo/registryAudit.js';
 import {
   applyOfficialVerificationToLead,
   verifyLeadWithOfficialRegistry,
@@ -1081,7 +1085,7 @@ protectedApi.get('/geo/capability-matrix', async (req: Request, res: Response) =
   }
 });
 
-// Phase 6: 10-Country Official Government Registry Coverage & 7-State Audit Matrix
+// Phase 6 & 9: 27-Country + Cross-Border Official Government Registry Coverage & 7-State Audit Matrix
 protectedApi.get('/registries/coverage', async (req: Request, res: Response) => {
   try {
     ensureConnectorsRegistered();
@@ -1096,7 +1100,7 @@ protectedApi.get('/registries/coverage', async (req: Request, res: Response) => 
     const hasChKey = Boolean(process.env.COMPANIES_HOUSE_API_KEY || settings.companiesHouseApiKey);
     const matrix = buildCountryCapabilityMatrix(connectors, { hasChKey, overrides });
 
-    const registries = Object.values(TEN_COUNTRY_REGISTRY_AUDIT).map((audit) => {
+    const registries = getAllAuditedRegistries().map((audit) => {
       const conn = audit.connectorId ? connectorMap.get(audit.connectorId) : undefined;
       let effectiveConn = conn;
       if (audit.countryCode === 'GB' && hasChKey && conn && !conn.isConfigured) {
@@ -1114,8 +1118,8 @@ protectedApi.get('/registries/coverage', async (req: Request, res: Response) => 
         primaryIdentifierType: audit.primaryIdentifierType,
         registryState,
         lastVerifiedAt,
-        connectorHealthState: conn?.healthState,
-        isConfigured: conn ? conn.isConfigured : false,
+        connectorHealthState: effectiveConn?.healthState,
+        isConfigured: effectiveConn ? effectiveConn.isConfigured : false,
         auditDetails: audit.auditDetails,
       };
     });
@@ -1136,6 +1140,8 @@ protectedApi.get('/registries/coverage', async (req: Request, res: Response) => 
     res.json({
       registries,
       stateCounts,
+      priorityCount: PRIORITY_27_COUNTRIES.length,
+      totalAudited: registries.length,
       matrixCount: matrix.length,
       timestamp: new Date().toISOString(),
     });

@@ -111,6 +111,7 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
   const [search, setSearch] = useState('');
   const [selectedRegistryState, setSelectedRegistryState] = useState<string>('ALL');
   const [selectedType, setSelectedType] = useState<string>('ALL');
+  const [auditedOnly, setAuditedOnly] = useState<boolean>(false);
   const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
 
   const fetchMatrix = async () => {
@@ -135,6 +136,7 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
 
   const filtered = capabilities.filter((cap) => {
     const resolvedState = inferSevenStateFallback(cap);
+    if (auditedOnly && !cap.auditDetails) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       const matchName = cap.countryName.toLowerCase().includes(q);
@@ -205,8 +207,8 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
             </h2>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-3xl">
-            Audit-grade classification across 10 core government registries and 195 sovereign states across 7 distinct operational states.
-            Distinguishes live APIs, key-gated portals, restricted systems, unimplemented registries, and offline reference tiers.
+            Audit-grade classification covering 27 priority national registries, 2 cross-border official registries (GLEIF LEI &amp; EU VIES VAT), and 195 sovereign states across 7 distinct operational states.
+            Distinguishes live open APIs, credentialed gateways, restricted commercial systems, unbuilt integrations, and offline reference tiers.
           </p>
         </div>
 
@@ -298,11 +300,24 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
           </div>
         </div>
 
-        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
-          <span>
-            Showing <span className="font-mono tabular-nums font-semibold">{filtered.length}</span> of{' '}
-            <span className="font-mono tabular-nums font-semibold">{capabilities.length}</span> registry entries
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <span>
+              Showing <span className="font-mono tabular-nums font-semibold">{filtered.length}</span> of{' '}
+              <span className="font-mono tabular-nums font-semibold">{capabilities.length}</span> registry entries
+            </span>
+            <button
+              type="button"
+              onClick={() => setAuditedOnly((v) => !v)}
+              className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition ${
+                auditedOnly
+                  ? 'bg-blue-600/10 border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300'
+              }`}
+            >
+              {auditedOnly ? 'Showing Priority Audited (29)' : 'Priority Audited Only (29)'}
+            </button>
+          </div>
           <span className="text-[11px] text-slate-400">
             Last verified timestamps reflect actual recorded connector execution runs only
           </span>

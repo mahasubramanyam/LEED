@@ -281,7 +281,7 @@ export function OwnerControlCentre({
   // Connectors Key & Encryption State
   const [encryptionStatus, setEncryptionStatus] = useState<ConnectorEncryptionStatus | null>(null);
   const [selectedCredConnector, setSelectedCredConnector] = useState('conn-companies-house');
-  const [chKeyInput, setChKeyInput] = useState('');
+  const [credFieldInputs, setCredFieldInputs] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState(false);
   const [keySuccess, setKeySuccess] = useState<string | null>(null);
   const [keyError, setKeyError] = useState<string | null>(null);
@@ -499,19 +499,31 @@ export function OwnerControlCentre({
   // Handle Save/Rotate Encrypted Connector Credential
   const handleSaveChKey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chKeyInput.trim()) return;
+    const target = connectors.find((c) => c.id === selectedCredConnector);
+    const fields = target?.credentialRequirements?.fields || [
+      { key: 'apiKey', label: 'API Key', required: true, secret: true },
+    ];
+    const credentials: Record<string, string> = {};
+    for (const field of fields) {
+      const val = (credFieldInputs[field.key] || '').trim();
+      if (field.required && !val) {
+        setKeyError(`${field.label} is required.`);
+        return;
+      }
+      if (val) credentials[field.key] = val;
+    }
+    if (Object.keys(credentials).length === 0) return;
+
     setSavingKey(true);
     setKeySuccess(null);
     setKeyError(null);
     try {
-      const target = connectors.find((c) => c.id === selectedCredConnector);
       const isRotation = target?.credentialStatus?.source === 'database_encrypted';
-      const fieldKey = target?.credentialRequirements?.fields?.[0]?.key || 'apiKey';
       const res = await apiFetch(`/api/connectors/${selectedCredConnector}/credentials`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          credentials: { [fieldKey]: chKeyInput.trim() },
+          credentials,
           rotate: isRotation,
         }),
       });
@@ -523,7 +535,7 @@ export function OwnerControlCentre({
       setKeySuccess(
         `Credential ${isRotation ? 'rotated' : 'stored'} securely (${data.credentialStatus?.maskedHint || 'masked'}).`
       );
-      setChKeyInput('');
+      setCredFieldInputs({});
       await Promise.all([onRefreshConnectors(), fetchAuditLog()]);
       setTimeout(() => setKeySuccess(null), 4000);
     } catch (err: any) {
@@ -1779,6 +1791,7 @@ export function OwnerControlCentre({
                 value={selectedCredConnector}
                 onChange={(e) => {
                   setSelectedCredConnector(e.target.value);
+                  setCredFieldInputs({});
                   setKeyError(null);
                   setKeySuccess(null);
                 }}
@@ -1797,52 +1810,75 @@ export function OwnerControlCentre({
             {(() => {
               const target = connectors.find((c) => c.id === selectedCredConnector);
               const credStatus = target?.credentialStatus;
+              const fields = target?.credentialRequirements?.fields || [];
+              const allRequiredFilled = fields.every(
+                (f) => !f.required || Boolean((credFieldInputs[f.key] || '').trim())
+              );
               return (
-                <div className="mb-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 text-xs flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <span className="text-slate-500 dark:text-slate-400">Current Source: </span>
-                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
-                      {credStatus?.source || 'missing'}
-                      {credStatus?.maskedHint ? ` (${credStatus.maskedHint})` : ''}
-                    </span>
-                    {credStatus?.rotatedAt && (
-                      <span className="text-slate-400 ml-2">
-                        · Rotated {new Date(credStatus.rotatedAt).toLocaleDateString()}
+                <>
+                  <div className="mb-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 text-xs flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400">Current Source: </span>
+                      <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                        {credStatus?.source || 'missing'}
+                        {credStatus?.maskedHint ? ` (${credStatus.maskedHint})` : ''}
                       </span>
+                      {credStatus?.rotatedAt && (
+                        <span className="text-slate-400 ml-2">
+                          · Rotated {new Date(credStatus.rotatedAt).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                    {credStatus?.source === 'database_encrypted' && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveConnectorCred(selectedCredConnector)}
+                        disabled={savingKey}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-md border border-rose-200 dark:border-rose-900"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove DB Secret</span>
+                      </button>
                     )}
                   </div>
-                  {credStatus?.source === 'database_encrypted' && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveConnectorCred(selectedCredConnector)}
-                      disabled={savingKey}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-md border border-rose-200 dark:border-rose-900"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Remove DB Secret</span>
-                    </button>
-                  )}
-                </div>
+
+                  <form onSubmit={handleSaveChKey} className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {fields.map((field) => (
+                        <div key={field.key} className={fields.length === 1 ? 'sm:col-span-2' : ''}>
+                          <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">
+                            {field.label}
+                            {field.required && <span className="text-rose-500 ml-0.5">*</span>}
+                          </label>
+                          <input
+                            type={field.secret ? 'password' : 'text'}
+                            placeholder={field.placeholder || 'Enter value (never pre-filled or displayed)...'}
+                            value={credFieldInputs[field.key] || ''}
+                            onChange={(e) =>
+                              setCredFieldInputs((prev) => ({ ...prev, [field.key]: e.target.value }))
+                            }
+                            className="w-full px-3.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                            autoComplete={field.secret ? 'new-password' : 'off'}
+                          />
+                          {field.helpText && (
+                            <p className="text-[10px] text-slate-400 mt-1">{field.helpText}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={savingKey || !allRequiredFilled || fields.length === 0}
+                        className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {savingKey ? 'Encrypting...' : 'Save / Rotate Credential'}
+                      </button>
+                    </div>
+                  </form>
+                </>
               );
             })()}
-
-            <form onSubmit={handleSaveChKey} className="flex flex-col sm:flex-row gap-3">
-              <input
-                type="password"
-                placeholder="Enter new credential value (never pre-filled or displayed)..."
-                value={chKeyInput}
-                onChange={(e) => setChKeyInput(e.target.value)}
-                className="flex-1 px-3.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-                autoComplete="new-password"
-              />
-              <button
-                type="submit"
-                disabled={savingKey || !chKeyInput.trim()}
-                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
-              >
-                {savingKey ? 'Encrypting...' : 'Save / Rotate Credential'}
-              </button>
-            </form>
             {keyError && (
               <div className="text-xs text-rose-600 dark:text-rose-400 font-medium mt-2">
                 {keyError}

@@ -176,6 +176,198 @@ export function validateIndiaCin(value: string): boolean {
 }
 
 /**
+ * Finnish Business ID (Y-tunnus): 7 digits + hyphen + Modulo-11 check digit.
+ * Weights: [7, 9, 10, 5, 8, 4, 2]
+ */
+export function validateFinnishYtunnus(value: string): boolean {
+  const digits = value.replace(/[^0-9]/g, '');
+  if (digits.length !== 8) return false;
+  const weights = [7, 9, 10, 5, 8, 4, 2];
+  let sum = 0;
+  for (let i = 0; i < 7; i++) {
+    sum += parseInt(digits[i], 10) * weights[i];
+  }
+  const rem = sum % 11;
+  if (rem === 1) return false;
+  const expected = rem === 0 ? 0 : 11 - rem;
+  return expected === parseInt(digits[7], 10);
+}
+
+export function formatFinnishYtunnus(value: string): string {
+  const digits = value.replace(/[^0-9]/g, '');
+  if (digits.length === 8) return `${digits.slice(0, 7)}-${digits.slice(7)}`;
+  return value.trim();
+}
+
+/**
+ * Polish Tax Identification Number (NIP): 10 digits with Modulo-11 weights [6, 5, 7, 2, 3, 4, 5, 6, 7].
+ */
+export function validatePolishNip(value: string): boolean {
+  const digits = value.replace(/[^0-9]/g, '');
+  if (digits.length !== 10) return false;
+  const weights = [6, 5, 7, 2, 3, 4, 5, 6, 7];
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += parseInt(digits[i], 10) * weights[i];
+  }
+  const rem = sum % 11;
+  if (rem === 10) return false;
+  return rem === parseInt(digits[9], 10);
+}
+
+/**
+ * Polish National Court Register (KRS): 10 digits (padded with leading zeros if 1-10 digits).
+ */
+export function validatePolishKrs(value: string): boolean {
+  const digits = value.replace(/[^0-9]/g, '');
+  return digits.length >= 1 && digits.length <= 10 && Number(digits) > 0;
+}
+
+export function normalizePolishKrs(value: string): string {
+  const digits = value.replace(/[^0-9]/g, '');
+  return digits ? digits.padStart(10, '0').slice(-10) : '';
+}
+
+/**
+ * Dutch Chamber of Commerce (KVK): 8 digits.
+ */
+export function validateDutchKvk(value: string): boolean {
+  const digits = value.replace(/[^0-9]/g, '');
+  return /^\d{8}$/.test(digits);
+}
+
+/**
+ * Belgian Crossroads Bank for Enterprises (KBO/BCE): 10 digits, Modulo-97 check.
+ * 97 - (first 8 digits mod 97) === last 2 digits. Accepts leading 0 or optional 'BE' prefix.
+ */
+export function validateBelgianKbo(value: string): boolean {
+  const clean = value.toUpperCase().replace(/^BE/, '').replace(/[^0-9]/g, '');
+  const padded = clean.length === 9 ? `0${clean}` : clean;
+  if (padded.length !== 10) return false;
+  const base = parseInt(padded.slice(0, 8), 10);
+  const check = parseInt(padded.slice(8, 10), 10);
+  return 97 - (base % 97) === check;
+}
+
+/**
+ * Swiss Enterprise Identification Number (UID / CHE): CHE + 9 digits with Modulo-11 check digit.
+ * Weights: [5, 4, 3, 2, 7, 6, 5, 4]
+ */
+export function validateSwissUid(value: string): boolean {
+  const clean = normalizeIdentifierValue(value);
+  const digits = clean.startsWith('CHE') ? clean.slice(3) : clean;
+  if (!/^\d{9}$/.test(digits)) return false;
+  const weights = [5, 4, 3, 2, 7, 6, 5, 4];
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    sum += parseInt(digits[i], 10) * weights[i];
+  }
+  const rem = sum % 11;
+  const expected = rem === 0 ? 0 : 11 - rem;
+  if (expected === 10) return false;
+  return expected === parseInt(digits[8], 10);
+}
+
+export function formatSwissUid(value: string): string {
+  const clean = normalizeIdentifierValue(value);
+  const digits = clean.startsWith('CHE') ? clean.slice(3) : clean;
+  if (/^\d{9}$/.test(digits)) {
+    return `CHE-${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}`;
+  }
+  return value.trim();
+}
+
+/**
+ * Swedish Organisationsnummer: 10 digits passing Luhn checksum.
+ */
+export function validateSwedishOrgnr(value: string): boolean {
+  let digits = value.replace(/[^0-9]/g, '');
+  if (digits.length === 12 && (digits.startsWith('16') || digits.startsWith('20'))) {
+    digits = digits.slice(2);
+  }
+  return /^\d{10}$/.test(digits) && validateLuhn(digits);
+}
+
+/**
+ * Danish CVR-nummer: 8 digits with Modulo-11 weights [2, 7, 6, 5, 4, 3, 2, 1].
+ */
+export function validateDanishCvr(value: string): boolean {
+  const clean = value.toUpperCase().replace(/^DK/, '').replace(/[^0-9]/g, '');
+  if (clean.length !== 8) return false;
+  const weights = [2, 7, 6, 5, 4, 3, 2, 1];
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    sum += parseInt(clean[i], 10) * weights[i];
+  }
+  return sum % 11 === 0;
+}
+
+/**
+ * New Zealand Business Number (NZBN): 13-digit EAN-13 GS1 identifier starting with 94.
+ */
+export function validateNewZealandNzbn(value: string): boolean {
+  const digits = value.replace(/[^0-9]/g, '');
+  if (!/^94\d{11}$/.test(digits)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const d = parseInt(digits[i], 10);
+    sum += i % 2 === 0 ? d : d * 3;
+  }
+  const check = (10 - (sum % 10)) % 10;
+  return check === parseInt(digits[12], 10);
+}
+
+/**
+ * Brazilian CNPJ: 14 digits with dual Modulo-11 check digits.
+ */
+export function validateBrazilianCnpj(value: string): boolean {
+  const digits = value.replace(/[^0-9]/g, '');
+  if (digits.length !== 14 || /^(\d)\1{13}$/.test(digits)) return false;
+
+  const calcDigit = (base: string, weights: number[]): number => {
+    let sum = 0;
+    for (let i = 0; i < weights.length; i++) {
+      sum += parseInt(base[i], 10) * weights[i];
+    }
+    const rem = sum % 11;
+    return rem < 2 ? 0 : 11 - rem;
+  };
+
+  const w1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  const d1 = calcDigit(digits.slice(0, 12), w1);
+  if (d1 !== parseInt(digits[12], 10)) return false;
+
+  const w2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  const d2 = calcDigit(digits.slice(0, 13), w2);
+  return d2 === parseInt(digits[13], 10);
+}
+
+/**
+ * South Korean Business Registration Number (사업자등록번호): 10 digits weighted check.
+ */
+export function validateKoreanBrn(value: string): boolean {
+  const digits = value.replace(/[^0-9]/g, '');
+  if (digits.length !== 10) return false;
+  const weights = [1, 3, 7, 1, 3, 7, 1, 3, 5];
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    sum += parseInt(digits[i], 10) * weights[i];
+  }
+  const ninth = parseInt(digits[8], 10) * weights[8];
+  sum += Math.floor(ninth / 10) + (ninth % 10);
+  const check = (10 - (sum % 10)) % 10;
+  return check === parseInt(digits[9], 10);
+}
+
+/**
+ * Irish CRO Company Number: 1-7 digits (or prefix + digits for external/ICAV/charity).
+ */
+export function validateIrishCro(value: string): boolean {
+  const clean = normalizeIdentifierValue(value);
+  return /^(\d{4,7}|IE\d{4,7}|[A-Z]{1,2}\d{4,7})$/.test(clean);
+}
+
+/**
  * Normalizes UK Company Registration Numbers (zero-pads pure numeric CRNs to 8 digits).
  */
 export function normalizeUkCrn(value: string): string {
@@ -247,7 +439,6 @@ export function validateIdentifier(
     case 'US_EIN': {
       countryCode = 'US';
       issuingAuthority = 'Internal Revenue Service (IRS)';
-      // 9 digits, often written XX-XXXXXXX
       valid = /^[0-9]{9}$/.test(normalized);
       if (!valid) error = 'US EIN must be 9 digits (format: XX-XXXXXXX)';
       break;
@@ -318,6 +509,160 @@ export function validateIdentifier(
       break;
     }
 
+    case 'FI_YTUNNUS': {
+      countryCode = 'FI';
+      issuingAuthority = 'Finnish Patent and Registration Office (PRH)';
+      valid = validateFinnishYtunnus(rawValue);
+      if (!valid) error = 'Finnish Business ID (Y-tunnus) must be 8 digits matching Modulo-11 checksum (e.g. 0112038-9)';
+      break;
+    }
+
+    case 'PL_KRS': {
+      countryCode = 'PL';
+      issuingAuthority = 'Ministry of Justice Poland (KRS)';
+      normalized = normalizePolishKrs(rawValue);
+      valid = validatePolishKrs(rawValue);
+      if (!valid) error = 'Polish KRS number must contain 1 to 10 digits (zero-padded to 10)';
+      break;
+    }
+
+    case 'PL_NIP': {
+      countryCode = 'PL';
+      issuingAuthority = 'Ministry of Finance Poland (KAS / VAT White List)';
+      const nipDigits = normalized.replace(/^PL/, '');
+      normalized = nipDigits;
+      valid = validatePolishNip(nipDigits);
+      if (!valid) error = 'Polish NIP must be 10 digits passing weighted Modulo-11 checksum';
+      break;
+    }
+
+    case 'NL_KVK': {
+      countryCode = 'NL';
+      issuingAuthority = 'Kamer van Koophandel (KVK)';
+      valid = validateDutchKvk(normalized);
+      if (!valid) error = 'Dutch KVK-nummer must be exactly 8 digits';
+      break;
+    }
+
+    case 'NZ_NZBN': {
+      countryCode = 'NZ';
+      issuingAuthority = 'New Zealand Companies Office / MBIE';
+      valid = validateNewZealandNzbn(normalized);
+      if (!valid) error = 'NZBN must be a valid 13-digit EAN-13 number starting with 94';
+      break;
+    }
+
+    case 'CH_UID': {
+      countryCode = 'CH';
+      issuingAuthority = 'Swiss Federal Statistical Office / Zefix';
+      if (/^\d{9}$/.test(normalized)) normalized = `CHE${normalized}`;
+      valid = validateSwissUid(normalized);
+      if (!valid) error = 'Swiss UID must follow CHE-XXX.XXX.XXX with valid Modulo-11 check digit';
+      break;
+    }
+
+    case 'IE_CRO': {
+      countryCode = 'IE';
+      issuingAuthority = 'Companies Registration Office (CRO)';
+      valid = validateIrishCro(normalized);
+      if (!valid) error = 'Irish CRO number must be 4–7 digits (optionally with 1–2 letter external entity prefix)';
+      break;
+    }
+
+    case 'BE_KBO': {
+      countryCode = 'BE';
+      issuingAuthority = 'Crossroads Bank for Enterprises (KBO/BCE)';
+      const cleanKbo = normalized.replace(/^BE/, '');
+      normalized = cleanKbo.length === 9 ? `0${cleanKbo}` : cleanKbo;
+      valid = validateBelgianKbo(normalized);
+      if (!valid) error = 'Belgian KBO/BCE number must be 10 digits (0XXX.XXX.XXX) passing Modulo-97 checksum';
+      break;
+    }
+
+    case 'SE_ORG': {
+      countryCode = 'SE';
+      issuingAuthority = 'Bolagsverket / Skatteverket';
+      if (normalized.length === 12 && (normalized.startsWith('16') || normalized.startsWith('20'))) {
+        normalized = normalized.slice(2);
+      }
+      valid = validateSwedishOrgnr(normalized);
+      if (!valid) error = 'Swedish Organisationsnummer must be 10 digits passing Luhn checksum';
+      break;
+    }
+
+    case 'DK_CVR': {
+      countryCode = 'DK';
+      issuingAuthority = 'Danish Business Authority (Erhvervsstyrelsen)';
+      normalized = normalized.replace(/^DK/, '');
+      valid = validateDanishCvr(normalized);
+      if (!valid) error = 'Danish CVR-nummer must be 8 digits passing Modulo-11 checksum';
+      break;
+    }
+
+    case 'ES_CIF': {
+      countryCode = 'ES';
+      issuingAuthority = 'Agencia Tributaria / Registro Mercantil';
+      valid = /^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/.test(normalized);
+      if (!valid) error = 'Spanish NIF/CIF must start with entity letter, 7 digits, and control character';
+      break;
+    }
+
+    case 'IT_CF': {
+      countryCode = 'IT';
+      issuingAuthority = 'Registro Imprese / Agenzia delle Entrate';
+      valid = /^(\d{11}|[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])$/.test(normalized);
+      if (!valid) error = 'Italian Partita IVA / Codice Fiscale must be 11 digits or valid 16-char alphanumeric code';
+      break;
+    }
+
+    case 'KR_BRN': {
+      countryCode = 'KR';
+      issuingAuthority = 'National Tax Service of Korea (NTS)';
+      valid = validateKoreanBrn(normalized);
+      if (!valid) error = 'Korean Business Registration Number must be 10 digits passing NTS checksum';
+      break;
+    }
+
+    case 'AE_TRN': {
+      countryCode = 'AE';
+      issuingAuthority = 'UAE Federal Tax Authority / DED';
+      valid = /^100\d{12}$/.test(normalized) || /^\d{6,15}$/.test(normalized);
+      if (!valid) error = 'UAE TRN (15 digits starting 100) or commercial license must be 6–15 digits';
+      break;
+    }
+
+    case 'SA_CR': {
+      countryCode = 'SA';
+      issuingAuthority = 'Saudi Ministry of Commerce (MC / Wathq)';
+      valid = /^\d{10}$/.test(normalized);
+      if (!valid) error = 'Saudi Commercial Registration (CR) number must be 10 digits';
+      break;
+    }
+
+    case 'ZA_CIPC': {
+      countryCode = 'ZA';
+      issuingAuthority = 'Companies & Intellectual Property Commission (CIPC)';
+      valid = /^\d{4}\d{6}\d{2}$/.test(normalized);
+      if (!valid) error = 'South African CIPC registration number must follow YYYY/NNNNNN/NN (12 digits)';
+      break;
+    }
+
+    case 'BR_CNPJ': {
+      countryCode = 'BR';
+      issuingAuthority = 'Receita Federal do Brasil';
+      valid = validateBrazilianCnpj(normalized);
+      if (!valid) error = 'Brazilian CNPJ must be 14 digits passing dual Modulo-11 checksums';
+      break;
+    }
+
+    case 'MX_RFC': {
+      countryCode = 'MX';
+      issuingAuthority = 'Servicio de Administración Tributaria (SAT)';
+      valid = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/.test(normalized);
+      if (!valid) error = 'Mexican RFC must follow 3-4 letters + YYMMDD + 3 homoclave characters';
+      break;
+    }
+
     case 'LEI': {
       issuingAuthority = 'Global Legal Entity Identifier Foundation (GLEIF)';
       valid = validateLei(normalized);
@@ -327,13 +672,12 @@ export function validateIdentifier(
 
     case 'EU_VAT': {
       issuingAuthority = 'European Commission VIES / National Tax Office';
-      // Starts with 2-letter country code followed by 8-12 alphanumeric characters
-      const vatPattern = /^[A-Z]{2}[A-Z0-9]{8,12}$/;
+      const vatPattern = /^[A-Z]{2}[A-Z0-9]{6,14}$/;
       valid = vatPattern.test(normalized);
       if (valid) {
         countryCode = normalized.slice(0, 2);
       } else {
-        error = 'VAT identifier must begin with 2-letter country code followed by 8-12 characters';
+        error = 'VAT identifier must begin with 2-letter country code followed by 6-14 characters';
       }
       break;
     }

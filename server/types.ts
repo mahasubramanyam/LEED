@@ -439,12 +439,20 @@ export interface VerificationHistoryEntry {
   summary: string;
 }
 
+export interface AttributeSourceProvenance {
+  connectorId: string;
+  sourceName: string;
+  retrievedAt: string;
+  verified: boolean;
+}
+
 export interface RegistryVerificationReport {
   leadId: string;
   state: RegistryVerificationState;
   matchType: RegistryMatchType;
   confidence: number;
   isLiveApi: boolean;
+  authRequired?: boolean;
   connectorId?: string;
   sourceName: string;
   sourceUrl?: string;
@@ -457,8 +465,11 @@ export interface RegistryVerificationReport {
   preservesHigherTrust: boolean;
   summary: string;
   notes: string[];
+  attemptedConnectors?: string[];
+  attributeSources?: Record<string, AttributeSourceProvenance>;
   provenance?: {
     queryMode: 'exact_identifier_lookup' | 'name_search';
+    fallbackUsed?: boolean;
     queriedIdentifier?: string;
     queriedIdentifierType?: string;
     rawApiRecord?: unknown;

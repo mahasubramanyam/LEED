@@ -1,10 +1,18 @@
 import { AbnConnector } from './adapters/abnAdapter.js';
 import { BrregConnector } from './adapters/brregAdapter.js';
+import { ChZefixConnector } from './adapters/chZefixAdapter.js';
 import { CompaniesHouseConnector } from './adapters/companiesHouseAdapter.js';
+import { EuViesConnector } from './adapters/euViesAdapter.js';
+import { FiPrhConnector } from './adapters/fiPrhAdapter.js';
 import { FrSireneConnector } from './adapters/frSireneAdapter.js';
 import { GeminiConnector } from './adapters/geminiAdapter.js';
+import { GleifConnector } from './adapters/gleifAdapter.js';
+import { IeCroConnector } from './adapters/ieCroAdapter.js';
 import { JpNtaConnector } from './adapters/jpNtaAdapter.js';
+import { NlKvkConnector } from './adapters/nlKvkAdapter.js';
+import { NzCompaniesConnector } from './adapters/nzCompaniesAdapter.js';
 import { OsmConnector } from './adapters/osmAdapter.js';
+import { PlKrsConnector } from './adapters/plKrsAdapter.js';
 import { SgAcraConnector } from './adapters/sgAcraAdapter.js';
 import { UsSecEdgarConnector } from './adapters/usSecEdgarAdapter.js';
 import { WebInspectorConnector } from './adapters/webInspectorAdapter.js';
@@ -33,6 +41,14 @@ export function ensureConnectorsRegistered(registry: ConnectorRegistry = connect
     new UsSecEdgarConnector(),
     new SgAcraConnector(),
     new JpNtaConnector(),
+    new GleifConnector(),
+    new EuViesConnector(),
+    new FiPrhConnector(),
+    new PlKrsConnector(),
+    new NlKvkConnector(),
+    new NzCompaniesConnector(),
+    new ChZefixConnector(),
+    new IeCroConnector(),
     new OsmConnector(),
     new WebInspectorConnector(),
     new GeminiConnector(),
@@ -246,6 +262,14 @@ export {
   UsSecEdgarConnector,
   SgAcraConnector,
   JpNtaConnector,
+  GleifConnector,
+  EuViesConnector,
+  FiPrhConnector,
+  PlKrsConnector,
+  NlKvkConnector,
+  NzCompaniesConnector,
+  ChZefixConnector,
+  IeCroConnector,
   OsmConnector,
   WebInspectorConnector,
   GeminiConnector,

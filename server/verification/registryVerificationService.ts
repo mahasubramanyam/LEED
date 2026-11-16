@@ -1,4 +1,5 @@
 import {
+  AttributeSourceProvenance,
   CanonicalLead,
   LeadActivity,
   LeadIdentifier,
@@ -25,7 +26,8 @@ import {
   normalizeUsCik,
 } from '../identifiers/identifierEngine.js';
 import { canonicalizeIdentifierType } from '../../shared/identifierRegistry.js';
-import { TEN_COUNTRY_REGISTRY_AUDIT } from '../geo/registryAudit.js';
+import { getAuditedRegistryEntry } from '../geo/registryAudit.js';
+import { EU_VIES_MEMBER_COUNTRIES } from '../connectors/adapters/euViesAdapter.js';
 import { inferLeadTrustRank } from '../connectors/core/normalizer.js';
 import { ConnectorError } from '../connectors/core/errors.js';
 
@@ -45,7 +47,34 @@ const COUNTRY_TO_REGISTRY_CONNECTOR: Record<string, string> = {
   FR: 'conn-fr-sirene',
   SG: 'conn-sg-acra',
   JP: 'conn-jp-nta',
+  FI: 'conn-fi-prh',
+  PL: 'conn-pl-krs',
+  NL: 'conn-nl-kvk',
+  NZ: 'conn-nz-companies',
+  CH: 'conn-ch-zefix',
+  IE: 'conn-ie-cro',
 };
+
+const EU_VIES_SET = new Set(EU_VIES_MEMBER_COUNTRIES);
+
+function leadHasIdentifierType(
+  lead: CanonicalLead,
+  targetTypes: string[],
+  countryCode: string
+): boolean {
+  const targetSet = new Set(targetTypes);
+  if (lead.registrationNumber && lead.registrationType) {
+    const canon = canonicalizeIdentifierType(lead.registrationType, countryCode);
+    if (targetSet.has(canon)) return true;
+  }
+  for (const ident of lead.identifiers || []) {
+    const canon = canonicalizeIdentifierType(ident.type, ident.countryCode || countryCode);
+    if (targetSet.has(canon) && Boolean((ident.normalizedValue || ident.value || '').trim())) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function normalizeLegalNameForComparison(name: string): string {
   return (name || '')
@@ -394,6 +423,32 @@ export function compareLeadAgainstOfficialRecord(
   };
 }
 
+function buildAttributeSources(
+  connectorId: string,
+  sourceName: string,
+  retrievedAt: string,
+  verified: boolean,
+  matched: CanonicalLead
+): Record<string, AttributeSourceProvenance> {
+  const sources: Record<string, AttributeSourceProvenance> = {};
+  const entry: AttributeSourceProvenance = {
+    connectorId,
+    sourceName,
+    retrievedAt,
+    verified,
+  };
+  if (matched.companyName) sources.companyName = entry;
+  if (matched.legalName) sources.legalName = entry;
+  if (matched.registrationNumber) sources.registrationNumber = entry;
+  if (matched.companyStatus && matched.companyStatus !== 'unknown') sources.companyStatus = entry;
+  if (matched.address?.formattedAddress || matched.address?.city || matched.address?.postalCode) {
+    sources.address = entry;
+  }
+  if (matched.website) sources.website = entry;
+  if (matched.industry) sources.industry = entry;
+  return sources;
+}
+
 export async function verifyLeadWithOfficialRegistry(
   lead: CanonicalLead,
   deps: RegistryVerificationDeps = {}
@@ -404,10 +459,23 @@ export async function verifyLeadWithOfficialRegistry(
   const userAgent = deps.userAgent || 'GlobalLeadPipeline/1.0 (compliance@leed-pipeline.local)';
   const verifiedAt = new Date().toISOString();
   const countryCode = (lead.address?.countryCode || 'US').toUpperCase();
-  const auditEntry = TEN_COUNTRY_REGISTRY_AUDIT[countryCode];
-  const connectorId = COUNTRY_TO_REGISTRY_CONNECTOR[countryCode];
+  const auditEntry = getAuditedRegistryEntry(countryCode);
+  const primaryConnectorId = COUNTRY_TO_REGISTRY_CONNECTOR[countryCode];
 
-  if (!connectorId) {
+  const candidateConnectorIds: string[] = [];
+  if (primaryConnectorId) {
+    candidateConnectorIds.push(primaryConnectorId);
+  }
+  const hasEuVat = leadHasIdentifierType(lead, ['EU_VAT'], countryCode);
+  if (hasEuVat && (EU_VIES_SET.has(countryCode) || !countryCode) && registry.getById('conn-eu-vies')) {
+    candidateConnectorIds.push('conn-eu-vies');
+  }
+  const hasLei = leadHasIdentifierType(lead, ['LEI'], countryCode);
+  if (hasLei && registry.getById('conn-gleif')) {
+    candidateConnectorIds.push('conn-gleif');
+  }
+
+  if (candidateConnectorIds.length === 0) {
     const auditMsg = auditEntry
       ? `${auditEntry.authorityName}: ${auditEntry.auditDetails.publicAccessSummary}`
       : `No official government business registry connector is integrated for country ${countryCode}.`;
@@ -427,136 +495,120 @@ export async function verifyLeadWithOfficialRegistry(
       preservesHigherTrust: true,
       summary: auditMsg,
       notes: [auditMsg],
+      attemptedConnectors: [],
     };
   }
 
-  const connector: IConnector | undefined = registry.getById(connectorId);
-  if (!connector) {
-    return {
-      leadId: lead.id,
-      state: 'unavailable',
-      matchType: 'none',
-      confidence: 0,
-      isLiveApi: false,
-      connectorId,
-      sourceName: connectorId,
-      verifiedAt,
-      conflicts: [],
-      nameSimilarity: 0,
-      addressSimilarity: 0,
-      identifierMatched: false,
-      preservesHigherTrust: true,
-      summary: `Official registry connector ${connectorId} is not registered.`,
-      notes: [`Connector ${connectorId} missing from registry.`],
-    };
-  }
+  const attemptedConnectors: string[] = [];
+  const allNotes: string[] = [];
+  let hadAuthRequired = false;
+  let firstDisabledReport: RegistryVerificationReport | undefined;
+  let firstMissingReport: RegistryVerificationReport | undefined;
+  let bestOfflineReport: RegistryVerificationReport | undefined;
+  let lastErrorReport: RegistryVerificationReport | undefined;
+  let lastNotFoundReport: RegistryVerificationReport | undefined;
 
-  const meta = connector.getMetadata();
-  const cfg: ConnectorConfigRecord = configs[connectorId] || {
-    connectorId,
-    enabled: registry.isEnabled(connectorId),
-  };
+  for (let idx = 0; idx < candidateConnectorIds.length; idx++) {
+    const connectorId = candidateConnectorIds[idx];
+    const isFallback = idx > 0;
+    const connector: IConnector | undefined = registry.getById(connectorId);
 
-  if (!cfg.enabled) {
-    return {
-      leadId: lead.id,
-      state: 'unavailable',
-      matchType: 'none',
-      confidence: 0,
-      isLiveApi: false,
-      connectorId,
-      sourceName: meta.name,
-      sourceUrl: meta.homepageUrl,
-      verifiedAt,
-      conflicts: [],
-      nameSimilarity: 0,
-      addressSimilarity: 0,
-      identifierMatched: false,
-      preservesHigherTrust: true,
-      summary: `${meta.name} is currently disabled in Owner Connector Settings.`,
-      notes: [`Enable ${meta.shortName} in Connectors Hub to verify leads.`],
-    };
-  }
-
-  // 1. Prefer exact official identifier lookup if the lead already carries a supported identifier
-  let matchedCandidate: CanonicalLead | undefined;
-  let isLiveApi = false;
-  let notes: string[] = [];
-  let queryMode: 'exact_identifier_lookup' | 'name_search' = 'name_search';
-  let matchedProviderMetadata: Record<string, unknown> | undefined;
-  let matchedRawApiRecord: unknown;
-  let matchedRetrievedAt: string | undefined;
-
-  const supportedTypes = new Set(meta.supportedIdentifierTypes || []);
-  let lookupExternalId: string | undefined;
-  let lookupIdentType: string | undefined;
-
-  if (lead.registrationNumber) {
-    const canonRegType = lead.registrationType
-      ? canonicalizeIdentifierType(lead.registrationType, countryCode)
-      : meta.supportedIdentifierTypes[0];
-    if (canonRegType && supportedTypes.has(canonRegType)) {
-      lookupExternalId = lead.registrationNumber;
-      lookupIdentType = canonRegType;
+    if (!connector) {
+      firstMissingReport = firstMissingReport || {
+        leadId: lead.id,
+        state: 'unavailable',
+        matchType: 'none',
+        confidence: 0,
+        isLiveApi: false,
+        connectorId,
+        sourceName: connectorId,
+        verifiedAt,
+        conflicts: [],
+        nameSimilarity: 0,
+        addressSimilarity: 0,
+        identifierMatched: false,
+        preservesHigherTrust: true,
+        summary: `Official registry connector ${connectorId} is not registered.`,
+        notes: [`Connector ${connectorId} missing from registry.`],
+        attemptedConnectors: [...attemptedConnectors],
+      };
+      continue;
     }
-  }
-  if (!lookupExternalId) {
-    for (const ident of lead.identifiers || []) {
-      const cType = canonicalizeIdentifierType(ident.type, ident.countryCode || countryCode);
-      if (supportedTypes.has(cType)) {
-        lookupExternalId = ident.value;
-        lookupIdentType = cType;
-        break;
+
+    const meta = connector.getMetadata();
+    const cfg: ConnectorConfigRecord = configs[connectorId] || {
+      connectorId,
+      enabled: registry.isEnabled(connectorId),
+    };
+
+    if (!cfg.enabled) {
+      firstDisabledReport = firstDisabledReport || {
+        leadId: lead.id,
+        state: 'unavailable',
+        matchType: 'none',
+        confidence: 0,
+        isLiveApi: false,
+        connectorId,
+        sourceName: meta.name,
+        sourceUrl: meta.homepageUrl,
+        verifiedAt,
+        conflicts: [],
+        nameSimilarity: 0,
+        addressSimilarity: 0,
+        identifierMatched: false,
+        preservesHigherTrust: true,
+        summary: `${meta.name} is currently disabled in Owner Connector Settings.`,
+        notes: [`Enable ${meta.shortName} in Connectors Hub to verify leads.`],
+        attemptedConnectors: [...attemptedConnectors],
+      };
+      continue;
+    }
+
+    attemptedConnectors.push(connectorId);
+
+    let matchedCandidate: CanonicalLead | undefined;
+    let isLiveApi = false;
+    const notes: string[] = [];
+    let queryMode: 'exact_identifier_lookup' | 'name_search' = 'name_search';
+    let matchedProviderMetadata: Record<string, unknown> | undefined;
+    let matchedRawApiRecord: unknown;
+    let matchedRetrievedAt: string | undefined;
+    let authErrorMsg: string | undefined;
+    let nonAuthErrorMsg: string | undefined;
+
+    const supportedTypes = new Set(meta.supportedIdentifierTypes || []);
+    let lookupExternalId: string | undefined;
+    let lookupIdentType: string | undefined;
+
+    if (lead.registrationNumber) {
+      const canonRegType = lead.registrationType
+        ? canonicalizeIdentifierType(lead.registrationType, countryCode)
+        : !isFallback
+          ? meta.supportedIdentifierTypes[0]
+          : undefined;
+      if (canonRegType && supportedTypes.has(canonRegType)) {
+        lookupExternalId = lead.registrationNumber;
+        lookupIdentType = canonRegType;
       }
     }
-  }
-
-  if (lookupExternalId) {
-    try {
-      const lookupRes = await engine.executeLookup(
-        connector,
-        {
-          externalId: lookupExternalId,
-          countryCode,
-        },
-        {
-          config: cfg,
-          userAgent,
-          onRecordRun: deps.onRecordRun,
+    if (!lookupExternalId) {
+      for (const ident of lead.identifiers || []) {
+        const cType = canonicalizeIdentifierType(ident.type, ident.countryCode || countryCode);
+        if (supportedTypes.has(cType)) {
+          lookupExternalId = ident.value;
+          lookupIdentType = cType;
+          break;
         }
-      );
-      isLiveApi = lookupRes.response.isLiveApi;
-      notes.push(...(lookupRes.response.notes || []));
-      if (lookupRes.normalization?.leads && lookupRes.normalization.leads.length > 0) {
-        matchedCandidate = lookupRes.normalization.leads[0];
-        queryMode = 'exact_identifier_lookup';
-        matchedProviderMetadata =
-          lookupRes.response.result?.providerMetadata || lookupRes.response.providerMetadata;
-        matchedRawApiRecord = matchedProviderMetadata?.rawApiRecord;
-        matchedRetrievedAt = lookupRes.response.result?.retrievedAt;
-      }
-    } catch (err) {
-      // If format invalid or 404/request issue, fall through to legal name search cleanly; preserve auth/unavailable errors
-      if (err instanceof ConnectorError && err.category !== 'invalid_request') {
-        notes.push(err.message);
       }
     }
-  }
 
-  // 2. Fallback or primary name/city search against official registry
-  if (!matchedCandidate) {
-    const searchQuery = (lead.legalName || lead.companyName || '').trim();
-    if (searchQuery) {
+    if (lookupExternalId) {
       try {
-        const searchRes = await engine.executeSearch(
+        const lookupRes = await engine.executeLookup(
           connector,
           {
-            query: searchQuery,
+            externalId: lookupExternalId,
             countryCode,
-            city: lead.address?.city,
-            postalCode: lead.address?.postalCode,
-            page: 1,
-            pageSize: 10,
           },
           {
             config: cfg,
@@ -564,130 +616,238 @@ export async function verifyLeadWithOfficialRegistry(
             onRecordRun: deps.onRecordRun,
           }
         );
-        isLiveApi = searchRes.response.isLiveApi;
-        notes.push(...(searchRes.response.notes || []));
-        queryMode = 'name_search';
-
-        // Exact identifier matches strictly take precedence over approximate name matches
-        let bestScore = -1;
-        for (const cand of searchRes.normalization.leads) {
-          const cmp = compareLeadAgainstOfficialRecord(lead, cand, isLiveApi);
-          const rankScore =
-            (cmp.identifierMatched ? 1000 : 0) +
-            cmp.nameSimilarity * 60 +
-            cmp.addressSimilarity * 20 +
-            (cand.companyStatus === 'active' ? 5 : 0);
-          if (rankScore > bestScore && (cmp.identifierMatched || cmp.nameSimilarity >= 0.55)) {
-            bestScore = rankScore;
-            matchedCandidate = cand;
-          }
-        }
-
-        if (matchedCandidate) {
-          const rawMatch = searchRes.response.results.find(
-            (r) =>
-              r.externalSourceId === matchedCandidate?.registrationNumber ||
-              r.company.registrationNumber === matchedCandidate?.registrationNumber
-          );
-          matchedProviderMetadata = rawMatch?.providerMetadata || searchRes.response.providerMetadata;
-          matchedRawApiRecord = rawMatch?.providerMetadata?.rawApiRecord;
-          matchedRetrievedAt = rawMatch?.retrievedAt;
+        isLiveApi = lookupRes.response.isLiveApi;
+        notes.push(...(lookupRes.response.notes || []));
+        if (lookupRes.normalization?.leads && lookupRes.normalization.leads.length > 0) {
+          matchedCandidate = lookupRes.normalization.leads[0];
+          queryMode = 'exact_identifier_lookup';
+          matchedProviderMetadata =
+            lookupRes.response.result?.providerMetadata || lookupRes.response.providerMetadata;
+          matchedRawApiRecord = matchedProviderMetadata?.rawApiRecord;
+          matchedRetrievedAt = lookupRes.response.result?.retrievedAt;
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          leadId: lead.id,
-          state: 'unavailable',
-          matchType: 'none',
-          confidence: 0,
-          isLiveApi: false,
-          connectorId,
-          sourceName: meta.name,
-          sourceUrl: meta.homepageUrl,
-          verifiedAt,
-          conflicts: [],
-          nameSimilarity: 0,
-          addressSimilarity: 0,
-          identifierMatched: false,
-          preservesHigherTrust: true,
-          summary: `Verification unavailable for ${meta.shortName}: ${msg}`,
-          notes: [msg],
-        };
+        if (
+          err instanceof ConnectorError &&
+          (err.category === 'missing_credentials' ||
+            err.category === 'authentication_failure' ||
+            err.category === 'authorization_failure')
+        ) {
+          hadAuthRequired = true;
+          authErrorMsg = err.message;
+          notes.push(err.message);
+        } else if (err instanceof ConnectorError && err.category !== 'invalid_request') {
+          notes.push(err.message);
+          nonAuthErrorMsg = err.message;
+        }
       }
     }
-  }
 
-  if (!matchedCandidate) {
-    return {
+    // Fallback or primary name/city search (only if connector supports company_search and no auth failure already stopped lookup)
+    if (!matchedCandidate && !authErrorMsg && meta.capabilities.includes('company_search')) {
+      const searchQuery = (lead.legalName || lead.companyName || '').trim();
+      if (searchQuery) {
+        try {
+          const searchRes = await engine.executeSearch(
+            connector,
+            {
+              query: searchQuery,
+              countryCode,
+              city: lead.address?.city,
+              postalCode: lead.address?.postalCode,
+              page: 1,
+              pageSize: 10,
+            },
+            {
+              config: cfg,
+              userAgent,
+              onRecordRun: deps.onRecordRun,
+            }
+          );
+          isLiveApi = searchRes.response.isLiveApi;
+          notes.push(...(searchRes.response.notes || []));
+          queryMode = 'name_search';
+
+          let bestScore = -1;
+          for (const cand of searchRes.normalization.leads) {
+            const cmp = compareLeadAgainstOfficialRecord(lead, cand, isLiveApi);
+            const rankScore =
+              (cmp.identifierMatched ? 1000 : 0) +
+              cmp.nameSimilarity * 60 +
+              cmp.addressSimilarity * 20 +
+              (cand.companyStatus === 'active' ? 5 : 0);
+            if (rankScore > bestScore && (cmp.identifierMatched || cmp.nameSimilarity >= 0.55)) {
+              bestScore = rankScore;
+              matchedCandidate = cand;
+            }
+          }
+
+          if (matchedCandidate) {
+            const rawMatch = searchRes.response.results.find(
+              (r) =>
+                r.externalSourceId === matchedCandidate?.registrationNumber ||
+                r.company.registrationNumber === matchedCandidate?.registrationNumber
+            );
+            matchedProviderMetadata = rawMatch?.providerMetadata || searchRes.response.providerMetadata;
+            matchedRawApiRecord = rawMatch?.providerMetadata?.rawApiRecord;
+            matchedRetrievedAt = rawMatch?.retrievedAt;
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const isAuthErr =
+            err instanceof ConnectorError &&
+            (err.category === 'missing_credentials' ||
+              err.category === 'authentication_failure' ||
+              err.category === 'authorization_failure');
+          if (isAuthErr) {
+            hadAuthRequired = true;
+            authErrorMsg = msg;
+          } else {
+            nonAuthErrorMsg = msg;
+          }
+          notes.push(msg);
+        }
+      }
+    }
+
+    allNotes.push(...notes);
+
+    if (authErrorMsg || nonAuthErrorMsg) {
+      const errMsg = authErrorMsg || nonAuthErrorMsg || 'Verification unavailable';
+      lastErrorReport = {
+        leadId: lead.id,
+        state: 'unavailable',
+        matchType: 'none',
+        confidence: 0,
+        isLiveApi: false,
+        authRequired: Boolean(authErrorMsg || hadAuthRequired),
+        connectorId,
+        sourceName: meta.name,
+        sourceUrl: meta.homepageUrl,
+        verifiedAt,
+        conflicts: [],
+        nameSimilarity: 0,
+        addressSimilarity: 0,
+        identifierMatched: false,
+        preservesHigherTrust: true,
+        summary: `Verification unavailable for ${meta.shortName}: ${errMsg}`,
+        notes: [...allNotes],
+        attemptedConnectors: [...attemptedConnectors],
+      };
+      if (idx < candidateConnectorIds.length - 1) {
+        continue;
+      }
+      return bestOfflineReport || lastErrorReport;
+    }
+
+    if (!matchedCandidate) {
+      const noCredsOffline = !isLiveApi && meta.credentialRequirements.required;
+      if (noCredsOffline) hadAuthRequired = true;
+      lastNotFoundReport = {
+        leadId: lead.id,
+        state: isLiveApi ? 'not_found' : 'offline_reference',
+        matchType: 'none',
+        confidence: 0,
+        isLiveApi,
+        authRequired: noCredsOffline || undefined,
+        connectorId,
+        sourceName: meta.name,
+        sourceUrl: meta.homepageUrl,
+        verifiedAt,
+        conflicts: [],
+        nameSimilarity: 0,
+        addressSimilarity: 0,
+        identifierMatched: false,
+        preservesHigherTrust: true,
+        summary: isLiveApi
+          ? `No matching corporate entity found in ${meta.name} for "${lead.companyName}".`
+          : `${meta.name} could not perform live verification (credentials not configured or offline reference mode only).`,
+        notes: [...allNotes],
+        attemptedConnectors: [...attemptedConnectors],
+        provenance: {
+          queryMode,
+          fallbackUsed: isFallback,
+          queriedIdentifier: lookupExternalId,
+          queriedIdentifierType: lookupIdentType,
+        },
+      };
+      if (idx < candidateConnectorIds.length - 1) {
+        continue;
+      }
+      return bestOfflineReport || lastNotFoundReport;
+    }
+
+    const comparison = compareLeadAgainstOfficialRecord(lead, matchedCandidate, isLiveApi);
+    const officialUrl = matchedCandidate.sources?.[0]?.url || meta.homepageUrl;
+
+    let summary = '';
+    if (comparison.state === 'officially_verified') {
+      summary = `Verified via ${meta.name} (${matchedCandidate.registrationType || 'ID'} ${matchedCandidate.registrationNumber || 'N/A'}, status: ${matchedCandidate.companyStatus || 'unknown'}).`;
+    } else if (comparison.state === 'probable_match') {
+      summary = `Probable match found in ${meta.name}: "${matchedCandidate.legalName || matchedCandidate.companyName}" (${matchedCandidate.registrationType || 'ID'} ${matchedCandidate.registrationNumber || 'N/A'}, ${Math.round(comparison.nameSimilarity * 100)}% name match). Confirm official identifier before verifying.`;
+    } else if (comparison.state === 'offline_reference') {
+      summary = `Matched against offline sample reference only (${meta.shortName} requires API credentials for live government verification).`;
+    } else if (comparison.state === 'conflict_detected') {
+      summary = `Conflict detected against ${meta.name}: ${comparison.conflicts.map((c) => c.message).join(' ')}`;
+    } else {
+      summary = `Official record retrieved from ${meta.name}, but similarity was below matching threshold.`;
+    }
+
+    const attributeSources = buildAttributeSources(
+      connectorId,
+      meta.name,
+      matchedRetrievedAt || verifiedAt,
+      comparison.state === 'officially_verified',
+      matchedCandidate
+    );
+
+    const candidateReport: RegistryVerificationReport = {
       leadId: lead.id,
-      state: isLiveApi ? 'not_found' : 'offline_reference',
-      matchType: 'none',
-      confidence: 0,
+      state: comparison.state,
+      matchType: comparison.matchType,
+      confidence: comparison.confidence,
       isLiveApi,
+      authRequired: (!isLiveApi && meta.credentialRequirements.required) || undefined,
       connectorId,
       sourceName: meta.name,
-      sourceUrl: meta.homepageUrl,
+      sourceUrl: officialUrl,
       verifiedAt,
-      conflicts: [],
-      nameSimilarity: 0,
-      addressSimilarity: 0,
-      identifierMatched: false,
+      matchedRecord: matchedCandidate,
+      conflicts: comparison.conflicts,
+      nameSimilarity: comparison.nameSimilarity,
+      addressSimilarity: comparison.addressSimilarity,
+      identifierMatched: comparison.identifierMatched,
       preservesHigherTrust: true,
-      summary: isLiveApi
-        ? `No matching corporate entity found in ${meta.name} for "${lead.companyName}".`
-        : `${meta.name} could not perform live verification (credentials not configured or offline reference mode only).`,
-      notes,
+      summary,
+      notes: [...allNotes],
+      attemptedConnectors: [...attemptedConnectors],
+      attributeSources,
       provenance: {
         queryMode,
+        fallbackUsed: isFallback,
         queriedIdentifier: lookupExternalId,
         queriedIdentifierType: lookupIdentType,
+        rawApiRecord: matchedRawApiRecord,
+        providerMetadata: matchedProviderMetadata,
+        retrievedAt: matchedRetrievedAt,
       },
     };
+
+    if (!isLiveApi && idx < candidateConnectorIds.length - 1) {
+      bestOfflineReport = bestOfflineReport || candidateReport;
+      continue;
+    }
+
+    return candidateReport;
   }
 
-  const comparison = compareLeadAgainstOfficialRecord(lead, matchedCandidate, isLiveApi);
-  const officialUrl = matchedCandidate.sources?.[0]?.url || meta.homepageUrl;
-
-  let summary = '';
-  if (comparison.state === 'officially_verified') {
-    summary = `Verified via ${meta.name} (${matchedCandidate.registrationType || 'ID'} ${matchedCandidate.registrationNumber || 'N/A'}, status: ${matchedCandidate.companyStatus || 'unknown'}).`;
-  } else if (comparison.state === 'probable_match') {
-    summary = `Probable match found in ${meta.name}: "${matchedCandidate.legalName || matchedCandidate.companyName}" (${matchedCandidate.registrationType || 'ID'} ${matchedCandidate.registrationNumber || 'N/A'}, ${Math.round(comparison.nameSimilarity * 100)}% name match). Confirm official identifier before verifying.`;
-  } else if (comparison.state === 'offline_reference') {
-    summary = `Matched against offline sample reference only (${meta.shortName} requires API credentials for live government verification).`;
-  } else if (comparison.state === 'conflict_detected') {
-    summary = `Conflict detected against ${meta.name}: ${comparison.conflicts.map((c) => c.message).join(' ')}`;
-  } else {
-    summary = `Official record retrieved from ${meta.name}, but similarity was below matching threshold.`;
-  }
-
-  return {
-    leadId: lead.id,
-    state: comparison.state,
-    matchType: comparison.matchType,
-    confidence: comparison.confidence,
-    isLiveApi,
-    connectorId,
-    sourceName: meta.name,
-    sourceUrl: officialUrl,
-    verifiedAt,
-    matchedRecord: matchedCandidate,
-    conflicts: comparison.conflicts,
-    nameSimilarity: comparison.nameSimilarity,
-    addressSimilarity: comparison.addressSimilarity,
-    identifierMatched: comparison.identifierMatched,
-    preservesHigherTrust: true,
-    summary,
-    notes,
-    provenance: {
-      queryMode,
-      queriedIdentifier: lookupExternalId,
-      queriedIdentifierType: lookupIdentType,
-      rawApiRecord: matchedRawApiRecord,
-      providerMetadata: matchedProviderMetadata,
-      retrievedAt: matchedRetrievedAt,
-    },
-  };
+  return (
+    bestOfflineReport ||
+    lastErrorReport ||
+    lastNotFoundReport ||
+    firstDisabledReport ||
+    firstMissingReport!
+  );
 }
 
 function parseVerificationHistory(customFields?: Record<string, string>): VerificationHistoryEntry[] {
@@ -697,6 +857,20 @@ function parseVerificationHistory(customFields?: Record<string, string>): Verifi
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function parseAttributeSources(
+  customFields?: Record<string, string>
+): Record<string, AttributeSourceProvenance> {
+  if (!customFields?.attributeSources) return {};
+  try {
+    const parsed = JSON.parse(customFields.attributeSources);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, AttributeSourceProvenance>)
+      : {};
+  } catch {
+    return {};
   }
 }
 
@@ -800,6 +974,17 @@ export function applyOfficialVerificationToLead(
     }
   }
 
+  const existingAttributeSources = parseAttributeSources(existingLead.customFields);
+  const mergedAttributeSources = report.attributeSources
+    ? { ...existingAttributeSources, ...report.attributeSources }
+    : existingAttributeSources;
+
+  const isCrossBorderFallback = Boolean(report.provenance?.fallbackUsed);
+  const preserveExistingReg =
+    isCrossBorderFallback &&
+    Boolean(existingLead.registrationNumber) &&
+    existingLead.registrationType !== matched.registrationType;
+
   return {
     ...existingLead,
     // Preserve CRM identity & pipeline state strictly
@@ -815,8 +1000,12 @@ export function applyOfficialVerificationToLead(
 
     // Upgrade legal identity fields from authoritative official registry (exact official match only)
     legalName: matched.legalName || matched.companyName || existingLead.legalName,
-    registrationNumber: matched.registrationNumber || existingLead.registrationNumber,
-    registrationType: matched.registrationType || existingLead.registrationType,
+    registrationNumber: preserveExistingReg
+      ? existingLead.registrationNumber
+      : matched.registrationNumber || existingLead.registrationNumber,
+    registrationType: preserveExistingReg
+      ? existingLead.registrationType
+      : matched.registrationType || existingLead.registrationType,
     companyStatus:
       matched.companyStatus && matched.companyStatus !== 'unknown'
         ? matched.companyStatus
@@ -846,6 +1035,7 @@ export function applyOfficialVerificationToLead(
     customFields: {
       ...baseCustomFields,
       lastVerificationStatus: 'officially_verified',
+      attributeSources: JSON.stringify(mergedAttributeSources),
     },
     updatedAt: report.verifiedAt,
   };

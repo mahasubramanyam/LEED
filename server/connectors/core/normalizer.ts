@@ -106,6 +106,8 @@ export function normalizeLegalCompanyStatus(
     s === 'registered' ||
     s === 'live' ||
     s === 'live company' ||
+    s === 'normal' ||
+    s === 'czynny' ||
     s === '0000000001' ||
     /\bactive\b/.test(s) ||
     /\bregistered\b/.test(s) ||
@@ -114,7 +116,7 @@ export function normalizeLegalCompanyStatus(
     return 'active';
   }
 
-  return 'unknown';
+  return flags?.explicitActive ? 'active' : 'unknown';
 }
 
 function getIdentifierStatusRank(status?: LeadIdentifier['status'], verified?: boolean): number {
@@ -367,6 +369,14 @@ function buildDeterministicLeadId(providerId: string, externalSourceId: string):
   if (providerId === 'conn-fr-sirene') return `fr-siren-${cleanExt}`;
   if (providerId === 'conn-jp-nta') return `jp-cn-${cleanExt}`;
   if (providerId === 'conn-sg-acra') return `sg-uen-${cleanExt}`;
+  if (providerId === 'conn-gleif') return `gleif-${cleanExt}`;
+  if (providerId === 'conn-eu-vies') return `eu-vat-${cleanExt}`;
+  if (providerId === 'conn-fi-prh') return `fi-ytunnus-${cleanExt}`;
+  if (providerId === 'conn-pl-krs') return `pl-krs-${cleanExt}`;
+  if (providerId === 'conn-nl-kvk') return `nl-kvk-${cleanExt}`;
+  if (providerId === 'conn-nz-companies') return `nz-nzbn-${cleanExt}`;
+  if (providerId === 'conn-ch-zefix') return `ch-uid-${cleanExt}`;
+  if (providerId === 'conn-ie-cro') return `ie-cro-${cleanExt}`;
   if (providerId === 'conn-osm') {
     const osmNumeric = cleanExt.replace(/^osm-(?:node|way|relation)-/, '');
     return `osm-${osmNumeric}`;
