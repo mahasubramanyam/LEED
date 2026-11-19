@@ -199,6 +199,434 @@ export interface CanonicalLead {
   updatedAt: string;
 }
 
+// ============================================================================
+// PHASE 15: INTELLIGENT OUTREACH & FOLLOW-UP AUTOMATION TYPES
+// ============================================================================
+
+export type OutreachCampaignStatusV2 = 'draft' | 'active' | 'paused' | 'completed' | 'archived';
+export type OutreachCampaignModeV2 = 'individual' | 'controlled_batch';
+export type OutreachChannelV2 = 'email' | 'linkedin' | 'phone' | 'custom';
+export type OutreachEnrollmentStatusV2 =
+  | 'active'
+  | 'paused'
+  | 'completed'
+  | 'exited_replied'
+  | 'exited_meeting_booked'
+  | 'exited_opportunity'
+  | 'exited_uninterested'
+  | 'exited_opted_out'
+  | 'exited_suppressed'
+  | 'exited_bounced'
+  | 'cancelled';
+
+export type OutreachMessageStatusV2 =
+  | 'draft'
+  | 'pending_approval'
+  | 'approved'
+  | 'sending'
+  | 'sent'
+  | 'manual_sent'
+  | 'failed'
+  | 'rejected'
+  | 'cancelled';
+
+export type OutreachFollowUpTriggerV2 =
+  | 'no_response'
+  | 'response_received'
+  | 'meeting_requested'
+  | 'meeting_scheduled'
+  | 'opportunity_created'
+  | 'contact_uninterested'
+  | 'opt_out'
+  | 'failed_delivery'
+  | 'owner_requested'
+  | 'overdue_follow_up';
+
+export type OutreachReplyClassificationV2 =
+  | 'positive'
+  | 'negative'
+  | 'meeting_interest'
+  | 'information_request'
+  | 'referral'
+  | 'unsubscribe'
+  | 'unknown';
+
+export type OutreachSuppressionTypeV2 =
+  | 'unsubscribe'
+  | 'do_not_contact'
+  | 'invalid_recipient'
+  | 'manual_suppression';
+
+export type OutreachSuppressionScopeV2 = 'global' | 'campaign';
+
+export interface OutreachAuditEntry {
+  id: string;
+  timestamp: string;
+  actor: string;
+  action: string;
+  entityType: 'campaign' | 'sequence' | 'enrollment' | 'message' | 'follow_up' | 'reply' | 'suppression' | 'provider' | 'compliance';
+  entityId: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OutreachComplianceConfig {
+  senderDisplayName: string;
+  senderEmail: string;
+  senderOrganization: string;
+  senderPhysicalAddress: string;
+  unsubscribeNoticeText: string;
+  legalBasisDefault: string;
+  includeIdentificationFooter: boolean;
+  includeUnsubscribeFooter: boolean;
+  requireExplicitApprovalAlways: true;
+  maxContactsPerCompanyPerWeek: number;
+  maxContactsPerPersonPer14Days: number;
+  businessDaysOnlyDefault: boolean;
+  sendWindowStartHour: number;
+  sendWindowEndHour: number;
+  updatedAt: string;
+}
+
+export interface OutreachSuppressionEntry {
+  id: string;
+  scope: OutreachSuppressionScopeV2;
+  campaignId?: string;
+  type: OutreachSuppressionTypeV2;
+  email?: string;
+  domain?: string;
+  leadId?: string;
+  personId?: string;
+  companyName?: string;
+  personName?: string;
+  reason: string;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutreachSequenceStep {
+  id: string;
+  stepNumber: number;
+  name: string;
+  channel: OutreachChannelV2;
+  draftType: AiDraftType;
+  tone: AiDraftTone;
+  delayDays: number;
+  businessDaysOnly: boolean;
+  sendWindowStartHour?: number;
+  sendWindowEndHour?: number;
+  subjectTemplate: string;
+  bodyTemplate: string;
+  aiPersonalizationEnabled: boolean;
+  customInstructions?: string;
+}
+
+export interface OutreachSequence {
+  id: string;
+  campaignId: string;
+  name: string;
+  description?: string;
+  status: 'active' | 'paused' | 'archived';
+  maxFollowUps: number;
+  businessDaysOnly: boolean;
+  respectRecipientTimezone: boolean;
+  stopOnReply: boolean;
+  stopOnMeetingBooked: boolean;
+  stopOnOpportunity: boolean;
+  stopOnOptOut: boolean;
+  steps: OutreachSequenceStep[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutreachCampaignV2 {
+  id: string;
+  name: string;
+  objective: string;
+  description?: string;
+  mode: OutreachCampaignModeV2;
+  channel: OutreachChannelV2;
+  status: OutreachCampaignStatusV2;
+  targetIcpId?: string;
+  targetIcpName?: string;
+  defaultTone: AiDraftTone;
+  defaultProviderId?: string;
+  sequenceId?: string;
+  dailySendLimit: number;
+  maxFollowUps: number;
+  complianceNotes?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+export interface OutreachEnrollment {
+  id: string;
+  campaignId: string;
+  sequenceId?: string;
+  leadId: string;
+  companyName: string;
+  personId?: string;
+  personName?: string;
+  personRole?: string;
+  recipientEmail?: string;
+  recipientEmailStatus?: string;
+  recipientCountryCode?: string;
+  recipientTimezone?: string;
+  status: OutreachEnrollmentStatusV2;
+  currentStepNumber: number;
+  maxSteps: number;
+  nextScheduledAt?: string;
+  exitReason?: string;
+  eligibilityNotes: string[];
+  enrolledBy: string;
+  enrolledAt: string;
+  updatedAt: string;
+  lastContactedAt?: string;
+  messagesSentCount: number;
+}
+
+export interface OutreachMessageComplianceCheck {
+  passed: boolean;
+  warnings: string[];
+  blockedReasons: string[];
+  checkedAt: string;
+}
+
+export interface OutreachMessageRecord {
+  id: string;
+  campaignId: string;
+  campaignName: string;
+  sequenceId?: string;
+  enrollmentId?: string;
+  stepNumber: number;
+  leadId: string;
+  companyName: string;
+  personId?: string;
+  recipientName?: string;
+  recipientRole?: string;
+  recipientEmail?: string;
+  recipientEmailStatus?: string;
+  channel: OutreachChannelV2;
+  tone: AiDraftTone;
+  subject: string;
+  body: string;
+  status: OutreachMessageStatusV2;
+  idempotencyKey: string;
+  personalizationEvidence: AiClaimItem[];
+  unknownsAndCaveats: string[];
+  evidenceSources: AiEvidenceSource[];
+  contextAudit?: AiContextAudit;
+  aiStatus?: {
+    mode: 'ai_assisted' | 'deterministic_fallback';
+    model: string;
+    warning?: string;
+  };
+  complianceCheck: OutreachMessageComplianceCheck;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  rejectedAt?: string;
+  rejectedBy?: string;
+  rejectionReason?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  providerId?: string;
+  providerName?: string;
+  providerMessageId?: string;
+  deliveryMethod?: 'provider_api' | 'manual_external';
+  deliveryStatus: 'not_sent' | 'queued' | 'sent' | 'delivered' | 'bounced' | 'failed' | 'manual_recorded';
+  providerResponseSummary?: string;
+  sentAt?: string;
+  attemptCount: number;
+  lastAttemptAt?: string;
+  lastError?: string;
+  nextRetryAt?: string;
+  crmInteractionId?: string;
+}
+
+export interface OutreachFollowUpItem {
+  id: string;
+  campaignId?: string;
+  campaignName?: string;
+  enrollmentId?: string;
+  leadId: string;
+  companyName: string;
+  personId?: string;
+  personName?: string;
+  messageId?: string;
+  stepNumber?: number;
+  triggerType: OutreachFollowUpTriggerV2;
+  status: 'scheduled' | 'pending_approval' | 'completed' | 'cancelled' | 'suppressed';
+  scheduledFor: string;
+  businessDayAdjusted: boolean;
+  recipientTimezone?: string;
+  explanation: string;
+  recommendedAction: string;
+  linkedTaskId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutreachReplyRecord {
+  id: string;
+  campaignId?: string;
+  campaignName?: string;
+  enrollmentId?: string;
+  messageId?: string;
+  leadId: string;
+  companyName: string;
+  personId?: string;
+  personName?: string;
+  senderEmail?: string;
+  channel: OutreachChannelV2;
+  subject?: string;
+  body: string;
+  source: 'manual_owner_recorded' | 'provider_inbound_sync';
+  classification: OutreachReplyClassificationV2;
+  classificationRationale: string;
+  receivedAt: string;
+  recordedAt: string;
+  recordedBy: string;
+  crmInteractionId?: string;
+  triggeredExit: boolean;
+  triggeredSuppression: boolean;
+}
+
+export interface OutreachProviderSettings {
+  defaultEmailProviderId?: string;
+  fromEmail: string;
+  fromName: string;
+  replyToEmail?: string;
+  maxRetries: number;
+  rateLimitPerHourByProvider: Record<string, number>;
+  updatedAt: string;
+}
+
+export interface OutreachProviderStatus {
+  id: string;
+  name: string;
+  channel: OutreachChannelV2;
+  automatedSendingSupported: boolean;
+  inboundSyncSupported: boolean;
+  configured: boolean;
+  credentialSource: 'environment' | 'database_encrypted' | 'none';
+  maskedHint?: string;
+  fromEmailConfigured: boolean;
+  fromEmail?: string;
+  healthState: 'operational' | 'unconfigured' | 'policy_manual_only' | 'degraded' | 'rate_limited';
+  rateLimitPerHour: number;
+  sentInCurrentHour: number;
+  honestDisclosure: string;
+  docsUrl?: string;
+  requiredCredentialFields: Array<{
+    key: string;
+    label: string;
+    secret: boolean;
+    placeholder?: string;
+  }>;
+  lastSuccessAt?: string;
+  lastError?: string;
+}
+
+export interface OutreachAnalyticsSummary {
+  generatedAt: string;
+  totals: {
+    campaignsTotal: number;
+    campaignsActive: number;
+    enrollmentsTotal: number;
+    enrollmentsActive: number;
+    messagesDrafted: number;
+    messagesPendingApproval: number;
+    messagesApproved: number;
+    messagesSentViaProvider: number;
+    messagesManualSent: number;
+    messagesTotalDispatched: number;
+    deliveryFailures: number;
+    repliesReceived: number;
+    positiveResponses: number;
+    meetingsBooked: number;
+    followUpsPending: number;
+    followUpsOverdue: number;
+    optOutsAndSuppressions: number;
+  };
+  rates: {
+    replyRatePercent: number | null;
+    positiveResponseRatePercent: number | null;
+    meetingConversionRatePercent: number | null;
+    optOutRatePercent: number | null;
+  };
+  byCampaign: Array<{
+    campaignId: string;
+    campaignName: string;
+    status: OutreachCampaignStatusV2;
+    channel: OutreachChannelV2;
+    targetIcpName?: string;
+    enrolled: number;
+    drafted: number;
+    approved: number;
+    sent: number;
+    failed: number;
+    replies: number;
+    positiveReplies: number;
+    meetingsBooked: number;
+    optOuts: number;
+  }>;
+  byIcp: Array<{
+    icpId: string;
+    icpName: string;
+    campaignsCount: number;
+    enrolled: number;
+    sent: number;
+    replies: number;
+    positiveReplies: number;
+    meetingsBooked: number;
+  }>;
+  byChannel: Array<{
+    channel: OutreachChannelV2;
+    drafted: number;
+    sent: number;
+    manualSent: number;
+    failed: number;
+    replies: number;
+    positiveReplies: number;
+  }>;
+  unavailableMetrics: Array<{
+    metric: string;
+    status: 'unavailable' | 'untracked';
+    reason: string;
+  }>;
+}
+
+export interface OutreachWorkspaceState {
+  version: 1;
+  campaigns: OutreachCampaignV2[];
+  sequences: OutreachSequence[];
+  enrollments: OutreachEnrollment[];
+  messages: OutreachMessageRecord[];
+  followUps: OutreachFollowUpItem[];
+  replies: OutreachReplyRecord[];
+  suppressions: OutreachSuppressionEntry[];
+  complianceConfig: OutreachComplianceConfig;
+  providerSettings: OutreachProviderSettings;
+  providerTelemetry: Record<
+    string,
+    {
+      windowStartMs: number;
+      sentInWindow: number;
+      lastSuccessAt?: string;
+      lastError?: string;
+    }
+  >;
+  auditLog: OutreachAuditEntry[];
+  updatedAt: string;
+}
+
+
 export interface PipelineStage {
   id: string;
   name: string;

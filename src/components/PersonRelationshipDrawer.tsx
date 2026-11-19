@@ -15,9 +15,11 @@ import {
   User,
   X,
   Bot,
+  Send,
 } from 'lucide-react';
 import {
   AiAgentLaunchContext,
+  OutreachLaunchContext,
   CrmInteractionType,
   CrmNoteCategory,
   CrmRelationshipStatus,
@@ -41,6 +43,7 @@ interface PersonRelationshipDrawerProps {
   onClose: () => void;
   onOpenCompany?: (leadId: string) => void;
   onOpenAiAgent?: (ctx: AiAgentLaunchContext) => void;
+  onOpenOutreach?: (ctx: OutreachLaunchContext) => void;
   onDataMutated?: () => void;
 }
 
@@ -49,6 +52,7 @@ export const PersonRelationshipDrawer: React.FC<PersonRelationshipDrawerProps> =
   onClose,
   onOpenCompany,
   onOpenAiAgent,
+  onOpenOutreach,
   onDataMutated,
 }) => {
   const [profile, setProfile] = useState<PersonRelationshipProfile | null>(null);
@@ -309,6 +313,21 @@ export const PersonRelationshipDrawer: React.FC<PersonRelationshipDrawerProps> =
                   AI Draft
                 </button>
               </>
+            )}
+            {onOpenOutreach && profile && (
+              <button
+                onClick={() =>
+                  onOpenOutreach({
+                    personId: profile.person.id,
+                    leadId: profile.currentCompanies[0]?.company?.id,
+                    tab: 'campaigns',
+                  })
+                }
+                className="px-2.5 py-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/25 text-xs font-medium inline-flex items-center gap-1 whitespace-nowrap"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Outreach
+              </button>
             )}
             <button
               onClick={onClose}

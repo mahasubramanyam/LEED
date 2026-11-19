@@ -26,6 +26,7 @@ import {
   ConnectorStatus,
   AppSettings,
   AiAgentLaunchContext,
+  OutreachLaunchContext,
 } from './types.ts';
 
 interface OwnerProfile {
@@ -80,6 +81,7 @@ export default function App() {
   const [discoveryInitialCountry, setDiscoveryInitialCountry] = useState<string | undefined>(undefined);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [aiLaunchContext, setAiLaunchContext] = useState<AiAgentLaunchContext | null>(null);
+  const [outreachLaunchContext, setOutreachLaunchContext] = useState<OutreachLaunchContext | null>(null);
   const [aiAvailable, setAiAvailable] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -89,6 +91,14 @@ export default function App() {
     setIsReminderDrawerOpen(false);
     setAiLaunchContext({ ...ctx, nonce: Date.now() });
     setCurrentTab('ai-agent');
+  }, []);
+
+  const openOutreach = useCallback((ctx: OutreachLaunchContext) => {
+    setSelectedLeadForDetail(null);
+    setSelectedPersonIdForDrawer(null);
+    setIsReminderDrawerOpen(false);
+    setOutreachLaunchContext({ ...ctx, nonce: Date.now() });
+    setCurrentTab('outreach');
   }, []);
 
   // Sync theme with HTML class and localStorage
@@ -735,8 +745,15 @@ export default function App() {
                 <OutreachCampaigns
                   campaigns={campaigns}
                   leads={leads}
+                  launchContext={outreachLaunchContext}
                   onRefreshCampaigns={fetchAllData}
-                  onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  onSelectLead={(leadId) => {
+                    const found = leads.find((l) => l.id === leadId);
+                    if (found) setSelectedLeadForDetail(found);
+                  }}
+                  onOpenAiAgent={(leadId, personId) =>
+                    openAiAgent({ tab: 'drafting', leadId, personId })
+                  }
                 />
               )}
 
@@ -809,6 +826,7 @@ export default function App() {
         onInspectUrl={handleInspectUrl}
         onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
         onOpenAiAgent={openAiAgent}
+        onOpenOutreach={openOutreach}
         onRefreshData={fetchAllData}
       />
 
@@ -825,6 +843,7 @@ export default function App() {
             }
           }}
           onOpenAiAgent={openAiAgent}
+          onOpenOutreach={openOutreach}
           onDataMutated={fetchAllData}
         />
       )}

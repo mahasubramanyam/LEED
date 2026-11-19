@@ -50,6 +50,7 @@ import {
   DecisionMakerCandidate,
   DecisionMakerDiscoveryResponse,
   AiAgentLaunchContext,
+  OutreachLaunchContext,
 } from '../types.ts';
 import { GeoSelector } from './GeoSelector.tsx';
 import { LeadEnrichmentPanel } from './LeadEnrichmentPanel.tsx';
@@ -241,6 +242,7 @@ interface LeadDetailModalProps {
   onInspectUrl: (url: string, leadId: string) => Promise<any>;
   onOpenPersonProfile?: (personId: string) => void;
   onOpenAiAgent?: (ctx: AiAgentLaunchContext) => void;
+  onOpenOutreach?: (ctx: OutreachLaunchContext) => void;
   onRefreshData?: () => void;
 }
 
@@ -255,6 +257,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   onInspectUrl,
   onOpenPersonProfile,
   onOpenAiAgent,
+  onOpenOutreach,
   onRefreshData,
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'relationship' | 'enrichment' | 'contacts' | 'web' | 'ai' | 'timeline' | 'notes'>('overview');
@@ -985,6 +988,16 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   Draft
                 </button>
               </>
+            )}
+            {onOpenOutreach && (
+              <button
+                onClick={() => onOpenOutreach({ leadId: lead.id, tab: 'campaigns' })}
+                className="px-2.5 py-1 text-xs font-medium rounded-lg border border-indigo-500/40 bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/25 inline-flex items-center gap-1 whitespace-nowrap"
+                title="Enroll or manage in Outreach & Follow-Up Automation"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Outreach</span>
+              </button>
             )}
 
             {/* Confidence Score Pill */}

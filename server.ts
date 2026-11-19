@@ -127,6 +127,39 @@ import {
   runSalesAgentConversationTurn,
 } from './server/ai/salesIntelligenceService.js';
 import {
+  OUTREACH_PROVIDER_MAP,
+} from './shared/outreachSpecs.js';
+import {
+  addSuppressionEntry,
+  approveOutreachMessage,
+  buildOutreachAnalytics,
+  cancelOutreachMessage,
+  createManualFollowUp,
+  createOutreachCampaign,
+  deactivateSuppressionEntry,
+  dispatchApprovedOutreachMessage,
+  editOutreachMessageDraft,
+  enrollRecipientsInCampaign,
+  generateOutreachMessageDraft,
+  getOutreachWorkspaceOverview,
+  markMessageManuallySent,
+  rejectOutreachMessage,
+  transitionEnrollmentStatus,
+  updateFollowUpStatus,
+  updateOutreachCampaign,
+  updateOutreachComplianceConfig,
+  updateOutreachProviderSettings,
+  upsertOutreachSequence,
+} from './server/outreach/outreachService.js';
+import { recordOutreachReply } from './server/outreach/replyManager.js';
+import {
+  buildProviderCredentialRequirement,
+  listOutreachProviderStatuses,
+} from './server/outreach/providerAbstraction.js';
+import {
+  getOutreachWorkspaceState,
+} from './server/outreach/outreachStoreHelper.js';
+import {
   requireOwnerAuth,
   setSessionCookie,
   clearSessionCookie,
@@ -2880,44 +2913,25 @@ protectedApi.post('/campaigns/:id/messages/:messageId/action', async (req: Reque
     return;
   }
   const { action } = validated.data;
-  const newStatus =
-    action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'sent';
+
+  // Phase 15 safeguard: legacy campaign route must never simulate external email delivery
+  if (action === 'send') {
+    res.status(422).json({
+      error:
+        'Simulated delivery is disabled. Use the Phase 15 Outreach Approval Queue (/api/outreach/messages/:id/dispatch or /manual-sent) with a configured email provider or explicit manual external recording.',
+      code: 'SIMULATED_DELIVERY_DISABLED',
+    });
+    return;
+  }
+
+  const newStatus = action === 'approve' ? 'approved' : 'rejected';
   const author = req.owner?.fullName || 'Lead Intelligence Operator';
 
   try {
     const { isPg } = checkStorageEngine();
-    let success = false;
-
-    if (isPg) {
-      success = await postgresStorage.updateCampaignMessageStatus(req.params.id, req.params.messageId, newStatus, author);
-    } else {
-      success = storage.updateCampaignMessageStatus(req.params.id, req.params.messageId, newStatus);
-      if (action === 'send') {
-        const camp = storage.getCampaigns().find((c) => c.id === req.params.id);
-        const msg = camp?.messages.find((m) => m.id === req.params.messageId);
-        if (msg) {
-          const lead = storage.getLead(msg.leadId);
-          if (lead) {
-            lead.activities.unshift({
-              id: `act-${Date.now()}`,
-              type: 'email',
-              title: `Campaign Message Dispatched: ${msg.subject}`,
-              outcome: `Provider ID ${msg.deliveryId} confirmed dispatch`,
-              date: new Date().toISOString(),
-              actor: author,
-            });
-            lead.status = 'contacted';
-            const contactedStage =
-              storage.getStages().find((s) => s.id === 'stage-contacted') ||
-              storage.getStages().find((s) => s.name.toLowerCase().includes('contacted'));
-            if (contactedStage) {
-              lead.pipelineStageId = contactedStage.id;
-            }
-            storage.upsertLead(lead);
-          }
-        }
-      }
-    }
+    const success = isPg
+      ? await postgresStorage.updateCampaignMessageStatus(req.params.id, req.params.messageId, newStatus, author)
+      : storage.updateCampaignMessageStatus(req.params.id, req.params.messageId, newStatus);
 
     if (!success) {
       res.status(404).json({ error: 'Campaign or message not found' });
@@ -6490,6 +6504,571 @@ protectedApi.post('/ai/tools/execute', createRateLimitMiddleware(aiRateLimiter),
     res.json(result);
   } catch (err: unknown) {
     res.status(400).json({ error: sanitizeApiError(err, 'Controlled tool execution rejected.') });
+  }
+});
+
+// ============================================================================
+// PHASE 15: INTELLIGENT OUTREACH & FOLLOW-UP AUTOMATION (OWNER-ONLY)
+// ============================================================================
+
+protectedApi.get('/outreach/overview', async (_req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const overview = await getOutreachWorkspaceOverview(facade, credentialManager);
+    res.json(overview);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load outreach workspace.') });
+  }
+});
+
+protectedApi.get('/outreach/analytics', async (_req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const ws = await getOutreachWorkspaceState(facade);
+    res.json({ analytics: buildOutreachAnalytics(ws) });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to compute outreach analytics.') });
+  }
+});
+
+protectedApi.post('/outreach/campaigns', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.name || typeof body.name !== 'string' || !body.objective || typeof body.objective !== 'string') {
+    res.status(400).json({ error: 'name and objective strings are required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const created = await createOutreachCampaign(facade, {
+      name: body.name,
+      objective: body.objective,
+      description: typeof body.description === 'string' ? body.description : undefined,
+      mode: body.mode === 'controlled_batch' ? 'controlled_batch' : 'individual',
+      channel: body.channel,
+      targetIcpId: typeof body.targetIcpId === 'string' ? body.targetIcpId : undefined,
+      defaultTone: body.defaultTone,
+      defaultProviderId: typeof body.defaultProviderId === 'string' ? body.defaultProviderId : undefined,
+      dailySendLimit: body.dailySendLimit !== undefined ? Number(body.dailySendLimit) : undefined,
+      maxFollowUps: body.maxFollowUps !== undefined ? Number(body.maxFollowUps) : undefined,
+      complianceNotes: typeof body.complianceNotes === 'string' ? body.complianceNotes : undefined,
+      createdBy: actor,
+      createDefaultSequence: body.createDefaultSequence !== false,
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'OUTREACH_CAMPAIGN_CREATED',
+        req.owner.email,
+        'outreach_campaign',
+        created.campaign.id,
+        { name: created.campaign.name, mode: created.campaign.mode, channel: created.campaign.channel },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(201).json(created);
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to create outreach campaign.') });
+  }
+});
+
+protectedApi.patch('/outreach/campaigns/:id', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const updated = await updateOutreachCampaign(facade, req.params.id, body, actor);
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'OUTREACH_CAMPAIGN_UPDATED',
+        req.owner.email,
+        'outreach_campaign',
+        updated.id,
+        { status: updated.status },
+        normalizeClientIp(req)
+      );
+    }
+    res.json({ campaign: updated });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 400).json({
+      error: sanitizeApiError(err, 'Failed to update outreach campaign.'),
+    });
+  }
+});
+
+protectedApi.post('/outreach/sequences', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.campaignId || typeof body.campaignId !== 'string' || !Array.isArray(body.steps)) {
+    res.status(400).json({ error: 'campaignId and steps array are required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const sequence = await upsertOutreachSequence(facade, body as any, actor);
+    res.json({ sequence });
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to save outreach sequence.') });
+  }
+});
+
+protectedApi.post('/outreach/campaigns/:id/enroll', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!Array.isArray(body.recipients) || body.recipients.length === 0) {
+    res.status(400).json({ error: 'recipients array is required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const result = await enrollRecipientsInCampaign(facade, {
+      campaignId: req.params.id,
+      recipients: body.recipients.slice(0, 100),
+      enrolledBy: actor,
+    });
+    res.json(result);
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to enroll recipients.') });
+  }
+});
+
+protectedApi.patch('/outreach/enrollments/:id', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.status || typeof body.status !== 'string') {
+    res.status(400).json({ error: 'status is required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const enrollment = await transitionEnrollmentStatus(
+      facade,
+      req.params.id,
+      body.status as any,
+      typeof body.reason === 'string' ? body.reason : undefined,
+      actor
+    );
+    res.json({ enrollment });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 400).json({
+      error: sanitizeApiError(err, 'Failed to update enrollment status.'),
+    });
+  }
+});
+
+protectedApi.post('/outreach/messages/draft', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.campaignId || !body.leadId) {
+    res.status(400).json({ error: 'campaignId and leadId are required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const message = await generateOutreachMessageDraft(facade, {
+      campaignId: String(body.campaignId),
+      leadId: String(body.leadId),
+      personId: typeof body.personId === 'string' ? body.personId : undefined,
+      enrollmentId: typeof body.enrollmentId === 'string' ? body.enrollmentId : undefined,
+      stepNumber: body.stepNumber !== undefined ? Number(body.stepNumber) : undefined,
+      channel: body.channel,
+      tone: body.tone,
+      draftType: body.draftType,
+      customInstructions: typeof body.customInstructions === 'string' ? body.customInstructions : undefined,
+      includePrivateNotes: body.includePrivateNotes === true,
+      actor,
+    });
+    res.status(201).json({ message });
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to generate outreach draft.') });
+  }
+});
+
+protectedApi.patch('/outreach/messages/:id', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const message = await editOutreachMessageDraft(
+      facade,
+      req.params.id,
+      {
+        subject: typeof body.subject === 'string' ? body.subject : undefined,
+        body: typeof body.body === 'string' ? body.body : undefined,
+        recipientEmail: typeof body.recipientEmail === 'string' ? body.recipientEmail : undefined,
+      },
+      actor
+    );
+    res.json({ message });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 400).json({
+      error: sanitizeApiError(err, 'Failed to edit outreach draft.'),
+    });
+  }
+});
+
+protectedApi.post('/outreach/messages/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const message = await approveOutreachMessage(facade, req.params.id, actor);
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'OUTREACH_MESSAGE_APPROVED',
+        req.owner.email,
+        'outreach_message',
+        message.id,
+        { companyName: message.companyName, channel: message.channel, stepNumber: message.stepNumber },
+        normalizeClientIp(req)
+      );
+    }
+    res.json({ message });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 422).json({
+      error: sanitizeApiError(err, 'Failed to approve outreach message.'),
+    });
+  }
+});
+
+protectedApi.post('/outreach/messages/:id/reject', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const message = await rejectOutreachMessage(
+      facade,
+      req.params.id,
+      typeof body.reason === 'string' ? body.reason : undefined,
+      actor
+    );
+    res.json({ message });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 400).json({
+      error: sanitizeApiError(err, 'Failed to reject outreach draft.'),
+    });
+  }
+});
+
+protectedApi.post('/outreach/messages/:id/cancel', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const message = await cancelOutreachMessage(facade, req.params.id, actor);
+    res.json({ message });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 400).json({
+      error: sanitizeApiError(err, 'Failed to cancel outreach message.'),
+    });
+  }
+});
+
+protectedApi.post('/outreach/messages/:id/dispatch', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const result = await dispatchApprovedOutreachMessage(facade, {
+      messageId: req.params.id,
+      providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
+      actor,
+      credentialManager,
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        result.sent ? 'OUTREACH_MESSAGE_SENT' : 'OUTREACH_MESSAGE_DISPATCH_FAILED',
+        req.owner.email,
+        'outreach_message',
+        result.message.id,
+        {
+          sent: result.sent,
+          providerId: result.message.providerId,
+          providerMessageId: result.message.providerMessageId,
+          deliveryStatus: result.message.deliveryStatus,
+        },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(result.sent ? 200 : result.httpStatus && result.httpStatus >= 400 ? result.httpStatus : 422).json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 422).json({
+      error: sanitizeApiError(err, 'Outreach dispatch refused.'),
+    });
+  }
+});
+
+protectedApi.post('/outreach/messages/:id/manual-sent', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const result = await markMessageManuallySent(facade, {
+      messageId: req.params.id,
+      notes: typeof body.notes === 'string' ? body.notes : undefined,
+      actor,
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'OUTREACH_MESSAGE_MANUAL_SENT',
+        req.owner.email,
+        'outreach_message',
+        result.message.id,
+        { channel: result.message.channel, companyName: result.message.companyName },
+        normalizeClientIp(req)
+      );
+    }
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 422).json({
+      error: sanitizeApiError(err, 'Failed to record manual external send.'),
+    });
+  }
+});
+
+protectedApi.post('/outreach/follow-ups', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.leadId || typeof body.leadId !== 'string') {
+    res.status(400).json({ error: 'leadId is required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const result = await createManualFollowUp(facade, {
+      leadId: body.leadId,
+      personId: typeof body.personId === 'string' ? body.personId : undefined,
+      campaignId: typeof body.campaignId === 'string' ? body.campaignId : undefined,
+      enrollmentId: typeof body.enrollmentId === 'string' ? body.enrollmentId : undefined,
+      triggerType: body.triggerType,
+      delayDays: body.delayDays !== undefined ? Number(body.delayDays) : undefined,
+      businessDaysOnly: typeof body.businessDaysOnly === 'boolean' ? body.businessDaysOnly : undefined,
+      explanation: typeof body.explanation === 'string' ? body.explanation : undefined,
+      recommendedAction: typeof body.recommendedAction === 'string' ? body.recommendedAction : undefined,
+      actor,
+    });
+    res.status(result.scheduled ? 201 : 200).json(result);
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to schedule follow-up.') });
+  }
+});
+
+protectedApi.patch('/outreach/follow-ups/:id', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const item = await updateFollowUpStatus(
+      facade,
+      req.params.id,
+      {
+        status: body.status,
+        scheduledFor: typeof body.scheduledFor === 'string' ? body.scheduledFor : undefined,
+      },
+      actor
+    );
+    res.json({ followUp: item });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 400).json({
+      error: sanitizeApiError(err, 'Failed to update follow-up.'),
+    });
+  }
+});
+
+protectedApi.post('/outreach/replies', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.leadId || !body.body || typeof body.body !== 'string') {
+    res.status(400).json({ error: 'leadId and reply body text are required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const result = await recordOutreachReply(facade, {
+      leadId: String(body.leadId),
+      personId: typeof body.personId === 'string' ? body.personId : undefined,
+      campaignId: typeof body.campaignId === 'string' ? body.campaignId : undefined,
+      enrollmentId: typeof body.enrollmentId === 'string' ? body.enrollmentId : undefined,
+      messageId: typeof body.messageId === 'string' ? body.messageId : undefined,
+      senderEmail: typeof body.senderEmail === 'string' ? body.senderEmail : undefined,
+      channel: body.channel,
+      subject: typeof body.subject === 'string' ? body.subject : undefined,
+      body: body.body,
+      receivedAt: typeof body.receivedAt === 'string' ? body.receivedAt : undefined,
+      overrideClassification: body.overrideClassification,
+      allowAiClassification: body.allowAiClassification === true,
+      recordedBy: actor,
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'OUTREACH_REPLY_RECORDED',
+        req.owner.email,
+        'outreach_reply',
+        result.reply.id,
+        {
+          leadId: result.reply.leadId,
+          classification: result.reply.classification,
+          suppressionCreated: result.suppressionCreated,
+        },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(201).json(result);
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to record reply.') });
+  }
+});
+
+protectedApi.post('/outreach/suppressions', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const suppression = await addSuppressionEntry(facade, {
+      scope: body.scope === 'campaign' ? 'campaign' : 'global',
+      campaignId: typeof body.campaignId === 'string' ? body.campaignId : undefined,
+      type: body.type || 'do_not_contact',
+      email: typeof body.email === 'string' ? body.email : undefined,
+      domain: typeof body.domain === 'string' ? body.domain : undefined,
+      leadId: typeof body.leadId === 'string' ? body.leadId : undefined,
+      personId: typeof body.personId === 'string' ? body.personId : undefined,
+      reason: typeof body.reason === 'string' ? body.reason : 'Owner-requested suppression',
+      createdBy: actor,
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'OUTREACH_SUPPRESSION_ADDED',
+        req.owner.email,
+        'outreach_suppression',
+        suppression.id,
+        { scope: suppression.scope, type: suppression.type },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(201).json({ suppression });
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to add suppression entry.') });
+  }
+});
+
+protectedApi.delete('/outreach/suppressions/:id', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const suppression = await deactivateSuppressionEntry(facade, req.params.id, actor);
+    res.json({ suppression });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    res.status(msg.includes('not found') ? 404 : 400).json({
+      error: sanitizeApiError(err, 'Failed to deactivate suppression.'),
+    });
+  }
+});
+
+protectedApi.patch('/outreach/compliance', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const complianceConfig = await updateOutreachComplianceConfig(facade, body, actor);
+    res.json({ complianceConfig });
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to update compliance settings.') });
+  }
+});
+
+protectedApi.patch('/outreach/providers/settings', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const providerSettings = await updateOutreachProviderSettings(facade, body, actor);
+    const ws = await getOutreachWorkspaceState(facade);
+    const providers = await listOutreachProviderStatuses(ws, credentialManager);
+    res.json({ providerSettings, providers });
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to update provider settings.') });
+  }
+});
+
+protectedApi.post('/outreach/providers/:providerId/credentials', async (req: Request, res: Response) => {
+  const providerId = req.params.providerId;
+  const entry = OUTREACH_PROVIDER_MAP.get(providerId);
+  const requirement = buildProviderCredentialRequirement(providerId);
+  if (!entry || !requirement) {
+    res.status(400).json({ error: 'Unknown or manual-only communication provider.' });
+    return;
+  }
+  const credentials = (req.body?.credentials || {}) as Record<string, string>;
+  try {
+    await credentialManager.setCredential(providerId, credentials, requirement, { isRotation: true });
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const ws = await getOutreachWorkspaceState(facade);
+    const providers = await listOutreachProviderStatuses(ws, credentialManager);
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'OUTREACH_PROVIDER_CREDENTIAL_STORED',
+        req.owner.email,
+        'outreach_provider',
+        providerId,
+        { providerName: entry.name },
+        normalizeClientIp(req)
+      );
+    }
+    res.json({ success: true, providers });
+  } catch (err: unknown) {
+    res.status(400).json({
+      error: sanitizeApiError(err, 'Failed to store encrypted provider credentials.'),
+    });
+  }
+});
+
+protectedApi.delete('/outreach/providers/:providerId/credentials', async (req: Request, res: Response) => {
+  const providerId = req.params.providerId;
+  const requirement = buildProviderCredentialRequirement(providerId);
+  if (!requirement) {
+    res.status(400).json({ error: 'Unknown or manual-only communication provider.' });
+    return;
+  }
+  try {
+    await credentialManager.removeCredential(providerId, requirement);
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const ws = await getOutreachWorkspaceState(facade);
+    const providers = await listOutreachProviderStatuses(ws, credentialManager);
+    res.json({ success: true, providers });
+  } catch (err: unknown) {
+    res.status(400).json({
+      error: sanitizeApiError(err, 'Failed to remove provider credentials.'),
+    });
   }
 });
 
