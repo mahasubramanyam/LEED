@@ -58,6 +58,17 @@ export const OUTREACH_ENROLLMENT_STATUSES = [
   'cancelled',
 ] as const;
 export type OutreachEnrollmentStatus = (typeof OUTREACH_ENROLLMENT_STATUSES)[number];
+export const OUTREACH_ENROLLMENT_STATUS_SET = new Set<string>(OUTREACH_ENROLLMENT_STATUSES);
+
+export const OUTREACH_FOLLOWUP_STATUSES = [
+  'scheduled',
+  'pending_approval',
+  'completed',
+  'cancelled',
+  'suppressed',
+] as const;
+export type OutreachFollowUpStatus = (typeof OUTREACH_FOLLOWUP_STATUSES)[number];
+export const OUTREACH_FOLLOWUP_STATUS_SET = new Set<string>(OUTREACH_FOLLOWUP_STATUSES);
 
 export const OUTREACH_MESSAGE_STATUSES = [
   'draft',

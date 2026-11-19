@@ -27,9 +27,77 @@ export function resolveRecipientTimezone(
   return COUNTRY_DEFAULT_TIMEZONE[countryCode.trim().toUpperCase()];
 }
 
+function isValidIanaTimezone(tz?: string): tz is string {
+  if (!tz || !tz.trim()) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz.trim() }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getZonedDateParts(
+  date: Date,
+  timeZone: string
+): { year: number; month: number; day: number; hour: number; minute: number; second: number } {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = fmt.formatToParts(date);
+  const pick = (type: string) => Number(parts.find((p) => p.type === type)?.value || '0');
+  const rawHour = pick('hour');
+  return {
+    year: pick('year'),
+    month: pick('month'),
+    day: pick('day'),
+    hour: rawHour === 24 ? 0 : rawHour,
+    minute: pick('minute'),
+    second: pick('second'),
+  };
+}
+
 /**
- * Computes a follow-up timestamp respecting delayDays, businessDaysOnly (skip Sat/Sun),
- * and owner send window hour. Returns ISO timestamp + whether weekend adjustment occurred.
+ * Converts a recipient-local wall-clock date/time (year, month, day, hour, minute) in an IANA
+ * timezone to the exact UTC instant, handling DST transitions via two-pass offset convergence.
+ */
+function zonedWallTimeToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date {
+  const wallAsUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  if (timeZone === 'UTC') {
+    return new Date(wallAsUtcMs);
+  }
+
+  const offsetAt = (instantMs: number): number => {
+    const p = getZonedDateParts(new Date(instantMs), timeZone);
+    const localAsUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, 0);
+    return localAsUtc - instantMs;
+  };
+
+  // Pass 1: estimate UTC instant from offset at naive guess
+  const firstGuessUtcMs = wallAsUtcMs - offsetAt(wallAsUtcMs);
+  // Pass 2: re-evaluate offset at refined UTC instant (converges accurately across DST boundaries)
+  const refinedUtcMs = wallAsUtcMs - offsetAt(firstGuessUtcMs);
+  return new Date(refinedUtcMs);
+}
+
+/**
+ * Computes a follow-up timestamp respecting delayDays, businessDaysOnly (skip Sat/Sun in
+ * recipient-local calendar), and sendWindowStartHour interpreted in the recipient's resolved
+ * IANA timezone (with DST support). Falls back to UTC only when no valid timezone is available.
  */
 export function computeBusinessAwareScheduleDate(params: {
   baseDate?: Date;
@@ -37,17 +105,28 @@ export function computeBusinessAwareScheduleDate(params: {
   businessDaysOnly: boolean;
   sendWindowStartHour?: number;
   recipientTimezone?: string;
-}): { scheduledFor: string; businessDayAdjusted: boolean } {
+}): {
+  scheduledFor: string;
+  businessDayAdjusted: boolean;
+  resolvedTimezone: string;
+  localScheduledSummary: string;
+} {
   const base = params.baseDate ? new Date(params.baseDate.getTime()) : new Date();
-  const target = new Date(base.getTime());
+  const resolvedTimezone = isValidIanaTimezone(params.recipientTimezone)
+    ? params.recipientTimezone.trim()
+    : 'UTC';
   const days = Math.max(0, Math.round(params.delayDays));
   let businessDayAdjusted = false;
+
+  // Start from the recipient's local calendar date (using noon UTC cursor for DST-free date stepping)
+  const baseLocal = getZonedDateParts(base, resolvedTimezone);
+  const calendarCursor = new Date(Date.UTC(baseLocal.year, baseLocal.month - 1, baseLocal.day, 12, 0, 0, 0));
 
   if (params.businessDaysOnly && days > 0) {
     let added = 0;
     while (added < days) {
-      target.setUTCDate(target.getUTCDate() + 1);
-      const dow = target.getUTCDay();
+      calendarCursor.setUTCDate(calendarCursor.getUTCDate() + 1);
+      const dow = calendarCursor.getUTCDay();
       if (dow === 0 || dow === 6) {
         businessDayAdjusted = true;
       } else {
@@ -55,14 +134,14 @@ export function computeBusinessAwareScheduleDate(params: {
       }
     }
   } else {
-    target.setUTCDate(target.getUTCDate() + days);
+    calendarCursor.setUTCDate(calendarCursor.getUTCDate() + days);
     if (params.businessDaysOnly) {
-      const dow = target.getUTCDay();
+      const dow = calendarCursor.getUTCDay();
       if (dow === 6) {
-        target.setUTCDate(target.getUTCDate() + 2);
+        calendarCursor.setUTCDate(calendarCursor.getUTCDate() + 2);
         businessDayAdjusted = true;
       } else if (dow === 0) {
-        target.setUTCDate(target.getUTCDate() + 1);
+        calendarCursor.setUTCDate(calendarCursor.getUTCDate() + 1);
         businessDayAdjusted = true;
       }
     }
@@ -72,11 +151,20 @@ export function computeBusinessAwareScheduleDate(params: {
     params.sendWindowStartHour !== undefined && Number.isFinite(params.sendWindowStartHour)
       ? Math.min(20, Math.max(7, Math.round(params.sendWindowStartHour)))
       : 9;
-  target.setUTCHours(hour, 0, 0, 0);
+
+  const targetYear = calendarCursor.getUTCFullYear();
+  const targetMonth = calendarCursor.getUTCMonth() + 1;
+  const targetDay = calendarCursor.getUTCDate();
+  const scheduledDate = zonedWallTimeToUtc(targetYear, targetMonth, targetDay, hour, 0, resolvedTimezone);
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const localScheduledSummary = `${targetYear}-${pad(targetMonth)}-${pad(targetDay)} ${pad(hour)}:00 (${resolvedTimezone})`;
 
   return {
-    scheduledFor: target.toISOString(),
+    scheduledFor: scheduledDate.toISOString(),
     businessDayAdjusted,
+    resolvedTimezone,
+    localScheduledSummary,
   };
 }
 
@@ -215,16 +303,16 @@ export function scheduleContextualFollowUp(params: {
   });
 
   const defaultExplanations: Record<OutreachFollowUpTriggerV2, string> = {
-    no_response: `Scheduled Step ${params.stepNumber ?? ((enrollment?.currentStepNumber || 1) + 1)} follow-up after ${delayDays} ${businessDaysOnly ? 'business ' : ''}day(s) with no recorded reply${recipientTimezone ? ` (recipient timezone context: ${recipientTimezone})` : ''}.`,
-    response_received: 'Inbound reply recorded; follow-up queued for owner review and personalized response.',
-    meeting_requested: 'Contact expressed meeting interest; priority follow-up scheduled to propose time slots.',
-    meeting_scheduled: 'Meeting scheduled; pre-meeting preparation and confirmation reminder queued.',
-    opportunity_created: 'Opportunity created from outreach; commercial follow-up scheduled to advance pipeline stage.',
+    no_response: `Scheduled Step ${params.stepNumber ?? ((enrollment?.currentStepNumber || 1) + 1)} follow-up after ${delayDays} ${businessDaysOnly ? 'business ' : ''}day(s) with no recorded reply — scheduled for ${sched.localScheduledSummary}.`,
+    response_received: `Inbound reply recorded; follow-up queued for owner review at ${sched.localScheduledSummary}.`,
+    meeting_requested: `Contact expressed meeting interest; priority follow-up scheduled for ${sched.localScheduledSummary} to propose time slots.`,
+    meeting_scheduled: `Meeting scheduled; pre-meeting preparation and confirmation reminder queued for ${sched.localScheduledSummary}.`,
+    opportunity_created: `Opportunity created from outreach; commercial follow-up scheduled for ${sched.localScheduledSummary} to advance pipeline stage.`,
     contact_uninterested: 'Contact marked uninterested.',
     opt_out: 'Opt-out honored.',
-    failed_delivery: 'Previous delivery attempt failed; owner review queued to verify recipient address or retry.',
-    owner_requested: 'Explicitly scheduled by owner for relationship follow-up.',
-    overdue_follow_up: 'Existing follow-up passed its scheduled date without completion.',
+    failed_delivery: `Previous delivery attempt failed; owner review queued for ${sched.localScheduledSummary} to verify recipient address or retry.`,
+    owner_requested: `Explicitly scheduled by owner for relationship follow-up at ${sched.localScheduledSummary}.`,
+    overdue_follow_up: `Existing follow-up passed its scheduled date without completion; review queued for ${sched.localScheduledSummary}.`,
   };
 
   const defaultActions: Record<OutreachFollowUpTriggerV2, string> = {
@@ -282,7 +370,7 @@ export function scheduleContextualFollowUp(params: {
     status: 'scheduled',
     scheduledFor: sched.scheduledFor,
     businessDayAdjusted: sched.businessDayAdjusted,
-    recipientTimezone,
+    recipientTimezone: recipientTimezone || sched.resolvedTimezone,
     explanation:
       params.customExplanation?.trim() ||
       `${defaultExplanations[triggerType]}${sched.businessDayAdjusted ? ' (Weekend skipped per business-day policy.)' : ''}`,

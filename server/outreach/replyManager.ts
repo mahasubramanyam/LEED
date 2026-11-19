@@ -3,6 +3,7 @@
 // automatically exits active sequences, triggers global suppression & do_not_contact on unsubscribe,
 // and schedules contextual follow-ups. Never fabricates inbound replies.
 
+import { OUTREACH_REPLY_CLASSIFICATION_SET } from '../../shared/outreachSpecs.js';
 import type {
   OutreachChannelV2,
   OutreachEnrollmentStatusV2,
@@ -208,7 +209,6 @@ function mapClassificationToEnrollmentExit(
     case 'negative':
       return 'exited_uninterested';
     case 'meeting_interest':
-      return 'exited_meeting_booked';
     case 'positive':
     case 'information_request':
     case 'referral':
@@ -258,6 +258,13 @@ export async function recordOutreachReply(
   const campaignId = input.campaignId || matchedMessage?.campaignId;
   const campaign = campaignId ? ws.campaigns.find((c) => c.id === campaignId) : undefined;
   const channel: OutreachChannelV2 = input.channel || matchedMessage?.channel || campaign?.channel || 'email';
+
+  if (
+    input.overrideClassification !== undefined &&
+    !OUTREACH_REPLY_CLASSIFICATION_SET.has(input.overrideClassification)
+  ) {
+    throw new Error(`Invalid reply classification "${String(input.overrideClassification)}".`);
+  }
 
   const autoClassified = await classifyReplyContent(
     input.body,

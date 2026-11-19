@@ -6,6 +6,8 @@ import crypto from 'crypto';
 import {
   OUTREACH_CAMPAIGN_STATUS_SET,
   OUTREACH_CHANNEL_SET,
+  OUTREACH_ENROLLMENT_STATUS_SET,
+  OUTREACH_FOLLOWUP_STATUS_SET,
   OUTREACH_FOLLOWUP_TRIGGER_SET,
   OUTREACH_SUPPRESSION_TYPE_SET,
 } from '../../shared/outreachSpecs.js';
@@ -48,6 +50,7 @@ import {
   checkSuppressionStatus,
   createSuppressionRecord,
   evaluateOutreachCompliance,
+  extractDomainFromEmailOrUrl,
   isEmailSyntaxValid,
   normalizeEmail,
 } from './suppressionCompliance.js';
@@ -128,9 +131,41 @@ export function buildOutreachAnalytics(
       r.classification === 'information_request' ||
       r.classification === 'referral'
   ).length;
-  const meetingsBooked =
-    ws.replies.filter((r) => r.classification === 'meeting_interest').length +
-    ws.followUps.filter((f) => f.triggerType === 'meeting_scheduled').length;
+  // Count ONLY confirmed/scheduled meetings (never unconfirmed meeting_interest replies)
+  // and deduplicate by (campaign, lead, person, scheduled date) to prevent double-counting.
+  const confirmedMeetingKeys = new Set<string>();
+  const confirmedMeetingKeysByCampaign = new Map<string, Set<string>>();
+  const targetsWithScheduledMeeting = new Set<string>();
+
+  for (const f of ws.followUps) {
+    if (f.triggerType !== 'meeting_scheduled') continue;
+    if (f.status === 'cancelled' || f.status === 'suppressed') continue;
+    const dateKey = (f.scheduledFor || f.createdAt || '').slice(0, 10);
+    const targetKey = `${f.campaignId || 'standalone'}|${f.leadId}|${f.personId || ''}`;
+    const dedupeKey = `${targetKey}|${dateKey}`;
+    confirmedMeetingKeys.add(dedupeKey);
+    targetsWithScheduledMeeting.add(targetKey);
+    if (f.campaignId) {
+      const set = confirmedMeetingKeysByCampaign.get(f.campaignId) || new Set<string>();
+      set.add(dedupeKey);
+      confirmedMeetingKeysByCampaign.set(f.campaignId, set);
+    }
+  }
+
+  // Also count enrollments explicitly transitioned to exited_meeting_booked ONLY when not already
+  // represented by a meeting_scheduled follow-up for the same (campaign, lead, person).
+  for (const enr of ws.enrollments) {
+    if (enr.status !== 'exited_meeting_booked') continue;
+    const targetKey = `${enr.campaignId}|${enr.leadId}|${enr.personId || ''}`;
+    if (targetsWithScheduledMeeting.has(targetKey)) continue;
+    const dedupeKey = `${targetKey}|enrollment_booked`;
+    confirmedMeetingKeys.add(dedupeKey);
+    const set = confirmedMeetingKeysByCampaign.get(enr.campaignId) || new Set<string>();
+    set.add(dedupeKey);
+    confirmedMeetingKeysByCampaign.set(enr.campaignId, set);
+  }
+
+  const meetingsBooked = confirmedMeetingKeys.size;
 
   const pendingFollowUps = ws.followUps.filter(
     (f) => f.status === 'scheduled' || f.status === 'pending_approval'
@@ -168,7 +203,7 @@ export function buildOutreachAnalytics(
           r.classification === 'information_request' ||
           r.classification === 'referral'
       ).length,
-      meetingsBooked: cReplies.filter((r) => r.classification === 'meeting_interest').length,
+      meetingsBooked: confirmedMeetingKeysByCampaign.get(c.id)?.size || 0,
       optOuts: cReplies.filter((r) => r.classification === 'unsubscribe').length,
     };
   });
@@ -278,6 +313,12 @@ export function buildOutreachAnalytics(
         status: 'unavailable',
         reason:
           'No inbound IMAP/webhook receiver is active in this environment. Replies are logged via Manual Owner Reply Recording.',
+      },
+      {
+        metric: 'Automated Calendar / Meeting Booking Sync',
+        status: 'unavailable',
+        reason:
+          'No external calendar integration is active. Confirmed meetings are counted strictly from deduplicated owner-recorded meeting_scheduled events or explicit exited_meeting_booked enrollments, never from unconfirmed meeting_interest replies.',
       },
     ],
   };
@@ -861,6 +902,9 @@ export async function transitionEnrollmentStatus(
   reason: string | undefined,
   actor: string
 ): Promise<OutreachEnrollment> {
+  if (!OUTREACH_ENROLLMENT_STATUS_SET.has(status)) {
+    throw new Error(`Invalid enrollment status "${String(status)}".`);
+  }
   const ws = await getOutreachWorkspaceState(facade);
   const enr = ws.enrollments.find((e) => e.id === enrollmentId);
   if (!enr) throw new Error(`Enrollment "${enrollmentId}" not found.`);
@@ -1623,6 +1667,7 @@ export async function markMessageManuallySent(
   ]);
   if (!lead) throw new Error(`Lead "${msg.leadId}" not found.`);
 
+  // Enforce live suppression, do_not_contact, and applicable compliance restrictions across EVERY channel
   const complianceCheck = evaluateOutreachCompliance({
     ws,
     settings,
@@ -1634,20 +1679,13 @@ export async function markMessageManuallySent(
     campaignId: msg.campaignId,
     subject: msg.subject,
     body: msg.body,
-    checkFrequency: false,
+    checkFrequency: true,
   });
-  if (!complianceCheck.passed && msg.channel === 'email') {
-    const suppressionOnly = checkSuppressionStatus({
-      ws,
-      settings,
-      lead,
-      person,
-      recipientEmail: msg.recipientEmail,
-      campaignId: msg.campaignId,
-    });
-    if (suppressionOnly.suppressed) {
-      throw new Error(`Manual send blocked by suppression: ${suppressionOnly.reasons.join(' ')}`);
-    }
+  msg.complianceCheck = complianceCheck;
+  if (!complianceCheck.passed) {
+    msg.updatedAt = new Date().toISOString();
+    await saveOutreachWorkspaceState(facade, ws);
+    throw new Error(`Manual send blocked by compliance/suppression: ${complianceCheck.blockedReasons.join(' ')}`);
   }
 
   const now = new Date().toISOString();
@@ -1754,6 +1792,9 @@ export async function updateFollowUpStatus(
   },
   actor: string
 ): Promise<OutreachFollowUpItem> {
+  if (updates.status !== undefined && !OUTREACH_FOLLOWUP_STATUS_SET.has(updates.status)) {
+    throw new Error(`Invalid follow-up status "${String(updates.status)}".`);
+  }
   const ws = await getOutreachWorkspaceState(facade);
   const item = ws.followUps.find((f) => f.id === followUpId);
   if (!item) throw new Error(`Follow-up "${followUpId}" not found.`);
@@ -1821,18 +1862,28 @@ export async function addSuppressionEntry(
 
   ws.suppressions = [entry, ...ws.suppressions];
 
-  // Immediately exit matching active enrollments and suppress scheduled follow-ups
+  // Build lead domain lookup when domain-based suppression is applied so non-email channels (LinkedIn/phone/custom) also match
+  const leadDomainCache = new Map<string, string | undefined>();
+  const resolveLeadDomain = async (leadId: string): Promise<string | undefined> => {
+    if (leadDomainCache.has(leadId)) return leadDomainCache.get(leadId);
+    const l = leadId === lead?.id ? lead : await facade.getLead(leadId);
+    const d = extractDomainFromEmailOrUrl(l?.email, l?.domain || l?.website);
+    leadDomainCache.set(leadId, d);
+    return d;
+  };
+
+  // 1. Immediately exit matching active/paused enrollments and suppress their scheduled follow-ups
   const now = new Date().toISOString();
   for (const enr of ws.enrollments) {
     if (enr.status !== 'active' && enr.status !== 'paused') continue;
     if (entry.scope === 'campaign' && enr.campaignId !== entry.campaignId) continue;
-    const enrDomain = enr.recipientEmail?.includes('@')
-      ? enr.recipientEmail.toLowerCase().split('@')[1].replace(/^www\./, '')
-      : undefined;
+    const enrDomain =
+      extractDomainFromEmailOrUrl(enr.recipientEmail) ||
+      (entry.domain ? await resolveLeadDomain(enr.leadId) : undefined);
     const match =
       (entry.leadId && enr.leadId === entry.leadId) ||
       (entry.personId && enr.personId === entry.personId) ||
-      (entry.email && enr.recipientEmail && enr.recipientEmail.toLowerCase() === entry.email) ||
+      (entry.email && enr.recipientEmail && normalizeEmail(enr.recipientEmail) === entry.email) ||
       (entry.domain && enrDomain && enrDomain === entry.domain);
     if (match) {
       enr.status = entry.type === 'unsubscribe' ? 'exited_opted_out' : 'exited_suppressed';
@@ -1840,6 +1891,46 @@ export async function addSuppressionEntry(
       enr.nextScheduledAt = undefined;
       enr.updatedAt = now;
       cancelPendingFollowUpsForEnrollment(ws, enr.id, 'suppressed');
+    }
+  }
+
+  // 2. Immediately cancel ALL matching pre-existing draft, pending_approval, and approved messages across ALL channels
+  let cancelledMessagesCount = 0;
+  for (const msg of ws.messages) {
+    if (msg.status !== 'draft' && msg.status !== 'pending_approval' && msg.status !== 'approved') continue;
+    if (entry.scope === 'campaign' && msg.campaignId !== entry.campaignId) continue;
+    const msgDomain =
+      extractDomainFromEmailOrUrl(msg.recipientEmail) ||
+      (entry.domain ? await resolveLeadDomain(msg.leadId) : undefined);
+    const msgMatch =
+      (entry.leadId && msg.leadId === entry.leadId) ||
+      (entry.personId && msg.personId === entry.personId) ||
+      (entry.email && msg.recipientEmail && normalizeEmail(msg.recipientEmail) === entry.email) ||
+      (entry.domain && msgDomain && msgDomain === entry.domain);
+    if (msgMatch) {
+      msg.status = 'cancelled';
+      msg.cancelledAt = now;
+      msg.cancelledBy = input.createdBy;
+      msg.approvedAt = undefined;
+      msg.approvedBy = undefined;
+      msg.lastError = `Cancelled automatically by ${entry.scope} suppression (${entry.type}): ${entry.reason}`;
+      msg.updatedAt = now;
+      cancelledMessagesCount++;
+    }
+  }
+
+  // 3. Also suppress any standalone scheduled/pending_approval follow-ups matching this suppression target
+  for (const f of ws.followUps) {
+    if (f.status !== 'scheduled' && f.status !== 'pending_approval') continue;
+    if (entry.scope === 'campaign' && f.campaignId !== entry.campaignId) continue;
+    const fDomain = entry.domain ? await resolveLeadDomain(f.leadId) : undefined;
+    const fMatch =
+      (entry.leadId && f.leadId === entry.leadId) ||
+      (entry.personId && f.personId === entry.personId) ||
+      (entry.domain && fDomain && fDomain === entry.domain);
+    if (fMatch) {
+      f.status = 'suppressed';
+      f.updatedAt = now;
     }
   }
 
@@ -1857,7 +1948,9 @@ export async function addSuppressionEntry(
     action: 'suppression_added',
     entityType: 'suppression',
     entityId: entry.id,
-    summary: `Added ${entry.scope} suppression (${entry.type}) for ${entry.email || entry.domain || entry.companyName || entry.personName}.`,
+    summary: `Added ${entry.scope} suppression (${entry.type}) for ${entry.email || entry.domain || entry.companyName || entry.personName}${
+      cancelledMessagesCount > 0 ? ` (cancelled ${cancelledMessagesCount} unsent draft/approved message(s))` : ''
+    }.`,
   });
 
   await saveOutreachWorkspaceState(facade, ws);

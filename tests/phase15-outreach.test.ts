@@ -8,8 +8,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import express from 'express';
+import cookieParser from 'cookie-parser';
 
 import { StorageManager } from '../server/storage.js';
 import {
@@ -18,6 +21,9 @@ import {
   listAllCrmInteractions,
 } from '../server/crm/crmStoreHelper.js';
 import { CredentialManager } from '../server/connectors/core/credentialManager.js';
+import { requireOwnerAuth } from '../server/auth/middleware.js';
+import { generateCsrfToken, validateCsrf } from '../server/auth/csrf.js';
+import { registerOutreachRoutes } from '../server/outreach/outreachRoutes.js';
 import { setAiGeneratorOverrideForTests } from '../server/ai/aiProvider.js';
 import { listAuthorizedAgentTools, executeControlledAgentTool } from '../server/ai/agentTools.js';
 import { upsertIcpProfile } from '../server/ai/aiStoreHelper.js';
@@ -61,7 +67,9 @@ import {
 } from '../server/outreach/providerAbstraction.js';
 import {
   computeBusinessAwareScheduleDate,
+  evaluateOverdueFollowUps,
   resolveRecipientTimezone,
+  scheduleContextualFollowUp,
 } from '../server/outreach/followUpScheduler.js';
 import type { CanonicalLead, PersonRecord } from '../server/types.js';
 
@@ -619,6 +627,37 @@ test('Phase 15 — 4. Strict sending authorization, zero simulated delivery, Lin
       assert.equal(failRes.message.status, 'failed');
       assert.equal(failRes.message.deliveryStatus, 'bounced');
       assert.ok(!failRes.message.lastError?.includes(secretKey));
+
+      // H) Cross-draft idempotencyKey collision: a distinct second draft for the SAME
+      // (campaignId, enrollmentId, leadId, personId, stepNumber: 1, channel: 'email')
+      // must be rejected BEFORE calling the provider transport.
+      let collisionTransportCalls = 0;
+      setOutreachProviderTransportForTests(async () => {
+        collisionTransportCalls++;
+        return { status: 200, bodyText: JSON.stringify({ id: 'should-never-be-called' }) };
+      });
+      const dupStep1Draft = await generateOutreachMessageDraft(facade, {
+        campaignId: campaign.id,
+        leadId: lead.id,
+        personId: person.id,
+        enrollmentId: enrollment.id,
+        stepNumber: 1,
+        channel: 'email',
+        actor: 'Owner',
+      });
+      assert.notEqual(dupStep1Draft.id, draft.id);
+      assert.equal(dupStep1Draft.idempotencyKey, draft.idempotencyKey);
+      await approveOutreachMessage(facade, dupStep1Draft.id, 'Owner');
+      await assert.rejects(
+        () =>
+          dispatchApprovedOutreachMessage(facade, {
+            messageId: dupStep1Draft.id,
+            actor: 'Owner',
+            credentialManager: vault,
+          }),
+        /Duplicate dispatch blocked by idempotency protection/
+      );
+      assert.equal(collisionTransportCalls, 0);
     } finally {
       if (prevEncKey === undefined) delete process.env.CONNECTOR_ENCRYPTION_KEY;
       else process.env.CONNECTOR_ENCRYPTION_KEY = prevEncKey;
@@ -809,6 +848,664 @@ test('Phase 15 — 6. Honest analytics, unavailable metrics disclosure, provider
     assert.equal(recheck.totals.optOutsAndSuppressions, 0);
   } finally {
     setOutreachEnvOverrideForTests(null);
+    iso.cleanup();
+  }
+});
+
+test('Phase 15 — 7. Multi-timezone & DST follow-up scheduling + all 10 canonical follow-up triggers', async () => {
+  const iso = createIsolatedStorage();
+  try {
+    const facade = createCrmStorageFacade(iso.store);
+
+    // 1) Multi-timezone & DST conversion verification
+    // America/New_York Winter (EST = UTC-5): 2026-01-15 09:00 EST -> 2026-01-15T14:00:00.000Z
+    const nyWinter = computeBusinessAwareScheduleDate({
+      baseDate: new Date('2026-01-14T16:00:00.000Z'),
+      delayDays: 1,
+      businessDaysOnly: true,
+      sendWindowStartHour: 9,
+      recipientTimezone: 'America/New_York',
+    });
+    assert.equal(nyWinter.resolvedTimezone, 'America/New_York');
+    assert.equal(nyWinter.businessDayAdjusted, false);
+    assert.equal(nyWinter.scheduledFor, '2026-01-15T14:00:00.000Z');
+    assert.equal(nyWinter.localScheduledSummary, '2026-01-15 09:00 (America/New_York)');
+
+    // America/New_York DST Spring-Forward transition (Sun 2026-03-08 02:00 EST -> 03:00 EDT):
+    // Base Fri 2026-03-06 10:00 EST + 1 business day skips Sat/Sun -> Mon 2026-03-09 09:00 EDT (UTC-4) -> 13:00Z
+    const nyDst = computeBusinessAwareScheduleDate({
+      baseDate: new Date('2026-03-06T15:00:00.000Z'),
+      delayDays: 1,
+      businessDaysOnly: true,
+      sendWindowStartHour: 9,
+      recipientTimezone: 'America/New_York',
+    });
+    assert.equal(nyDst.resolvedTimezone, 'America/New_York');
+    assert.equal(nyDst.businessDayAdjusted, true);
+    assert.equal(nyDst.scheduledFor, '2026-03-09T13:00:00.000Z');
+    assert.equal(nyDst.localScheduledSummary, '2026-03-09 09:00 (America/New_York)');
+
+    // Europe/Zurich Summer (CEST = UTC+2) vs Winter (CET = UTC+1)
+    const chSummer = computeBusinessAwareScheduleDate({
+      baseDate: new Date('2026-07-14T10:00:00.000Z'),
+      delayDays: 1,
+      businessDaysOnly: true,
+      sendWindowStartHour: 9,
+      recipientTimezone: resolveRecipientTimezone(undefined, 'CH'),
+    });
+    assert.equal(chSummer.scheduledFor, '2026-07-15T07:00:00.000Z');
+
+    const chWinter = computeBusinessAwareScheduleDate({
+      baseDate: new Date('2026-11-20T10:00:00.000Z'), // Friday -> Monday Nov 23
+      delayDays: 1,
+      businessDaysOnly: true,
+      sendWindowStartHour: 9,
+      recipientTimezone: resolveRecipientTimezone(undefined, 'CH'),
+    });
+    assert.equal(chWinter.businessDayAdjusted, true);
+    assert.equal(chWinter.scheduledFor, '2026-11-23T08:00:00.000Z');
+
+    // Asia/Tokyo (JST = UTC+9, no DST): Mon 2026-11-23 09:00 JST -> 00:00Z
+    const jpSched = computeBusinessAwareScheduleDate({
+      baseDate: new Date('2026-11-20T05:00:00.000Z'), // Friday 14:00 JST -> Monday 09:00 JST
+      delayDays: 1,
+      businessDaysOnly: true,
+      sendWindowStartHour: 9,
+      recipientTimezone: resolveRecipientTimezone(undefined, 'JP'),
+    });
+    assert.equal(jpSched.resolvedTimezone, 'Asia/Tokyo');
+    assert.equal(jpSched.businessDayAdjusted, true);
+    assert.equal(jpSched.scheduledFor, '2026-11-23T00:00:00.000Z');
+
+    // 2) Exercise ALL 10 canonical follow-up triggers deterministically
+    const lead = makeLead({
+      id: 'lead-triggers',
+      companyName: 'Triggers Dynamics Inc',
+      email: 'ops@triggers.example',
+      address: { city: 'New York', country: 'United States', countryCode: 'US' },
+    });
+    iso.store.upsertLead(lead);
+    const person = linkTestPerson(iso.store, lead.id, {
+      fullName: 'Claire Bennett',
+      email: 'c.bennett@triggers.example',
+      countryCode: 'US',
+    });
+    const settings = iso.store.getSettings();
+    const ws = await getOutreachWorkspaceState(facade);
+    const fixedBase = new Date('2026-03-06T15:00:00.000Z'); // Fri EST -> Mon EDT
+
+    // (1) no_response
+    const rNoResp = scheduleContextualFollowUp({
+      ws,
+      settings,
+      lead,
+      person,
+      stepNumber: 2,
+      triggerType: 'no_response',
+      delayDays: 1,
+      businessDaysOnly: true,
+      now: fixedBase,
+    });
+    assert.equal(rNoResp.scheduled, true);
+    assert.equal(rNoResp.item?.scheduledFor, '2026-03-09T13:00:00.000Z');
+    assert.equal(rNoResp.item?.recipientTimezone, 'America/New_York');
+    assert.ok(rNoResp.item?.explanation.includes('2026-03-09 09:00 (America/New_York)'));
+
+    // (2) response_received
+    const rResp = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'response_received', now: fixedBase });
+    assert.equal(rResp.scheduled, true);
+    assert.equal(rResp.item?.triggerType, 'response_received');
+
+    // (3) meeting_requested
+    const rMeetReq = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'meeting_requested', now: fixedBase });
+    assert.equal(rMeetReq.scheduled, true);
+    assert.equal(rMeetReq.item?.triggerType, 'meeting_requested');
+
+    // (4) failed_delivery
+    const rFailed = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'failed_delivery', now: fixedBase });
+    assert.equal(rFailed.scheduled, true);
+    assert.equal(rFailed.item?.triggerType, 'failed_delivery');
+
+    // (5) owner_requested
+    const rOwner = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'owner_requested', now: fixedBase });
+    assert.equal(rOwner.scheduled, true);
+    assert.equal(rOwner.item?.triggerType, 'owner_requested');
+
+    // (6) overdue_follow_up (detected via evaluateOverdueFollowUps & schedulable)
+    const overdueSweep = evaluateOverdueFollowUps(ws, new Date('2026-04-01T00:00:00.000Z'));
+    assert.ok(overdueSweep.overdueItems.length >= 5);
+    const rOverdue = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'overdue_follow_up', now: fixedBase });
+    assert.equal(rOverdue.scheduled, true);
+    assert.equal(rOverdue.item?.triggerType, 'overdue_follow_up');
+
+    // (7) meeting_scheduled — schedules reminder AND cancels earlier no_response nudge
+    const rMeetSched = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'meeting_scheduled', now: fixedBase });
+    assert.equal(rMeetSched.scheduled, true);
+    assert.equal(rMeetSched.item?.triggerType, 'meeting_scheduled');
+    assert.equal(rNoResp.item?.status, 'cancelled');
+
+    // (8) opportunity_created
+    const rOpp = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'opportunity_created', now: fixedBase });
+    assert.equal(rOpp.scheduled, true);
+    assert.equal(rOpp.item?.triggerType, 'opportunity_created');
+
+    // (9) contact_uninterested — cancels all scheduled follow-ups without creating a new nudge
+    const rUnint = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'contact_uninterested', now: fixedBase });
+    assert.equal(rUnint.scheduled, false);
+    assert.ok(rUnint.skippedReason?.includes('uninterested'));
+    assert.equal(rResp.item?.status, 'cancelled');
+    assert.equal(rMeetReq.item?.status, 'cancelled');
+
+    // (10) opt_out — re-queue one scheduled item then verify opt_out suppresses it immediately
+    const rBeforeOptOut = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'owner_requested', delayDays: 3, now: fixedBase });
+    assert.equal(rBeforeOptOut.scheduled, true);
+    const rOptOut = scheduleContextualFollowUp({ ws, settings, lead, person, triggerType: 'opt_out', now: fixedBase });
+    assert.equal(rOptOut.scheduled, false);
+    assert.ok(rOptOut.skippedReason?.includes('Opt-out'));
+    assert.equal(rBeforeOptOut.item?.status, 'suppressed');
+  } finally {
+    iso.cleanup();
+  }
+});
+
+test('Phase 15 — 8. All-channel suppression cancellation of pre-existing drafts & manual-send enforcement across email, linkedin, phone, custom', async () => {
+  const iso = createIsolatedStorage();
+  try {
+    setAiGeneratorOverrideForTests(null);
+    const facade = createCrmStorageFacade(iso.store);
+    const leadA = makeLead({
+      id: 'lead-supp-all',
+      companyName: 'Omnichannel Target GmbH',
+      domain: 'omnitarget.de',
+      website: 'https://omnitarget.de',
+      email: 'contact@omnitarget.de',
+    });
+    const leadB = makeLead({
+      id: 'lead-manual-clean',
+      companyName: 'Clean Manual AG',
+      domain: 'cleanmanual.de',
+      website: 'https://cleanmanual.de',
+      email: 'team@cleanmanual.de',
+    });
+    iso.store.upsertLead(leadA);
+    iso.store.upsertLead(leadB);
+    const personA = linkTestPerson(iso.store, leadA.id, { fullName: 'Stefan Krug', email: 's.krug@omnitarget.de' });
+    const personB = linkTestPerson(iso.store, leadB.id, { fullName: 'Nora Lindner', email: 'n.lindner@cleanmanual.de' });
+
+    await updateOutreachComplianceConfig(
+      facade,
+      { maxContactsPerCompanyPerWeek: 20, maxContactsPerPersonPer14Days: 20 },
+      'Owner'
+    );
+
+    const channels = ['email', 'linkedin', 'phone', 'custom'] as const;
+    const campaigns: Record<string, string> = {};
+    const leadADraftIds: string[] = [];
+
+    for (const ch of channels) {
+      const { campaign } = await createOutreachCampaign(facade, {
+        name: `Camp ${ch}`,
+        objective: `Test ${ch} channel`,
+        channel: ch,
+        createdBy: 'Owner',
+      });
+      campaigns[ch] = campaign.id;
+
+      const dA = await generateOutreachMessageDraft(facade, {
+        campaignId: campaign.id,
+        leadId: leadA.id,
+        personId: personA.id,
+        channel: ch,
+        actor: 'Owner',
+      });
+      // Approve email & linkedin; leave phone & custom as pending_approval to verify BOTH statuses cancel
+      if (ch === 'email' || ch === 'linkedin') {
+        await approveOutreachMessage(facade, dA.id, 'Owner');
+      }
+      leadADraftIds.push(dA.id);
+    }
+
+    // Schedule a standalone follow-up for leadA as well
+    const standaloneFup = await createManualFollowUp(facade, {
+      leadId: leadA.id,
+      personId: personA.id,
+      triggerType: 'owner_requested',
+      actor: 'Owner',
+    });
+    assert.equal(standaloneFup.scheduled, true);
+
+    // Add a global DOMAIN suppression matching leadA (even for linkedin/phone/custom where recipientEmail is undefined!)
+    await addSuppressionEntry(facade, {
+      scope: 'global',
+      type: 'do_not_contact',
+      domain: 'omnitarget.de',
+      reason: 'Domain opted out across all channels',
+      createdBy: 'Owner',
+    });
+
+    // Verify ALL pre-existing drafts/pending_approval/approved across all 4 channels were immediately cancelled
+    // AND approval metadata was cleared, AND standalone follow-up was suppressed.
+    const wsAfterSupp = await getOutreachWorkspaceState(facade);
+    for (const id of leadADraftIds) {
+      const msg = wsAfterSupp.messages.find((m) => m.id === id)!;
+      assert.equal(msg.status, 'cancelled', `Expected message ${msg.channel} to be cancelled on suppression`);
+      assert.equal(msg.approvedAt, undefined);
+      assert.equal(msg.approvedBy, undefined);
+      assert.ok(msg.lastError?.includes('Cancelled automatically by global suppression'));
+    }
+    const fupAfter = wsAfterSupp.followUps.find((f) => f.id === standaloneFup.item!.id)!;
+    assert.equal(fupAfter.status, 'suppressed');
+
+    // Verify previously-approved messages CANNOT bypass a newly added lead do_not_contact restriction via markMessageManuallySent
+    // across ALL 4 channels (email, linkedin, phone, custom)
+    const leadC = makeLead({
+      id: 'lead-dnc-post-approve',
+      companyName: 'PostApprove DNC GmbH',
+      domain: 'postdnc.de',
+      email: 'hi@postdnc.de',
+    });
+    iso.store.upsertLead(leadC);
+    const personC = linkTestPerson(iso.store, leadC.id, { fullName: 'Tobias Brand', email: 't.brand@postdnc.de' });
+    const approvedIdsByChannel: Record<string, string> = {};
+    for (const ch of channels) {
+      const dC = await generateOutreachMessageDraft(facade, {
+        campaignId: campaigns[ch],
+        leadId: leadC.id,
+        personId: personC.id,
+        channel: ch,
+        actor: 'Owner',
+      });
+      await approveOutreachMessage(facade, dC.id, 'Owner');
+      approvedIdsByChannel[ch] = dC.id;
+    }
+
+    // Now mark leadC as do_not_contact directly in CRM (bypassing addSuppressionEntry)
+    iso.store.upsertLead({ ...leadC, status: 'do_not_contact' });
+
+    for (const ch of channels) {
+      await assert.rejects(
+        () =>
+          markMessageManuallySent(facade, {
+            messageId: approvedIdsByChannel[ch],
+            notes: `Attempted manual ${ch} send after DNC`,
+            actor: 'Owner',
+          }),
+        /Manual send blocked by compliance\/suppression/
+      );
+    }
+
+    // Verify legitimate manual execution STILL SUCCEEDS when no suppression or restriction applies (all 4 channels)
+    for (const ch of channels) {
+      const dB = await generateOutreachMessageDraft(facade, {
+        campaignId: campaigns[ch],
+        leadId: leadB.id,
+        personId: personB.id,
+        channel: ch,
+        actor: 'Owner',
+      });
+      await approveOutreachMessage(facade, dB.id, 'Owner');
+      const res = await markMessageManuallySent(facade, {
+        messageId: dB.id,
+        notes: `Legitimate manual ${ch} execution`,
+        actor: 'Owner',
+      });
+      assert.equal(res.message.status, 'manual_sent');
+      assert.equal(res.message.deliveryMethod, 'manual_external');
+    }
+  } finally {
+    iso.cleanup();
+  }
+});
+
+test('Phase 15 — 9. Confirmed meeting analytics (zero inflation from meeting_interest, zero double-counting) & service-level enum validation', async () => {
+  const iso = createIsolatedStorage();
+  try {
+    const facade = createCrmStorageFacade(iso.store);
+    const lead = makeLead({ id: 'lead-meet-1', companyName: 'Confirmed Meetings AG', email: 'hello@confirmed.de' });
+    iso.store.upsertLead(lead);
+    const person = linkTestPerson(iso.store, lead.id, { fullName: 'Eva Hoffmann', email: 'e.hoffmann@confirmed.de' });
+
+    const { campaign } = await createOutreachCampaign(facade, {
+      name: 'Meeting Analytics Campaign',
+      objective: 'Book qualified discovery calls',
+      channel: 'email',
+      createdBy: 'Owner',
+    });
+    const { enrolled } = await enrollRecipientsInCampaign(facade, {
+      campaignId: campaign.id,
+      recipients: [{ leadId: lead.id, personId: person.id }],
+      enrolledBy: 'Owner',
+    });
+    const enr = enrolled[0];
+
+    // 1) Record a meeting_interest reply -> must NOT count as a confirmed booked meeting
+    // and enrollment must exit as exited_replied (NOT exited_meeting_booked)
+    const replyRes = await recordOutreachReply(facade, {
+      leadId: lead.id,
+      personId: person.id,
+      campaignId: campaign.id,
+      enrollmentId: enr.id,
+      body: 'Sounds interesting — let us schedule a call next week!',
+      recordedBy: 'Owner',
+    });
+    assert.equal(replyRes.reply.classification, 'meeting_interest');
+
+    let ws = await getOutreachWorkspaceState(facade);
+    const enrAfterReply = ws.enrollments.find((e) => e.id === enr.id)!;
+    assert.equal(enrAfterReply.status, 'exited_replied');
+
+    let analytics = buildOutreachAnalytics(ws);
+    assert.equal(analytics.totals.repliesReceived, 1);
+    assert.equal(analytics.totals.positiveResponses, 1);
+    assert.equal(analytics.totals.meetingsBooked, 0);
+    assert.equal(analytics.byCampaign[0].meetingsBooked, 0);
+    assert.equal(analytics.byIcp[0].meetingsBooked, 0);
+    assert.ok(analytics.unavailableMetrics.some((m) => m.metric.includes('Calendar / Meeting Booking Sync')));
+
+    // 2) Explicitly schedule a confirmed meeting_scheduled follow-up -> meetingsBooked becomes 1
+    const fup1 = await createManualFollowUp(facade, {
+      leadId: lead.id,
+      personId: person.id,
+      campaignId: campaign.id,
+      enrollmentId: enr.id,
+      triggerType: 'meeting_scheduled',
+      delayDays: 1,
+      actor: 'Owner',
+    });
+    assert.equal(fup1.scheduled, true);
+
+    ws = await getOutreachWorkspaceState(facade);
+    analytics = buildOutreachAnalytics(ws);
+    assert.equal(analytics.totals.meetingsBooked, 1);
+    assert.equal(analytics.byCampaign[0].meetingsBooked, 1);
+    assert.equal(analytics.byIcp[0].meetingsBooked, 1);
+
+    // 3) Also mark enrollment as exited_meeting_booked -> MUST NOT double-count (remains 1!)
+    await transitionEnrollmentStatus(facade, enr.id, 'exited_meeting_booked', 'Owner confirmed calendar invite', 'Owner');
+    ws = await getOutreachWorkspaceState(facade);
+    analytics = buildOutreachAnalytics(ws);
+    assert.equal(analytics.totals.meetingsBooked, 1);
+    assert.equal(analytics.byCampaign[0].meetingsBooked, 1);
+    assert.equal(analytics.byIcp[0].meetingsBooked, 1);
+
+    // 4) Cancel the meeting_scheduled follow-up AND move enrollment to exited_replied -> drops back to 0
+    await updateFollowUpStatus(facade, fup1.item!.id, { status: 'cancelled' }, 'Owner');
+    await transitionEnrollmentStatus(facade, enr.id, 'exited_replied', 'Meeting cancelled', 'Owner');
+    ws = await getOutreachWorkspaceState(facade);
+    analytics = buildOutreachAnalytics(ws);
+    assert.equal(analytics.totals.meetingsBooked, 0);
+    assert.equal(analytics.byCampaign[0].meetingsBooked, 0);
+
+    // 5) Service-level invalid enum rejections (zero silent coercion)
+    await assert.rejects(
+      () => transitionEnrollmentStatus(facade, enr.id, 'bogus_enrollment_status' as any, undefined, 'Owner'),
+      /Invalid enrollment status/
+    );
+    await assert.rejects(
+      () => updateFollowUpStatus(facade, fup1.item!.id, { status: 'bogus_followup_status' as any }, 'Owner'),
+      /Invalid follow-up status/
+    );
+    await assert.rejects(
+      () =>
+        recordOutreachReply(facade, {
+          leadId: lead.id,
+          body: 'Test reply',
+          overrideClassification: 'bogus_reply_class' as any,
+          recordedBy: 'Owner',
+        }),
+      /Invalid reply classification/
+    );
+  } finally {
+    iso.cleanup();
+  }
+});
+
+test('Phase 15 — 10. Isolated HTTP route-level tests: owner auth, CSRF, HTTP 422 enum validation, LinkedIn dispatch refusal & PG credential deletion audit', async () => {
+  const iso = createIsolatedStorage();
+  const prevEncKey = process.env.CONNECTOR_ENCRYPTION_KEY;
+  process.env.CONNECTOR_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+  try {
+    const facade = createCrmStorageFacade(iso.store);
+    const lead = makeLead({ id: 'lead-http-1', companyName: 'HTTP Route GmbH', email: 'api@httproute.de' });
+    iso.store.upsertLead(lead);
+
+    const vault = new CredentialManager();
+    const pgAuditLog: Array<{
+      eventType: string;
+      actorEmail: string;
+      resourceType: string;
+      resourceId: string;
+      metadata: Record<string, unknown>;
+      ipAddress: string;
+    }> = [];
+
+    // Seed campaign, enrollment, follow-up, and approved LinkedIn draft via service layer
+    const { campaign: emailCamp } = await createOutreachCampaign(facade, {
+      name: 'HTTP Email Campaign',
+      objective: 'Verify route validation',
+      channel: 'email',
+      createdBy: 'Owner',
+    });
+    const { enrolled } = await enrollRecipientsInCampaign(facade, {
+      campaignId: emailCamp.id,
+      recipients: [{ leadId: lead.id }],
+      enrolledBy: 'Owner',
+    });
+    const enr = enrolled[0];
+    const fup = await createManualFollowUp(facade, {
+      leadId: lead.id,
+      campaignId: emailCamp.id,
+      enrollmentId: enr.id,
+      triggerType: 'owner_requested',
+      actor: 'Owner',
+    });
+    const { campaign: liCamp } = await createOutreachCampaign(facade, {
+      name: 'HTTP LinkedIn Campaign',
+      objective: 'Manual LinkedIn only',
+      channel: 'linkedin',
+      createdBy: 'Owner',
+    });
+    const liDraft = await generateOutreachMessageDraft(facade, {
+      campaignId: liCamp.id,
+      leadId: lead.id,
+      channel: 'linkedin',
+      actor: 'Owner',
+    });
+    await approveOutreachMessage(facade, liDraft.id, 'Owner');
+
+    // Mount two isolated sub-apps on one local ephemeral HTTP server:
+    // (1) /api/strict/* -> REAL requireOwnerAuth + REAL validateCsrf + REAL registerOutreachRoutes
+    // (2) /api/authed/* -> Test owner session stub + REAL validateCsrf + REAL registerOutreachRoutes
+    const app = express();
+    app.use(express.json());
+    app.use(cookieParser());
+
+    const routeDeps = {
+      getFacade: () => ({ facade, isPg: true }),
+      credentialManager: vault,
+      aiRateLimitMiddleware: (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(),
+      sanitizeApiError: (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback),
+      normalizeClientIp: () => '127.0.0.1',
+      recordPgAuditEvent: async (
+        eventType: string,
+        actorEmail: string,
+        resourceType: string,
+        resourceId: string,
+        metadata: Record<string, unknown>,
+        ipAddress: string
+      ) => {
+        pgAuditLog.push({ eventType, actorEmail, resourceType, resourceId, metadata, ipAddress });
+      },
+    };
+
+    const strictRouter = express.Router();
+    strictRouter.use(requireOwnerAuth);
+    strictRouter.use(validateCsrf);
+    registerOutreachRoutes(strictRouter, routeDeps);
+    app.use('/api/strict', strictRouter);
+
+    const authedRouter = express.Router();
+    authedRouter.use((req, _res, next) => {
+      req.owner = {
+        id: 'owner-http-test',
+        email: 'owner@leed.test',
+        fullName: 'Test Owner',
+        isActive: true,
+        passwordHash: '',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      } as any;
+      next();
+    });
+    authedRouter.use(validateCsrf);
+    registerOutreachRoutes(authedRouter, routeDeps);
+    app.use('/api/authed', authedRouter);
+
+    const srv = http.createServer(app);
+    await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve));
+    const addr = srv.address();
+    const port = typeof addr === 'object' && addr ? addr.port : 0;
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const csrfToken = generateCsrfToken();
+
+    try {
+      // A) Unauthenticated request MUST fail with 401 UNAUTHORIZED
+      const unauthRes = await fetch(`${baseUrl}/api/strict/outreach/overview`);
+      assert.equal(unauthRes.status, 401);
+      const unauthJson = (await unauthRes.json()) as any;
+      assert.equal(unauthJson.code, 'UNAUTHORIZED');
+
+      // B) Invalid session cookie MUST fail with 401 SESSION_EXPIRED
+      const badSessRes = await fetch(`${baseUrl}/api/strict/outreach/overview`, {
+        headers: { Cookie: 'leed_session=invalid_token_xyz' },
+      });
+      assert.equal(badSessRes.status, 401);
+      const badSessJson = (await badSessRes.json()) as any;
+      assert.equal(badSessJson.code, 'SESSION_EXPIRED');
+
+      // C) CSRF cross-origin MUST fail with 403 CSRF_CROSS_ORIGIN
+      const crossOriginRes = await fetch(`${baseUrl}/api/authed/outreach/campaigns`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'https://evil-attacker.example',
+          Cookie: `leed_csrf=${csrfToken}`,
+          'x-leed-csrf-token': csrfToken,
+        },
+        body: JSON.stringify({ name: 'X', objective: 'Y' }),
+      });
+      assert.equal(crossOriginRes.status, 403);
+      assert.equal(((await crossOriginRes.json()) as any).code, 'CSRF_CROSS_ORIGIN');
+
+      // D) Missing CSRF token MUST fail with 403 CSRF_MISSING
+      const noCsrfRes = await fetch(`${baseUrl}/api/authed/outreach/campaigns`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'X', objective: 'Y' }),
+      });
+      assert.equal(noCsrfRes.status, 403);
+      assert.equal(((await noCsrfRes.json()) as any).code, 'CSRF_MISSING');
+
+      // E) Mismatched CSRF token MUST fail with 403 CSRF_INVALID
+      const badCsrfRes = await fetch(`${baseUrl}/api/authed/outreach/campaigns`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `leed_csrf=${csrfToken}`,
+          'x-leed-csrf-token': '0'.repeat(csrfToken.length),
+        },
+        body: JSON.stringify({ name: 'X', objective: 'Y' }),
+      });
+      assert.equal(badCsrfRes.status, 403);
+      assert.equal(((await badCsrfRes.json()) as any).code, 'CSRF_INVALID');
+
+      const validCsrfHeaders = {
+        'Content-Type': 'application/json',
+        Cookie: `leed_csrf=${csrfToken}`,
+        'x-leed-csrf-token': csrfToken,
+      };
+
+      // F) HTTP 422 enum rejection on PATCH /outreach/enrollments/:id (zero silent coercion)
+      const badEnrRes = await fetch(`${baseUrl}/api/authed/outreach/enrollments/${enr.id}`, {
+        method: 'PATCH',
+        headers: validCsrfHeaders,
+        body: JSON.stringify({ status: 'not_a_real_status' }),
+      });
+      assert.equal(badEnrRes.status, 422);
+      assert.equal(((await badEnrRes.json()) as any).code, 'INVALID_ENROLLMENT_STATUS');
+      const wsCheck1 = await getOutreachWorkspaceState(facade);
+      assert.equal(wsCheck1.enrollments.find((e) => e.id === enr.id)?.status, 'active');
+
+      // G) HTTP 422 enum rejection on PATCH /outreach/follow-ups/:id
+      const badFupRes = await fetch(`${baseUrl}/api/authed/outreach/follow-ups/${fup.item!.id}`, {
+        method: 'PATCH',
+        headers: validCsrfHeaders,
+        body: JSON.stringify({ status: 'invalid_fup_status' }),
+      });
+      assert.equal(badFupRes.status, 422);
+      assert.equal(((await badFupRes.json()) as any).code, 'INVALID_FOLLOWUP_STATUS');
+      const wsCheck2 = await getOutreachWorkspaceState(facade);
+      assert.equal(wsCheck2.followUps.find((f) => f.id === fup.item!.id)?.status, 'scheduled');
+
+      // H) HTTP 422 enum rejection on POST /outreach/replies overrideClassification
+      const badReplyRes = await fetch(`${baseUrl}/api/authed/outreach/replies`, {
+        method: 'POST',
+        headers: validCsrfHeaders,
+        body: JSON.stringify({
+          leadId: lead.id,
+          body: 'Thanks for the email.',
+          overrideClassification: 'super_secret_invalid_intent',
+        }),
+      });
+      assert.equal(badReplyRes.status, 422);
+      assert.equal(((await badReplyRes.json()) as any).code, 'INVALID_REPLY_CLASSIFICATION');
+      const wsCheck3 = await getOutreachWorkspaceState(facade);
+      assert.equal(wsCheck3.replies.length, 0);
+
+      // I) LinkedIn automated dispatch unconditionally blocked with HTTP 422
+      const liDispatchRes = await fetch(`${baseUrl}/api/authed/outreach/messages/${liDraft.id}/dispatch`, {
+        method: 'POST',
+        headers: validCsrfHeaders,
+        body: JSON.stringify({}),
+      });
+      assert.equal(liDispatchRes.status, 422);
+      const liDispatchJson = (await liDispatchRes.json()) as any;
+      assert.ok(String(liDispatchJson.error).includes('linkedin'));
+
+      // J) Provider credential store + DELETE emits OUTREACH_PROVIDER_CREDENTIAL_REMOVED PG audit event & workspace audit with ZERO secrets
+      const fakeSecretKey = 're_test_neverLogThisSecretValue987654321';
+      const storeCredRes = await fetch(`${baseUrl}/api/authed/outreach/providers/comm-resend/credentials`, {
+        method: 'POST',
+        headers: validCsrfHeaders,
+        body: JSON.stringify({ credentials: { apiKey: fakeSecretKey } }),
+      });
+      assert.equal(storeCredRes.status, 200);
+
+      const delCredRes = await fetch(`${baseUrl}/api/authed/outreach/providers/comm-resend/credentials`, {
+        method: 'DELETE',
+        headers: validCsrfHeaders,
+      });
+      assert.equal(delCredRes.status, 200);
+
+      const storedAudit = pgAuditLog.find((e) => e.eventType === 'OUTREACH_PROVIDER_CREDENTIAL_STORED');
+      const removedAudit = pgAuditLog.find((e) => e.eventType === 'OUTREACH_PROVIDER_CREDENTIAL_REMOVED');
+      assert.ok(storedAudit, 'Expected OUTREACH_PROVIDER_CREDENTIAL_STORED PG audit event');
+      assert.ok(removedAudit, 'Expected OUTREACH_PROVIDER_CREDENTIAL_REMOVED PG audit event');
+      assert.equal(removedAudit?.resourceType, 'outreach_provider');
+      assert.equal(removedAudit?.resourceId, 'comm-resend');
+      assert.equal(removedAudit?.actorEmail, 'owner@leed.test');
+      assert.ok(!JSON.stringify(pgAuditLog).includes(fakeSecretKey));
+
+      const wsCheck4 = await getOutreachWorkspaceState(facade);
+      assert.ok(wsCheck4.auditLog.some((a) => a.action === 'provider_credential_removed' && a.entityId === 'comm-resend'));
+      assert.ok(!JSON.stringify(wsCheck4.auditLog).includes(fakeSecretKey));
+    } finally {
+      await new Promise<void>((resolve) => srv.close(() => resolve()));
+    }
+  } finally {
+    if (prevEncKey === undefined) delete process.env.CONNECTOR_ENCRYPTION_KEY;
+    else process.env.CONNECTOR_ENCRYPTION_KEY = prevEncKey;
     iso.cleanup();
   }
 });
