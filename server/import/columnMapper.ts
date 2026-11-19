@@ -70,6 +70,13 @@ export const IMPORT_FIELD_CATALOG: FieldCatalogEntry[] = [
   { field: 'relationshipPosition', label: 'Relationship Position', group: 'relationship', description: 'Formal board or appointment position' },
   { field: 'decisionMakerCategory', label: 'Decision-Maker Category', group: 'relationship', description: 'Economic Buyer, Technical Approver, Executive Sponsor, etc.' },
   { field: 'isPrimaryContact', label: 'Is Primary Contact', group: 'relationship', description: 'Boolean flag (true/false/yes/no)' },
+  // Phase 13: Optional CRM Relationship & Interaction Import Fields
+  { field: 'relationshipStatus', label: 'Relationship Status', group: 'relationship', description: 'new, active, warm, nurturing, needs_attention, dormant, archived' },
+  { field: 'relationshipNotes', label: 'Private Relationship Notes', group: 'relationship', description: 'Owner-only private relationship context note' },
+  { field: 'nextFollowUpDate', label: 'Next Follow-Up Date', group: 'relationship', description: 'Planned follow-up date (ISO or locale date)' },
+  { field: 'lastInteractionDate', label: 'Last Interaction Date', group: 'relationship', description: 'Date of last manually recorded interaction' },
+  { field: 'lastInteractionType', label: 'Last Interaction Type', group: 'relationship', description: 'phone_call, meeting, video_meeting, email, linkedin, whatsapp, note...' },
+  { field: 'lastInteractionSummary', label: 'Last Interaction Summary', group: 'relationship', description: 'Summary of prior interaction history' },
 ];
 
 const EXACT_ALIAS_MAP: Record<string, ImportCanonicalField> = {
@@ -208,6 +215,21 @@ const EXACT_ALIAS_MAP: Record<string, ImportCanonicalField> = {
   'buying role': 'decisionMakerCategory',
   'primary contact': 'isPrimaryContact',
   'is primary contact': 'isPrimaryContact',
+  'relationship status': 'relationshipStatus',
+  'relationship notes': 'relationshipNotes',
+  'private notes': 'relationshipNotes',
+  'crm notes': 'relationshipNotes',
+  'next follow up': 'nextFollowUpDate',
+  'next follow up date': 'nextFollowUpDate',
+  'follow up date': 'nextFollowUpDate',
+  'last interaction': 'lastInteractionDate',
+  'last interaction date': 'lastInteractionDate',
+  'last contact date': 'lastInteractionDate',
+  'last interaction type': 'lastInteractionType',
+  'interaction type': 'lastInteractionType',
+  'last interaction summary': 'lastInteractionSummary',
+  'interaction summary': 'lastInteractionSummary',
+  'interaction notes': 'lastInteractionSummary',
 };
 
 function normalizeHeaderToken(header: string): string {

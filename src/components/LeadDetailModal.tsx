@@ -52,6 +52,7 @@ import {
 } from '../types.js';
 import { GeoSelector } from './GeoSelector.tsx';
 import { LeadEnrichmentPanel } from './LeadEnrichmentPanel.tsx';
+import { CompanyRelationshipPanel } from './CompanyRelationshipPanel.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
 import {
   EXPANDED_RELATIONSHIP_TYPES,
@@ -237,6 +238,8 @@ interface LeadDetailModalProps {
   onAddNote: (leadId: string, content: string) => void;
   onAddActivity: (leadId: string, activity: any) => void;
   onInspectUrl: (url: string, leadId: string) => Promise<any>;
+  onOpenPersonProfile?: (personId: string) => void;
+  onRefreshData?: () => void;
 }
 
 export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
@@ -248,8 +251,10 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   onAddNote,
   onAddActivity,
   onInspectUrl,
+  onOpenPersonProfile,
+  onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'enrichment' | 'contacts' | 'web' | 'ai' | 'timeline' | 'notes'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'relationship' | 'enrichment' | 'contacts' | 'web' | 'ai' | 'timeline' | 'notes'>('overview');
   const [newNote, setNewNote] = useState('');
   const [newTag, setNewTag] = useState('');
   const [oppValue, setOppValue] = useState(lead?.opportunityValue?.toString() || '');
@@ -1049,6 +1054,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
         <div className="px-5 border-b border-slate-800 flex space-x-4 bg-slate-950/20 text-xs overflow-x-auto">
           {[
             { id: 'overview', label: 'Lead Facts & Profile' },
+            { id: 'relationship', label: 'Relationship & CRM' },
             { id: 'enrichment', label: 'Enrichment & Quality' },
             { id: 'contacts', label: `Decision-Makers (${linkedPersons.length})` },
             { id: 'web', label: 'Live Web Inspector (SSRF Safe)' },
@@ -1072,6 +1078,16 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
         {/* Tab Content Body */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
+          {/* 1A. RELATIONSHIP & PERSONAL CRM TAB (Phase 13) */}
+          {activeTab === 'relationship' && (
+            <CompanyRelationshipPanel
+              leadId={lead.id}
+              stages={stages}
+              onOpenPersonProfile={onOpenPersonProfile}
+              onDataMutated={onRefreshData}
+            />
+          )}
+
           {/* 1B. ENRICHMENT & DATA QUALITY TAB (Phase 12) */}
           {activeTab === 'enrichment' && (
             <LeadEnrichmentPanel
@@ -2174,6 +2190,16 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                             </div>
 
                             <div className="flex items-center gap-1.5 shrink-0">
+                              {onOpenPersonProfile && (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenPersonProfile(person.id)}
+                                  className="px-2 py-1 rounded text-[10px] font-semibold bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-300 border border-indigo-500/30 transition"
+                                  title="Open Unified Person Relationship Profile"
+                                >
+                                  CRM Profile
+                                </button>
+                              )}
                               {getStatusBadge(person.verificationStatus)}
                               {!relationship.isPrimaryContact && (
                                 <button

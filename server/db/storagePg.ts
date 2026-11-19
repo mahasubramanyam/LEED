@@ -1553,7 +1553,13 @@ export class PostgresStorage {
             ? JSON.parse(rows[0].connector_configs)
             : rows[0].connector_configs;
         if (parsed && typeof parsed === 'object') {
-          return parsed;
+          const filtered: Record<string, ConnectorConfigRecord> = {};
+          for (const [k, v] of Object.entries(parsed as Record<string, ConnectorConfigRecord>)) {
+            if (!k.startsWith('__')) {
+              filtered[k] = v;
+            }
+          }
+          return filtered;
         }
       }
       return {};
@@ -2492,6 +2498,7 @@ export class PostgresStorage {
       seniority: string | null;
       decisionMakingFunction: string | null;
       verificationStatus: PersonRecord['verificationStatus'];
+      customFields: Record<string, string>;
     }>
   ): Promise<PersonRecord | null> {
     const pool = this.getClient();
@@ -2506,7 +2513,7 @@ export class PostgresStorage {
         return null;
       }
       const cur = this.mapRowToPerson(curRes.rows[0]);
-      const cf = { ...(cur.customFields || {}) };
+      const cf = { ...(cur.customFields || {}), ...(updates.customFields || {}) };
       if (updates.bioSummary !== undefined) {
         if (updates.bioSummary) cf.bioSummary = updates.bioSummary;
         else delete cf.bioSummary;

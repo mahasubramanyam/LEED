@@ -14,8 +14,17 @@ import {
   Plus,
   X,
   ShieldCheck,
+  Bookmark,
+  Lock,
+  Pin,
 } from 'lucide-react';
-import { CanonicalLead, PipelineStage } from '../types.ts';
+import {
+  CanonicalLead,
+  PipelineStage,
+  CrmSavedView,
+  CrmPrivateNote,
+  CrmRelationshipStatus,
+} from '../types.ts';
 import { GeoSelector } from './GeoSelector.tsx';
 import { BulkEnrichmentModal } from './BulkEnrichmentModal.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
@@ -25,6 +34,11 @@ import {
   getDefaultIdentifierTypeForCountry,
 } from '../../shared/identifierRegistry.ts';
 import { formatCurrencyLocale, getLocaleForCountry } from '../../shared/localization.ts';
+import {
+  CRM_RELATIONSHIP_STATUSES,
+  getNoteCategoryLabel,
+  getRelationshipStatusLabel,
+} from '../../shared/crmSpecs.ts';
 
 function getCountryFlag(code?: string): string {
   if (!code || code.length !== 2) return '🌐';
@@ -77,6 +91,24 @@ export function LeadsView({
   const [isQuerying, setIsQuerying] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkEnrichModal, setShowBulkEnrichModal] = useState(false);
+
+  // Phase 13: CRM Segmentation, Saved Views & Private Notes Search
+  const [relationshipStatusFilter, setRelationshipStatusFilter] = useState<string>('ALL');
+  const [qualityGradeFilter, setQualityGradeFilter] = useState<string>('ALL');
+  const [followUpDueFilter, setFollowUpDueFilter] = useState<string>('ALL');
+  const [tagFilter, setTagFilter] = useState<string>('');
+  const [savedViews, setSavedViews] = useState<CrmSavedView[]>([]);
+  const [activeSavedViewId, setActiveSavedViewId] = useState<string>('');
+  const [newViewName, setNewViewName] = useState('');
+  const [showSaveViewForm, setShowSaveViewForm] = useState(false);
+  const [savingView, setSavingView] = useState(false);
+
+  const [showNotesSearch, setShowNotesSearch] = useState(false);
+  const [notesQuery, setNotesQuery] = useState('');
+  const [notesPinnedOnly, setNotesPinnedOnly] = useState(false);
+  const [notesResults, setNotesResults] = useState<CrmPrivateNote[]>([]);
+  const [loadingNotes, setLoadingNotes] = useState(false);
+
   const [qualityMap, setQualityMap] = useState<
     Record<
       string,
@@ -89,6 +121,115 @@ export function LeadsView({
       }
     >
   >({});
+
+  const fetchSavedViews = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/crm/saved-views?entityType=company');
+      if (res.ok) {
+        const data = await res.json();
+        setSavedViews(Array.isArray(data.views) ? data.views : []);
+      }
+    } catch {
+      // Non-blocking
+    }
+  }, []);
+
+  const fetchPrivateNotesSearch = useCallback(async () => {
+    setLoadingNotes(true);
+    try {
+      const params = new URLSearchParams();
+      if (notesQuery.trim()) params.set('search', notesQuery.trim());
+      if (notesPinnedOnly) params.set('pinnedOnly', 'true');
+      const res = await apiFetch(`/api/crm/notes?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNotesResults(Array.isArray(data.notes) ? data.notes : []);
+      }
+    } finally {
+      setLoadingNotes(false);
+    }
+  }, [notesQuery, notesPinnedOnly]);
+
+  useEffect(() => {
+    fetchSavedViews();
+  }, [fetchSavedViews]);
+
+  useEffect(() => {
+    if (showNotesSearch) {
+      fetchPrivateNotesSearch();
+    }
+  }, [showNotesSearch, fetchPrivateNotesSearch]);
+
+  const handleSaveCurrentView = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newViewName.trim()) return;
+    setSavingView(true);
+    try {
+      const filters: Record<string, any> = {};
+      if (search.trim()) filters.search = search.trim();
+      if (selectedCountry !== 'ALL') filters.countryCode = selectedCountry;
+      if (selectedCity.trim()) filters.city = selectedCity.trim();
+      if (selectedStage !== 'ALL') filters.pipelineStageId = selectedStage;
+      if (relationshipStatusFilter !== 'ALL') filters.relationshipStatus = relationshipStatusFilter;
+      if (qualityGradeFilter !== 'ALL') filters.qualityGrade = qualityGradeFilter;
+      if (followUpDueFilter !== 'ALL') filters.followUpDue = followUpDueFilter;
+      if (tagFilter.trim()) filters.tag = tagFilter.trim();
+
+      const res = await apiFetch('/api/crm/saved-views', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newViewName.trim(),
+          entityType: 'company',
+          filters,
+        }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setNewViewName('');
+        setShowSaveViewForm(false);
+        await fetchSavedViews();
+        if (created?.id) setActiveSavedViewId(created.id);
+      }
+    } finally {
+      setSavingView(false);
+    }
+  };
+
+  const handleApplySavedView = (viewId: string) => {
+    setActiveSavedViewId(viewId);
+    if (!viewId) {
+      setSearch('');
+      setSelectedCountry('ALL');
+      setSelectedRegion('');
+      setSelectedCity('');
+      setSelectedStage('ALL');
+      setRelationshipStatusFilter('ALL');
+      setQualityGradeFilter('ALL');
+      setFollowUpDueFilter('ALL');
+      setTagFilter('');
+      return;
+    }
+    const found = savedViews.find((v) => v.id === viewId);
+    if (!found) return;
+    const f = (found.filters || {}) as Record<string, any>;
+    setSearch(String(f.search || ''));
+    setSelectedCountry(String(f.countryCode || 'ALL'));
+    setSelectedCity(String(f.city || ''));
+    setSelectedStage(String(f.pipelineStageId || 'ALL'));
+    setRelationshipStatusFilter(String(f.relationshipStatus || 'ALL'));
+    setQualityGradeFilter(String(f.qualityGrade || 'ALL'));
+    setFollowUpDueFilter(String(f.followUpDue || 'ALL'));
+    setTagFilter(String(f.tag || ''));
+  };
+
+  const handleDeleteSavedView = async (viewId: string) => {
+    const res = await apiFetch(`/api/crm/saved-views/${viewId}`, { method: 'DELETE' });
+    if (res.ok) {
+      if (activeSavedViewId === viewId) setActiveSavedViewId('');
+      await fetchSavedViews();
+    }
+  };
 
   const fetchQualitySummary = useCallback(async () => {
     try {
@@ -108,9 +249,52 @@ export function LeadsView({
 
   const uiIdentifierOptions = getUiIdentifierOptions();
 
+  const hasCrmSegmentationActive =
+    relationshipStatusFilter !== 'ALL' ||
+    qualityGradeFilter !== 'ALL' ||
+    followUpDueFilter !== 'ALL' ||
+    tagFilter.trim().length > 0;
+
   const fetchServerLeads = useCallback(async () => {
     setIsQuerying(true);
     try {
+      if (hasCrmSegmentationActive) {
+        const body: Record<string, any> = {};
+        if (search.trim()) body.search = search.trim();
+        if (selectedCountry !== 'ALL') body.countryCode = selectedCountry;
+        if (selectedCity.trim()) body.city = selectedCity.trim();
+        if (selectedStage !== 'ALL') body.pipelineStageId = selectedStage;
+        if (relationshipStatusFilter !== 'ALL') body.relationshipStatus = relationshipStatusFilter as CrmRelationshipStatus;
+        if (qualityGradeFilter !== 'ALL') body.qualityGrade = qualityGradeFilter;
+        if (followUpDueFilter !== 'ALL') body.followUpDue = followUpDueFilter;
+        if (tagFilter.trim()) body.tag = tagFilter.trim();
+
+        const res = await apiFetch('/api/crm/search/companies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          let rows: CanonicalLead[] = Array.isArray(data.items)
+            ? data.items.map((r: any) => r.lead).filter(Boolean)
+            : [];
+          if (selectedRegion.trim()) {
+            const reg = selectedRegion.trim().toLowerCase();
+            rows = rows.filter((l) => (l.address?.region || '').toLowerCase().includes(reg));
+          }
+          if (onlyWithWebsite) rows = rows.filter((l) => Boolean(l.website));
+          if (onlyWithEmail) rows = rows.filter((l) => Boolean(l.email));
+          if (onlyWithPhone) rows = rows.filter((l) => Boolean(l.phone));
+
+          const startIdx = (page - 1) * pageSize;
+          setTotalMatching(rows.length);
+          setTotalPages(Math.max(1, Math.ceil(rows.length / pageSize)));
+          setServerLeads(rows.slice(startIdx, startIdx + pageSize));
+        }
+        return;
+      }
+
       const params = new URLSearchParams();
       if (search.trim()) params.set('search', search.trim());
       if (selectedCountry !== 'ALL') params.set('country', selectedCountry);
@@ -139,6 +323,7 @@ export function LeadsView({
       setIsQuerying(false);
     }
   }, [
+    hasCrmSegmentationActive,
     search,
     selectedCountry,
     selectedRegion,
@@ -148,6 +333,10 @@ export function LeadsView({
     onlyWithWebsite,
     onlyWithEmail,
     onlyWithPhone,
+    relationshipStatusFilter,
+    qualityGradeFilter,
+    followUpDueFilter,
+    tagFilter,
     sortBy,
     sortDir,
     page,
@@ -167,6 +356,10 @@ export function LeadsView({
     onlyWithWebsite,
     onlyWithEmail,
     onlyWithPhone,
+    relationshipStatusFilter,
+    qualityGradeFilter,
+    followUpDueFilter,
+    tagFilter,
     sortBy,
     sortDir,
     pageSize,
@@ -519,6 +712,15 @@ export function LeadsView({
                 </>
               )}
             </div>
+            <button
+              type="button"
+              onClick={() => setShowNotesSearch(true)}
+              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium rounded-lg flex items-center gap-1.5 text-xs transition"
+              title="Search owner-only private CRM notes"
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-500" />
+              <span>Private Notes</span>
+            </button>
             {onCreateLead && (
               <button
                 onClick={() => setIsCreateOpen(true)}
@@ -526,6 +728,119 @@ export function LeadsView({
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>New Lead</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Phase 13: CRM Segmentation & Saved Views Strip */}
+        <div className="flex items-center justify-between flex-wrap gap-2 pt-2.5 border-t border-slate-100 dark:border-slate-800 text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={relationshipStatusFilter}
+              onChange={(e) => setRelationshipStatusFilter(e.target.value)}
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1 focus:outline-hidden"
+            >
+              <option value="ALL">All Relationship Statuses</option>
+              {CRM_RELATIONSHIP_STATUSES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={qualityGradeFilter}
+              onChange={(e) => setQualityGradeFilter(e.target.value)}
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1 focus:outline-hidden"
+            >
+              <option value="ALL">All Quality Grades</option>
+              <option value="A">Grade A</option>
+              <option value="B">Grade B</option>
+              <option value="C">Grade C</option>
+              <option value="D">Grade D</option>
+              <option value="F">Grade F</option>
+            </select>
+
+            <select
+              value={followUpDueFilter}
+              onChange={(e) => setFollowUpDueFilter(e.target.value)}
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1 focus:outline-hidden"
+            >
+              <option value="ALL">All Follow-Up Dates</option>
+              <option value="overdue">Follow-Up Overdue</option>
+              <option value="today">Follow-Up Today</option>
+              <option value="upcoming">Follow-Up Upcoming</option>
+              <option value="has_date">Has Scheduled Follow-Up</option>
+            </select>
+
+            <input
+              type="text"
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              placeholder="Filter tag..."
+              className="w-28 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1 focus:outline-hidden"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Bookmark className="w-3.5 h-3.5 text-slate-400" />
+            <select
+              value={activeSavedViewId}
+              onChange={(e) => handleApplySavedView(e.target.value)}
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1 focus:outline-hidden"
+            >
+              <option value="">Saved Views ({savedViews.length})</option>
+              {savedViews.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+
+            {activeSavedViewId && (
+              <button
+                type="button"
+                onClick={() => handleDeleteSavedView(activeSavedViewId)}
+                className="p-1 text-slate-400 hover:text-rose-500"
+                title="Delete active saved view"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {showSaveViewForm ? (
+              <form onSubmit={handleSaveCurrentView} className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={newViewName}
+                  onChange={(e) => setNewViewName(e.target.value)}
+                  placeholder="View name..."
+                  required
+                  className="w-32 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg px-2 py-1"
+                />
+                <button
+                  type="submit"
+                  disabled={savingView}
+                  className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSaveViewForm(false)}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowSaveViewForm(true)}
+                className="px-2.5 py-1 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 font-medium"
+              >
+                Save View
               </button>
             )}
           </div>
@@ -1032,6 +1347,106 @@ export function LeadsView({
             fetchQualitySummary();
           }}
         />
+      )}
+
+      {/* Phase 13: Owner-Only Private Notes Search Modal */}
+      {showNotesSearch && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-500" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Private CRM Notes Search
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Owner-only private notes across companies, decision-makers, and opportunities
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNotesSearch(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={notesQuery}
+                  onChange={(e) => setNotesQuery(e.target.value)}
+                  placeholder="Search private notes by text, title, or tag..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
+                />
+              </div>
+              <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notesPinnedOnly}
+                  onChange={(e) => setNotesPinnedOnly(e.target.checked)}
+                  className="rounded border-slate-300 dark:border-slate-700"
+                />
+                <span>Pinned only</span>
+              </label>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1 space-y-2.5">
+              {loadingNotes ? (
+                <div className="py-10 text-center text-xs text-slate-400">Searching private notes...</div>
+              ) : notesResults.length === 0 ? (
+                <div className="py-10 text-center text-xs text-slate-400">
+                  No private notes matched your query. Add private notes inside any Company or Person CRM profile.
+                </div>
+              ) : (
+                notesResults.map((note) => {
+                  const linkedLead = note.leadId ? leads.find((l) => l.id === note.leadId) : undefined;
+                  return (
+                    <div
+                      key={note.id}
+                      className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 space-y-1.5 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          {note.pinned && <Pin className="w-3 h-3 text-amber-500" />}
+                          <span>{note.title || getNoteCategoryLabel(note.category)}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {getNoteCategoryLabel(note.category)} · {new Date(note.updatedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+                        {note.content}
+                      </p>
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                        <span>
+                          {note.tags.length > 0 ? note.tags.map((t) => `#${t}`).join(' ') : 'Owner only'}
+                        </span>
+                        {linkedLead && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowNotesSearch(false);
+                              onSelectLead(linkedLead);
+                            }}
+                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                          >
+                            Open {linkedLead.companyName}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

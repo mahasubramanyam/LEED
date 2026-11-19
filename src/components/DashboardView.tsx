@@ -1,27 +1,37 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  TrendingUp,
   Building2,
   DollarSign,
   CheckCircle2,
-  Radio,
   ArrowRight,
   ShieldCheck,
-  Search,
-  Upload,
-  Sparkles,
-  ExternalLink,
   ChevronRight,
-  Clock,
-  Layers
+  Users,
+  Activity,
+  AlertTriangle,
+  Calendar,
+  Bell,
+  Briefcase,
+  RefreshCw,
 } from 'lucide-react';
-import { CanonicalLead, PipelineStage, LeadTask, ConnectorStatus } from '../types.ts';
+import {
+  CanonicalLead,
+  PipelineStage,
+  LeadTask,
+  ConnectorStatus,
+  CrmDashboardSummary,
+} from '../types.ts';
 import {
   summarizeValuesByCurrency,
   formatCurrencyLocale,
   formatNumberLocale,
   getLocaleForCountry,
 } from '../../shared/localization.ts';
+import {
+  getInteractionTypeLabel,
+  getRelationshipStatusLabel,
+} from '../../shared/crmSpecs.ts';
+import { apiFetch } from '../utils/apiFetch.ts';
 
 interface DashboardViewProps {
   leads: CanonicalLead[];
@@ -31,6 +41,8 @@ interface DashboardViewProps {
   onNavigateTab: (tab: string) => void;
   onSelectLead: (lead: CanonicalLead) => void;
   onOpenImport: () => void;
+  onOpenPersonProfile?: (personId: string) => void;
+  onOpenReminderCenter?: () => void;
 }
 
 export function DashboardView({
@@ -41,298 +53,531 @@ export function DashboardView({
   onNavigateTab,
   onSelectLead,
   onOpenImport,
+  onOpenPersonProfile,
+  onOpenReminderCenter,
 }: DashboardViewProps) {
+  const [crmSummary, setCrmSummary] = useState<CrmDashboardSummary | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+
+  const fetchCrmDashboard = useCallback(async () => {
+    setLoadingSummary(true);
+    try {
+      const res = await apiFetch('/api/crm/dashboard');
+      if (res.ok) {
+        setCrmSummary(await res.json());
+      }
+    } catch {
+      // Fall back gracefully to prop-derived real counts
+    } finally {
+      setLoadingSummary(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCrmDashboard();
+  }, [fetchCrmDashboard, leads.length, tasks.length]);
+
   const pipelineSummary = summarizeValuesByCurrency(leads, 'USD');
   const activeConnectorsCount = connectors.filter((c) => c.status === 'healthy').length;
-  const pendingTasks = tasks.filter((t) => !t.completed);
-  const verifiedLeads = leads.filter((l) => l.confidenceScore >= 70);
+  const pendingTasks = tasks.filter((t) => !t.completed && t.status !== 'completed' && t.status !== 'cancelled');
 
-  // Stage distribution (currency-safe per stage)
-  const stageCounts = stages.map((stage) => {
-    const stageLeads = leads.filter((l) => l.pipelineStageId === stage.id);
-    const summary = summarizeValuesByCurrency(stageLeads, 'USD');
-    return {
-      stage,
-      count: stageLeads.length,
-      formattedValue: summary.primaryFormatted,
-      isMixed: summary.isMixed,
-    };
-  });
+  const m = crmSummary?.metrics;
+  const totalCompanies = m ? m.totalCompanies : leads.length;
+  const totalDecisionMakers = m ? m.totalDecisionMakers : 0;
+  const activeRelationships = m ? m.activeRelationships : 0;
+  const newRelationships30d = m ? m.newRelationships30d : 0;
+  const recentInteractions30d = m ? m.recentInteractions30d : 0;
+  const todaysFollowUps = m ? m.todaysFollowUps : 0;
+  const overdueFollowUps = m ? m.overdueFollowUps : 0;
+  const upcomingMeetings7d = m ? m.upcomingMeetings7d : 0;
+  const activeOpportunities = m ? m.activeOpportunities : 0;
 
-  const isEmpty = leads.length === 0;
+  const expectedValueDisplay =
+    m && m.expectedOpportunityValueByCurrency.length > 0
+      ? m.expectedOpportunityValueByCurrency
+          .map((b) => `${b.currency} ${b.totalValue.toLocaleString()}`)
+          .join(' · ')
+      : pipelineSummary.primaryFormatted;
+
+  const weightedValueDisplay =
+    m && m.expectedOpportunityValueByCurrency.length > 0
+      ? m.expectedOpportunityValueByCurrency
+          .map((b) => `${b.currency} ${b.weightedValue.toLocaleString()}`)
+          .join(' · ')
+      : null;
+
+  const stageRows =
+    crmSummary?.opportunitiesByStage && crmSummary.opportunitiesByStage.length > 0
+      ? crmSummary.opportunitiesByStage
+      : stages.map((stage) => {
+          const stageLeads = leads.filter((l) => l.pipelineStageId === stage.id);
+          const summary = summarizeValuesByCurrency(stageLeads, 'USD');
+          return {
+            stageId: stage.id,
+            stageName: stage.name,
+            stageColor: stage.color || '#3b82f6',
+            count: stageLeads.length,
+            totalValue: 0,
+            currencySummary: summary.primaryFormatted,
+          };
+        });
+
+  const handleOpenLeadById = (leadId?: string) => {
+    if (!leadId) return;
+    const found = leads.find((l) => l.id === leadId);
+    if (found) onSelectLead(found);
+  };
+
+  const isEmpty = leads.length === 0 && totalDecisionMakers === 0;
 
   return (
     <div className="space-y-6">
-      {/* KPI Cards Grid */}
+      {/* Header strip with live refresh & Reminder Centre */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-bold text-slate-900 dark:text-white tracking-tight">
+            Personal CRM &amp; Relationship Command Centre
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Real-time metrics computed strictly from your CRM companies, decision-makers, interactions, tasks, and opportunities
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {onOpenReminderCenter && (
+            <button
+              onClick={onOpenReminderCenter}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 inline-flex items-center gap-1.5"
+            >
+              <Bell className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Reminders</span>
+              {(crmSummary?.reminderCounts.total ?? 0) > 0 && (
+                <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                  ({crmSummary?.reminderCounts.total})
+                </span>
+              )}
+            </button>
+          )}
+          <button
+            onClick={fetchCrmDashboard}
+            disabled={loadingSummary}
+            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 hover:text-slate-900 dark:hover:text-white"
+            title="Refresh CRM metrics"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingSummary ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Primary KPI Grid (Row 1: Relationships & Activity) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Leads */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs transition-all hover:border-slate-300 dark:hover:border-slate-700">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span className="text-xs font-semibold uppercase tracking-wider">Total Leads</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-              <Building2 className="w-4 h-4" />
-            </div>
+            <span className="text-xs font-semibold uppercase tracking-wider">Companies &amp; People</span>
+            <Building2 className="w-4 h-4 text-blue-500" />
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900 dark:text-white font-mono tracking-tight">
-              {formatNumberLocale(leads.length)}
+            <span className="text-2xl font-bold text-slate-900 dark:text-white font-mono">
+              {formatNumberLocale(totalCompanies)}
             </span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-              ({formatNumberLocale(verifiedLeads.length)} high-confidence)
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              · {formatNumberLocale(totalDecisionMakers)} decision-makers
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            Official government registry &amp; POI intelligence
+          <p className="text-[11px] text-slate-500 mt-1">
+            {activeRelationships} active relationships · {newRelationships30d} new (30d)
           </p>
         </div>
 
-        {/* Pipeline Value */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs transition-all hover:border-slate-300 dark:hover:border-slate-700">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span className="text-xs font-semibold uppercase tracking-wider">Pipeline Value</span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <DollarSign className="w-4 h-4" />
-            </div>
+            <span className="text-xs font-semibold uppercase tracking-wider">Follow-Ups &amp; Meetings</span>
+            <Calendar className="w-4 h-4 text-amber-500" />
           </div>
-          <div className="mt-3 flex items-baseline gap-2 flex-wrap">
-            <span className="text-2xl font-bold text-slate-900 dark:text-white font-mono tracking-tight">
-              {pipelineSummary.primaryFormatted}
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-slate-900 dark:text-white font-mono">
+              {todaysFollowUps}
             </span>
-            {pipelineSummary.primaryCurrency && (
-              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                {pipelineSummary.isMixed ? 'Mixed ISO 4217' : pipelineSummary.primaryCurrency}
-              </span>
+            <span className="text-xs text-slate-500 dark:text-slate-400">today</span>
+            {overdueFollowUps > 0 && (
+              <span className="text-xs font-semibold text-rose-500">· {overdueFollowUps} overdue</span>
             )}
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            {pipelineSummary.isMixed
-              ? `By currency (no FX applied): ${pipelineSummary.totals.map((b) => b.formatted).join(' · ')}`
-              : 'Across active deal stages'}
+          <p className="text-[11px] text-slate-500 mt-1">
+            {upcomingMeetings7d} upcoming meeting(s) (7d) · {pendingTasks.length} open tasks
           </p>
         </div>
 
-        {/* Pending Follow-ups */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs transition-all hover:border-slate-300 dark:hover:border-slate-700">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span className="text-xs font-semibold uppercase tracking-wider">Follow-up Tasks</span>
-            <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
+            <span className="text-xs font-semibold uppercase tracking-wider">Active Opportunities</span>
+            <DollarSign className="w-4 h-4 text-emerald-500" />
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900 dark:text-white font-mono tracking-tight">
-              {pendingTasks.length}
-            </span>
-            <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-              pending
+          <div className="mt-3 flex items-baseline gap-2 flex-wrap">
+            <span className="text-xl font-bold text-slate-900 dark:text-white font-mono truncate">
+              {expectedValueDisplay}
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            Scheduled owner follow-ups
+          <p className="text-[11px] text-slate-500 mt-1 truncate">
+            {activeOpportunities} open deal(s)
+            {weightedValueDisplay ? ` · Weighted: ${weightedValueDisplay}` : ''}
           </p>
         </div>
 
-        {/* Connectors Status */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs transition-all hover:border-slate-300 dark:hover:border-slate-700">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span className="text-xs font-semibold uppercase tracking-wider">Registry Connectors</span>
-            <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-              <Radio className="w-4 h-4" />
-            </div>
+            <span className="text-xs font-semibold uppercase tracking-wider">Interactions &amp; Health</span>
+            <Activity className="w-4 h-4 text-indigo-500" />
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900 dark:text-white font-mono tracking-tight">
-              {activeConnectorsCount}/6
+            <span className="text-2xl font-bold text-slate-900 dark:text-white font-mono">
+              {recentInteractions30d}
             </span>
-            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-              Operational
-            </span>
+            <span className="text-xs text-slate-500 dark:text-slate-400">logged (30d)</span>
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            Brreg, CH, ABN, OSM, Crawler, AI
+          <p className="text-[11px] text-slate-500 mt-1">
+            {m?.relationshipsNeedingAttentionCount ?? 0} needing attention · {activeConnectorsCount}/{connectors.length} connectors healthy
           </p>
         </div>
       </div>
 
-      {/* Onboarding State for Empty Database */}
       {isEmpty ? (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 shadow-xs">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8">
           <div className="max-w-2xl mx-auto text-center">
-            <div className="w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-4 border border-blue-200 dark:border-blue-900">
-              <ShieldCheck className="w-7 h-7" />
+            <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-4">
+              <ShieldCheck className="w-6 h-6" />
             </div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
-              Welcome to LEED Intelligence Platform
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+              Welcome to LEED Personal CRM &amp; Intelligence Platform
             </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-              Your single-owner Neon PostgreSQL database is connected and ready. Begin by discovering verified businesses or importing existing pipeline records.
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+              Your sole-owner CRM workspace is ready. Discover verified businesses, import existing company and contact records, or start logging business relationships.
             </p>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8 max-w-4xl mx-auto">
-            {/* Step 1: Discover */}
-            <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col justify-between hover:border-blue-300 dark:hover:border-blue-700 transition-all">
+            <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
               <div>
-                <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 flex items-center justify-center font-bold text-xs mb-3 font-mono">
-                  01
-                </div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Discover Global Leads</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-                  Query official registries in Norway (Brreg) &amp; UK (Companies House), validate AU ABNs, and search OpenStreetMap POI.
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                  Search official business registries, directories, and websites worldwide.
                 </p>
               </div>
               <button
                 onClick={() => onNavigateTab('discovery')}
-                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400"
               >
                 Open Discovery Engine <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
-
-            {/* Step 2: Batch Import */}
-            <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col justify-between hover:border-emerald-300 dark:hover:border-emerald-700 transition-all">
+            <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
               <div>
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300 flex items-center justify-center font-bold text-xs mb-3 font-mono">
-                  02
-                </div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Import Existing Data</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-                  Upload existing leads via CSV or JSON with automatic column mapping, duplicate detection, and schema validation.
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Import CRM Relationships</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                  Upload CSV/XLSX companies, decision-makers, notes, and interaction history with dedupe preview.
                 </p>
               </div>
               <button
                 onClick={onOpenImport}
-                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300"
+                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400"
               >
-                Upload CSV/JSON File <ArrowRight className="w-3.5 h-3.5" />
+                Open Import Hub <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
-
-            {/* Step 3: Configure Connectors */}
-            <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col justify-between hover:border-purple-300 dark:hover:border-purple-700 transition-all">
+            <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
               <div>
-                <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300 flex items-center justify-center font-bold text-xs mb-3 font-mono">
-                  03
-                </div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Configure & Calibrate</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-                  Configure Companies House API credentials, review deduplication thresholds, and inspect active sessions in Owner Control Centre.
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Manage Follow-Ups</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                  Track tasks, meetings, private notes, and multi-opportunity pipelines.
                 </p>
               </div>
               <button
-                onClick={() => onNavigateTab('control-centre')}
-                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300"
+                onClick={() => onNavigateTab('tasks')}
+                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400"
               >
-                Open Owner Control Centre <ArrowRight className="w-3.5 h-3.5" />
+                Open Task Manager <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
         </div>
       ) : (
         <>
-          {/* Pipeline Stage Distribution */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs">
+          {/* Opportunities / Pipeline Stage Distribution */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Pipeline Stage Distribution</h3>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  Opportunities &amp; Pipeline by Stage
+                </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Real-time deal progression across stages
+                  Live stage breakdown across active deals and companies
                 </p>
               </div>
               <button
                 onClick={() => onNavigateTab('pipeline')}
                 className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
               >
-                View Pipeline Kanban <ArrowRight className="w-3 h-3" />
+                Open Pipeline &amp; Opportunities <ArrowRight className="w-3 h-3" />
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              {stageCounts.map(({ stage, count, formattedValue }) => (
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+              {stageRows.map((row) => (
                 <div
-                  key={stage.id}
-                  className="p-3.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40"
+                  key={row.stageId}
+                  className="p-3 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30"
                 >
                   <div className="flex items-center gap-1.5">
                     <span
-                      className="w-2.5 h-2.5 rounded-full"
-                      style={{ backgroundColor: stage.color || '#3b82f6' }}
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: row.stageColor || '#3b82f6' }}
                     />
-                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate">
-                      {stage.name}
+                    <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate">
+                      {row.stageName}
                     </span>
                   </div>
-                  <div className="mt-2 text-lg font-bold font-mono text-slate-900 dark:text-white">
-                    {formatNumberLocale(count)}
+                  <div className="mt-1.5 text-base font-bold font-mono text-slate-900 dark:text-white">
+                    {formatNumberLocale(row.count)}
                   </div>
-                  <span className="text-[11px] text-slate-400 font-mono block mt-0.5 truncate" title={formattedValue}>
-                    {formattedValue}
+                  <span className="text-[10px] text-slate-500 font-mono block truncate" title={row.currencySummary}>
+                    {row.currencySummary}
                   </span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Recent Leads / High Confidence Prospects */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Recently Discovered Leads</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Latest verified records added to the pipeline
-                </p>
+          {/* Action Row: Follow-Ups (Overdue + Today), Upcoming Meetings, Relationships Needing Attention */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Today's & Overdue Follow-Ups */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col">
+              <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-500" />
+                  Due Today &amp; Overdue Follow-Ups
+                </h3>
+                <button
+                  onClick={() => onNavigateTab('tasks')}
+                  className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Manage Tasks
+                </button>
               </div>
-              <button
-                onClick={() => onNavigateTab('leads')}
-                className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                View All Leads <ArrowRight className="w-3 h-3" />
-              </button>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 flex-1">
+                {((crmSummary?.overdueFollowUpTasks?.length || 0) + (crmSummary?.todaysFollowUpTasks?.length || 0)) === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-500">
+                    No overdue or due-today follow-up tasks.
+                  </div>
+                ) : (
+                  [...(crmSummary?.overdueFollowUpTasks || []), ...(crmSummary?.todaysFollowUpTasks || [])]
+                    .slice(0, 6)
+                    .map((task) => {
+                      const isOverdue = (crmSummary?.overdueFollowUpTasks || []).some((t) => t.id === task.id);
+                      return (
+                        <div key={task.id} className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <div className="text-xs font-medium text-slate-900 dark:text-white truncate">
+                            {task.title}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                            <span className={isOverdue ? 'text-rose-500 font-semibold' : 'text-amber-500 font-semibold'}>
+                              {isOverdue ? 'Overdue' : 'Today'}
+                            </span>
+                            <span>·</span>
+                            <span>{new Date(task.dueDate).toLocaleDateString()}</span>
+                            {task.companyName && (
+                              <>
+                                <span>·</span>
+                                <button
+                                  onClick={() => handleOpenLeadById(task.leadId)}
+                                  className="text-indigo-500 dark:text-indigo-400 hover:underline"
+                                >
+                                  {task.companyName}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
             </div>
 
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {leads.slice(0, 5).map((lead) => (
-                <div
-                  key={lead.id}
-                  onClick={() => onSelectLead(lead)}
-                  className="px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-900 dark:text-white">
-                        {lead.companyName}
-                      </span>
-                      {lead.registrationNumber && (
-                        <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
-                          {lead.registrationType || 'REG'}: {lead.registrationNumber}
+            {/* Upcoming Meetings & Recent Interactions */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col">
+              <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                  Recent Interactions &amp; Meetings
+                </h3>
+                <span className="text-[11px] text-slate-500">{upcomingMeetings7d} meetings (7d)</span>
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 flex-1">
+                {(crmSummary?.recentInteractions?.length || 0) === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-500">
+                    No manually logged interactions yet. Open any company or person to log a call, meeting, or note.
+                  </div>
+                ) : (
+                  (crmSummary?.recentInteractions || []).slice(0, 6).map((item) => (
+                    <div key={item.id} className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <div className="text-xs font-medium text-slate-900 dark:text-white truncate">
+                        {item.summary}
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                        <span className="text-indigo-500 dark:text-indigo-400">
+                          {getInteractionTypeLabel(item.type)}
                         </span>
-                      )}
-                      <span className="text-[11px] text-slate-400">·</span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {lead.address?.city || lead.address?.country}
-                      </span>
+                        {' · '}
+                        {new Date(item.occurredAt).toLocaleDateString()}
+                        {item.companyName && ` · ${item.companyName}`}
+                        {item.personName && ` · ${item.personName}`}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                      <span>{lead.industry || 'General Business'}</span>
-                      <span>·</span>
-                      <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-                        {lead.confidenceScore}% confidence
-                      </span>
-                    </div>
-                  </div>
+                  ))
+                )}
+              </div>
+            </div>
 
-                  <div className="flex items-center gap-4 shrink-0">
-                    <span className="text-xs font-mono font-bold text-slate-900 dark:text-white">
-                      {formatCurrencyLocale(
-                        lead.opportunityValue || 0,
-                        lead.currency || 'USD',
-                        getLocaleForCountry(lead.address?.countryCode, lead.currency)
-                      )}
-                    </span>
-                    <ChevronRight className="w-4 h-4 text-slate-400" />
+            {/* Relationships Needing Attention */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col">
+              <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
+                  Relationships Needing Attention
+                </h3>
+                <span className="text-[11px] text-slate-500">
+                  {crmSummary?.relationshipsNeedingAttention?.length || 0} flagged
+                </span>
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 flex-1">
+                {(crmSummary?.relationshipsNeedingAttention?.length || 0) === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-500">
+                    All tracked relationships are currently healthy and on schedule.
                   </div>
-                </div>
-              ))}
+                ) : (
+                  (crmSummary?.relationshipsNeedingAttention || []).slice(0, 6).map((item) => (
+                    <button
+                      key={`${item.entityType}-${item.id}`}
+                      onClick={() =>
+                        item.entityType === 'company'
+                          ? handleOpenLeadById(item.id)
+                          : onOpenPersonProfile?.(item.id)
+                      }
+                      className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                          {item.name}
+                        </div>
+                        <div className="text-[11px] text-rose-500 dark:text-rose-400 truncate mt-0.5">
+                          {item.reason}
+                        </div>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Row: Recently Updated Companies & Recently Contacted People */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Recently Updated Companies */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-900 dark:text-white">
+                  Recently Updated Companies
+                </h3>
+                <button
+                  onClick={() => onNavigateTab('leads')}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  All Companies <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {(crmSummary?.recentlyUpdatedCompanies || []).slice(0, 5).map((co) => {
+                  const fullLead = leads.find((l) => l.id === co.id);
+                  return (
+                    <div
+                      key={co.id}
+                      onClick={() => fullLead && onSelectLead(fullLead)}
+                      className="px-5 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                          {co.companyName}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                          {co.industry}
+                          {co.country ? ` · ${co.country}` : ''} · {getRelationshipStatusLabel(co.relationshipStatus)}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        {fullLead && (fullLead.opportunityValue || 0) > 0 && (
+                          <span className="text-xs font-mono font-semibold text-slate-700 dark:text-slate-300">
+                            {formatCurrencyLocale(
+                              fullLead.opportunityValue || 0,
+                              fullLead.currency || 'USD',
+                              getLocaleForCountry(fullLead.address?.countryCode, fullLead.currency)
+                            )}
+                          </span>
+                        )}
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Recently Contacted People */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-emerald-500" />
+                  Recently Contacted Decision-Makers
+                </h3>
+                <button
+                  onClick={() => onNavigateTab('import')}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  People Directory <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {(crmSummary?.recentlyContactedPeople?.length || 0) === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-500">
+                    No person-level interactions logged yet. Record a call or meeting linked to a decision-maker to track contact recency here.
+                  </div>
+                ) : (
+                  (crmSummary?.recentlyContactedPeople || []).slice(0, 5).map((person) => (
+                    <div
+                      key={person.id}
+                      onClick={() => onOpenPersonProfile?.(person.id)}
+                      className="px-5 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                          {person.fullName}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                          {[person.jobTitle, person.companyName].filter(Boolean).join(' · ') || 'Decision-Maker'}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-[11px] font-mono text-slate-600 dark:text-slate-300">
+                          {new Date(person.lastContactDate).toLocaleDateString()}
+                        </div>
+                        {person.lastInteractionType && (
+                          <div className="text-[10px] text-slate-500">
+                            {getInteractionTypeLabel(person.lastInteractionType)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </>

@@ -23,6 +23,8 @@ import {
   ChevronUp,
   Info,
   X,
+  Bookmark,
+  Activity,
 } from 'lucide-react';
 import {
   CanonicalLead,
@@ -31,6 +33,7 @@ import {
   ImportMappingTemplate,
   PersonRecord,
   SocialProviderDoc,
+  CrmSavedView,
 } from '../types.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
 import { ImportWizard } from './ImportWizard.tsx';
@@ -39,11 +42,13 @@ import {
   EXPANDED_RELATIONSHIP_TYPES,
   ROLE_TAXONOMY_SPECS,
 } from '../../shared/decisionMakerRoles.ts';
+import { CRM_RELATIONSHIP_STATUSES } from '../../shared/crmSpecs.ts';
 
 interface ImportWorkspaceProps {
   existingLeads: CanonicalLead[];
   onImportComplete: () => void;
   onSelectLead: (lead: CanonicalLead) => void;
+  onOpenPersonProfile?: (personId: string) => void;
 }
 
 interface EnrichedPersonCompanyLink {
@@ -96,6 +101,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
   existingLeads,
   onImportComplete,
   onSelectLead,
+  onOpenPersonProfile,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'wizard' | 'templates' | 'batches' | 'persons'>(
     'wizard'
@@ -113,7 +119,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
     rows: ImportBatchRowRecord[];
   } | null>(null);
 
-  // Persons directory & Phase 11 filters
+  // Persons directory & Phase 11/13 filters
   const [persons, setPersons] = useState<EnrichedPersonItem[]>([]);
   const [personsSearch, setPersonsSearch] = useState('');
   const [filterLeadId, setFilterLeadId] = useState('');
@@ -122,6 +128,11 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
   const [filterDepartment, setFilterDepartment] = useState('');
   const [filterVerification, setFilterVerification] = useState('all');
   const [filterEmployment, setFilterEmployment] = useState('all');
+  const [filterRelStatus, setFilterRelStatus] = useState('all');
+  const [personSavedViews, setPersonSavedViews] = useState<CrmSavedView[]>([]);
+  const [activePersonViewId, setActivePersonViewId] = useState('');
+  const [newPersonViewName, setNewPersonViewName] = useState('');
+  const [showSavePersonView, setShowSavePersonView] = useState(false);
   const [loadingPersons, setLoadingPersons] = useState(false);
   const [personActionFeedback, setPersonActionFeedback] = useState<string | null>(null);
 
@@ -188,6 +199,18 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
     }
   }, []);
 
+  const loadPersonSavedViews = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/crm/saved-views?entityType=person');
+      if (res.ok) {
+        const data = await res.json();
+        setPersonSavedViews(Array.isArray(data.views) ? data.views : []);
+      }
+    } catch {
+      // Non-blocking
+    }
+  }, []);
+
   const loadPersons = useCallback(async () => {
     setLoadingPersons(true);
     try {
@@ -207,7 +230,27 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
       const res = await apiFetch(`/api/persons${qs ? `?${qs}` : ''}`);
       if (res.ok) {
         const data = await res.json();
-        setPersons(data.persons || []);
+        let list: EnrichedPersonItem[] = data.persons || [];
+        if (filterRelStatus && filterRelStatus !== 'all') {
+          const segRes = await apiFetch('/api/crm/search/persons', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              search: personsSearch.trim() || undefined,
+              leadId: filterLeadId || undefined,
+              countryCode: filterCountry.trim() ? filterCountry.trim().toUpperCase() : undefined,
+              relationshipStatus: filterRelStatus,
+            }),
+          });
+          if (segRes.ok) {
+            const segData = await segRes.json();
+            const allowedIds = new Set<string>(
+              (segData.items || []).map((r: any) => r.person?.id).filter(Boolean)
+            );
+            list = list.filter((p) => allowedIds.has(p.id));
+          }
+        }
+        setPersons(list);
       }
     } finally {
       setLoadingPersons(false);
@@ -220,7 +263,64 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
     filterDepartment,
     filterVerification,
     filterEmployment,
+    filterRelStatus,
   ]);
+
+  useEffect(() => {
+    if (activeSubTab === 'persons') {
+      loadPersonSavedViews();
+    }
+  }, [activeSubTab, loadPersonSavedViews]);
+
+  const handleSavePersonView = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPersonViewName.trim()) return;
+    const res = await apiFetch('/api/crm/saved-views', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newPersonViewName.trim(),
+        entityType: 'person',
+        filters: {
+          search: personsSearch.trim() || undefined,
+          leadId: filterLeadId || undefined,
+          countryCode: filterCountry.trim() || undefined,
+          role: filterRole !== 'all' ? filterRole : undefined,
+          department: filterDepartment.trim() || undefined,
+          relationshipStatus: filterRelStatus !== 'all' ? filterRelStatus : undefined,
+        },
+      }),
+    });
+    if (res.ok) {
+      const created = await res.json();
+      setNewPersonViewName('');
+      setShowSavePersonView(false);
+      await loadPersonSavedViews();
+      if (created?.id) setActivePersonViewId(created.id);
+    }
+  };
+
+  const handleApplyPersonView = (viewId: string) => {
+    setActivePersonViewId(viewId);
+    if (!viewId) {
+      setPersonsSearch('');
+      setFilterLeadId('');
+      setFilterCountry('');
+      setFilterRole('all');
+      setFilterDepartment('');
+      setFilterRelStatus('all');
+      return;
+    }
+    const found = personSavedViews.find((v) => v.id === viewId);
+    if (!found) return;
+    const f = (found.filters || {}) as Record<string, any>;
+    setPersonsSearch(String(f.search || ''));
+    setFilterLeadId(String(f.leadId || ''));
+    setFilterCountry(String(f.countryCode || ''));
+    setFilterRole(String(f.role || 'all'));
+    setFilterDepartment(String(f.department || ''));
+    setFilterRelStatus(String(f.relationshipStatus || 'all'));
+  };
 
   const loadSocialProviders = useCallback(async () => {
     setLoadingProviders(true);
@@ -868,6 +968,58 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
               <option value="unverified">Unverified Search</option>
             </select>
 
+            <select
+              value={filterRelStatus}
+              onChange={(e) => setFilterRelStatus(e.target.value)}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+            >
+              <option value="all">All Relationship Statuses</option>
+              {CRM_RELATIONSHIP_STATUSES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+
+            <div className="flex items-center gap-1.5">
+              <Bookmark className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <select
+                value={activePersonViewId}
+                onChange={(e) => handleApplyPersonView(e.target.value)}
+                className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+              >
+                <option value="">Saved Views ({personSavedViews.length})</option>
+                {personSavedViews.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+              {showSavePersonView ? (
+                <form onSubmit={handleSavePersonView} className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={newPersonViewName}
+                    onChange={(e) => setNewPersonViewName(e.target.value)}
+                    placeholder="Name..."
+                    required
+                    className="w-20 px-1.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  />
+                  <button type="submit" className="px-2 py-1 text-[11px] bg-blue-600 text-white rounded">
+                    Save
+                  </button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowSavePersonView(true)}
+                  className="px-2 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+                >
+                  Save
+                </button>
+              )}
+            </div>
+
             <button
               type="button"
               onClick={() => {
@@ -878,6 +1030,8 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                 setFilterDepartment('');
                 setFilterVerification('all');
                 setFilterEmployment('all');
+                setFilterRelStatus('all');
+                setActivePersonViewId('');
               }}
               className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
@@ -1049,7 +1203,17 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
 
                     {/* Action Bar */}
                     <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap text-[11px]">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5">
+                        {onOpenPersonProfile && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenPersonProfile(p.id)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-medium transition"
+                          >
+                            <Activity className="w-3 h-3" />
+                            <span>Relationship Profile</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() =>

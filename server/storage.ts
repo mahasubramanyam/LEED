@@ -842,7 +842,14 @@ export class StorageManager implements ImportStorageAdapter {
   }
 
   public getConnectorConfigs(): Record<string, ConnectorConfigRecord> {
-    return this.db.connectorConfigs || this.db.settings?.connectorConfigs || {};
+    const raw = this.db.connectorConfigs || this.db.settings?.connectorConfigs || {};
+    const filtered: Record<string, ConnectorConfigRecord> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (!k.startsWith('__')) {
+        filtered[k] = v;
+      }
+    }
+    return filtered;
   }
 
   public updateConnectorConfig(
@@ -851,8 +858,8 @@ export class StorageManager implements ImportStorageAdapter {
   ): ConnectorConfigRecord {
     ensureConnectorsRegistered();
     const meta = connectorRegistry.getById(connectorId)?.getMetadata();
-    const currentConfigs = this.getConnectorConfigs();
-    const existing = currentConfigs[connectorId];
+    const rawConfigs = this.db.connectorConfigs || this.db.settings?.connectorConfigs || {};
+    const existing = rawConfigs[connectorId];
     const nextConfig: ConnectorConfigRecord = {
       connectorId,
       enabled: partial.enabled ?? existing?.enabled ?? true,
@@ -866,7 +873,7 @@ export class StorageManager implements ImportStorageAdapter {
     };
 
     this.db.connectorConfigs = {
-      ...currentConfigs,
+      ...rawConfigs,
       [connectorId]: nextConfig,
     };
     if (this.db.settings) {
@@ -1328,6 +1335,7 @@ export class StorageManager implements ImportStorageAdapter {
       seniority: string | null;
       decisionMakingFunction: string | null;
       verificationStatus: PersonRecord['verificationStatus'];
+      customFields: Record<string, string>;
     }>
   ): PersonRecord | null {
     if (!this.db.persons) this.db.persons = [];
@@ -1336,7 +1344,7 @@ export class StorageManager implements ImportStorageAdapter {
 
     const cur = this.db.persons[idx];
     const now = new Date().toISOString();
-    const cf = { ...(cur.customFields || {}) };
+    const cf = { ...(cur.customFields || {}), ...(updates.customFields || {}) };
     if (updates.bioSummary !== undefined) {
       if (updates.bioSummary) cf.bioSummary = updates.bioSummary;
       else delete cf.bioSummary;

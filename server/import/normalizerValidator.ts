@@ -705,6 +705,61 @@ export function normalizeAndValidateMappedRow(input: {
       companyCustom.rawImportedCompanyStatus = fields.companyStatus.trim();
     }
 
+    // Phase 13: Optional relationship metadata, private note, and historical interaction import
+    const rawRelStatus = fields.relationshipStatus?.trim().toLowerCase().replace(/\s+/g, '_');
+    const validRelStatuses = new Set(['new', 'active', 'warm', 'nurturing', 'needs_attention', 'dormant', 'archived']);
+    const parsedFollowUpIso = fields.nextFollowUpDate?.trim()
+      ? parseLocaleDateToIso(fields.nextFollowUpDate, options.dateLocale)
+      : undefined;
+    if (rawRelStatus || parsedFollowUpIso) {
+      const relMeta = {
+        relationshipStatus: rawRelStatus && validRelStatuses.has(rawRelStatus) ? rawRelStatus : 'new',
+        nextFollowUpDate: parsedFollowUpIso ? `${parsedFollowUpIso}T09:00:00.000Z` : undefined,
+        tags,
+        updatedAt: new Date().toISOString(),
+      };
+      companyCustom.crmRelationshipMeta = JSON.stringify(relMeta);
+    }
+    if (fields.relationshipNotes?.trim()) {
+      const nowIso = new Date().toISOString();
+      companyCustom.crmPrivateNotes = JSON.stringify([
+        {
+          id: `note-imp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          entityType: 'company',
+          content: fields.relationshipNotes.trim().slice(0, 5000),
+          category: 'relationship',
+          tags: ['imported'],
+          pinned: false,
+          visibility: 'owner_only',
+          author: 'Import Hub (Owner)',
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+      ]);
+    }
+    if (fields.lastInteractionSummary?.trim() || fields.lastInteractionDate?.trim()) {
+      const nowIso = new Date().toISOString();
+      const parsedIntDate = parseLocaleDateToIso(fields.lastInteractionDate, options.dateLocale);
+      const rawIntType = fields.lastInteractionType?.trim().toLowerCase().replace(/\s+/g, '_');
+      const validIntTypes = new Set([
+        'phone_call', 'meeting', 'video_meeting', 'email', 'linkedin', 'whatsapp',
+        'introduction', 'referral', 'business_discussion', 'negotiation', 'note', 'custom',
+      ]);
+      companyCustom.crmInteractions = JSON.stringify([
+        {
+          id: `int-imp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          type: rawIntType && validIntTypes.has(rawIntType) ? rawIntType : 'note',
+          occurredAt: parsedIntDate ? `${parsedIntDate}T12:00:00.000Z` : nowIso,
+          summary: (fields.lastInteractionSummary?.trim() || 'Imported historical interaction').slice(0, 500),
+          followUpDate: parsedFollowUpIso ? `${parsedFollowUpIso}T09:00:00.000Z` : undefined,
+          recordingMode: 'manual',
+          recordedBy: 'Import Hub (Owner)',
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+      ]);
+    }
+
     company = {
       companyName: companyName || undefined,
       legalName: fields.legalName?.trim() || undefined,

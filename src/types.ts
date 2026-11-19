@@ -147,12 +147,35 @@ export interface LeadNote {
 export interface LeadTask {
   id: string;
   title: string;
+  description?: string;
   dueDate: string;
+  reminderDate?: string;
   priority: 'low' | 'medium' | 'high';
+  category?:
+    | 'follow_up'
+    | 'call'
+    | 'meeting'
+    | 'proposal'
+    | 'verification'
+    | 'research'
+    | 'relationship_review'
+    | 'other';
+  status?: 'pending' | 'in_progress' | 'waiting' | 'completed' | 'cancelled';
   completed: boolean;
+  completedAt?: string;
+  notes?: string;
+  outcome?: string;
+  recurrence?: {
+    frequency: 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly';
+    intervalDays?: number;
+    endDate?: string;
+  };
   assignedTo: string;
   leadId: string;
+  personId?: string;
+  opportunityId?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface LeadActivity {
@@ -1518,5 +1541,355 @@ export interface ReverificationSchedulePolicy {
   maxBatchSize: number;
   updatedAt: string;
 }
+
+// ============================================================================
+// PHASE 13: PERSONAL CRM & RELATIONSHIP MANAGEMENT TYPES
+// ============================================================================
+
+export type CrmInteractionType =
+  | 'phone_call'
+  | 'meeting'
+  | 'video_meeting'
+  | 'email'
+  | 'linkedin'
+  | 'whatsapp'
+  | 'introduction'
+  | 'referral'
+  | 'business_discussion'
+  | 'negotiation'
+  | 'note'
+  | 'custom';
+
+export interface CrmAttachmentMetadata {
+  filename: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  referenceUrl?: string;
+  note?: string;
+}
+
+export interface CrmInteraction {
+  id: string;
+  leadId?: string;
+  personId?: string;
+  opportunityId?: string;
+  type: CrmInteractionType;
+  customTypeLabel?: string;
+  occurredAt: string;
+  summary: string;
+  detailedNotes?: string;
+  outcome?: string;
+  nextAction?: string;
+  followUpDate?: string;
+  attachments?: CrmAttachmentMetadata[];
+  recordingMode: 'manual';
+  recordedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CrmNoteCategory =
+  | 'general'
+  | 'relationship'
+  | 'meeting_prep'
+  | 'negotiation'
+  | 'follow_up'
+  | 'personal_context'
+  | 'risk_flag';
+
+export interface CrmPrivateNote {
+  id: string;
+  entityType: 'company' | 'person' | 'interaction' | 'opportunity' | 'follow_up';
+  leadId?: string;
+  personId?: string;
+  interactionId?: string;
+  opportunityId?: string;
+  title?: string;
+  content: string;
+  category: CrmNoteCategory;
+  tags: string[];
+  pinned: boolean;
+  visibility: 'owner_only';
+  author: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OpportunityStageChange {
+  id: string;
+  fromStageId?: string;
+  fromStageName?: string;
+  toStageId: string;
+  toStageName: string;
+  changedAt: string;
+  changedBy: string;
+  reason?: string;
+}
+
+export interface CrmOpportunity {
+  id: string;
+  leadId: string;
+  personId?: string;
+  title: string;
+  description?: string;
+  estimatedValue: number;
+  currency: string;
+  expectedCloseDate?: string;
+  pipelineStageId: string;
+  probability: number;
+  source?: string;
+  nextAction?: string;
+  nextActionDate?: string;
+  notes?: string;
+  status: 'open' | 'won' | 'lost' | 'on_hold';
+  winLossReason?: string;
+  stageHistory: OpportunityStageChange[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CrmRelationshipStatus =
+  | 'new'
+  | 'active'
+  | 'warm'
+  | 'nurturing'
+  | 'needs_attention'
+  | 'dormant'
+  | 'archived';
+
+export interface RelationshipMetadata {
+  relationshipStatus: CrmRelationshipStatus;
+  nextFollowUpDate?: string;
+  scheduledReviewDate?: string;
+  tags: string[];
+  ownerOverrideLevel?: 'strong' | 'active' | 'developing' | 'cooling' | 'inactive';
+  ownerAnnotation?: string;
+  updatedAt?: string;
+}
+
+export interface RelationshipEngagementFactor {
+  key: string;
+  label: string;
+  points: number;
+  maxPoints: number;
+  detail: string;
+}
+
+export interface RelationshipEngagementAssessment {
+  score: number;
+  level: 'strong' | 'active' | 'developing' | 'cooling' | 'inactive';
+  effectiveLevel: 'strong' | 'active' | 'developing' | 'cooling' | 'inactive';
+  isDerived: true;
+  basis: 'derived_from_crm_activity';
+  transparencyLabel: string;
+  ownerOverrideLevel?: 'strong' | 'active' | 'developing' | 'cooling' | 'inactive';
+  ownerAnnotation?: string;
+  factors: RelationshipEngagementFactor[];
+  metrics: {
+    totalInteractions: number;
+    interactionsLast30Days: number;
+    interactionsLast90Days: number;
+    daysSinceLastInteraction: number | null;
+    completedTasksCount: number;
+    overdueTasksCount: number;
+    openOpportunitiesCount: number;
+    relationshipAgeDays: number;
+  };
+  evaluatedAt: string;
+}
+
+export interface CompanyRelationshipProfile {
+  lead: CanonicalLead;
+  relationshipMeta: RelationshipMetadata;
+  engagement: RelationshipEngagementAssessment;
+  decisionMakers: LinkedPersonWithRelationship[];
+  interactions: CrmInteraction[];
+  privateNotes: CrmPrivateNote[];
+  tasks: LeadTask[];
+  opportunities: CrmOpportunity[];
+  lastInteractionAt?: string;
+  nextPlannedInteractionAt?: string;
+  nextPlannedSummary?: string;
+  enrichmentSummary: {
+    confidenceScore: number;
+    registryVerificationState: string;
+    lastVerifiedAt?: string;
+    dataQualityScore?: number;
+    dataQualityGrade?: string;
+  };
+}
+
+export interface PersonRelationshipProfile {
+  person: PersonRecord;
+  relationshipMeta: RelationshipMetadata;
+  engagement: RelationshipEngagementAssessment;
+  currentCompanies: Array<{
+    relationship: CompanyPersonRelationship;
+    company?: Pick<CanonicalLead, 'id' | 'companyName' | 'industry' | 'website' | 'address' | 'pipelineStageId' | 'companyStatus'>;
+  }>;
+  historicalCompanies: Array<{
+    relationship: CompanyPersonRelationship;
+    company?: Pick<CanonicalLead, 'id' | 'companyName' | 'industry' | 'website' | 'address' | 'pipelineStageId' | 'companyStatus'>;
+  }>;
+  interactions: CrmInteraction[];
+  privateNotes: CrmPrivateNote[];
+  tasks: LeadTask[];
+  opportunities: CrmOpportunity[];
+  lastContactDate?: string;
+  nextFollowUpDate?: string;
+  nextPlannedSummary?: string;
+}
+
+export interface CrmSavedView {
+  id: string;
+  name: string;
+  entityType: 'company' | 'person';
+  description?: string;
+  filters: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CrmReminderItem {
+  id: string;
+  kind:
+    | 'overdue_task'
+    | 'today_task'
+    | 'upcoming_task'
+    | 'interaction_follow_up'
+    | 'upcoming_meeting'
+    | 'relationship_review'
+    | 'needs_attention';
+  severity: 'urgent' | 'high' | 'medium' | 'info';
+  title: string;
+  detail: string;
+  dueAt?: string;
+  leadId?: string;
+  companyName?: string;
+  personId?: string;
+  personName?: string;
+  taskId?: string;
+  interactionId?: string;
+  opportunityId?: string;
+}
+
+export interface CrmReminderCenterResponse {
+  generatedAt: string;
+  counts: {
+    total: number;
+    overdueTasks: number;
+    todayFollowUps: number;
+    upcomingMeetings: number;
+    relationshipReviews: number;
+    needsAttention: number;
+  };
+  reminders: CrmReminderItem[];
+  schedulerStatus: {
+    backgroundDaemonActive: false;
+    automatedNotificationsConfigured: false;
+    deliveryMode: 'in_app_on_demand';
+    honestNote: string;
+  };
+}
+
+export interface CrmDashboardSummary {
+  generatedAt: string;
+  metrics: {
+    totalCompanies: number;
+    totalDecisionMakers: number;
+    activeRelationships: number;
+    newRelationships30d: number;
+    recentInteractions30d: number;
+    todaysFollowUps: number;
+    overdueFollowUps: number;
+    upcomingMeetings7d: number;
+    activeOpportunities: number;
+    expectedOpportunityValueByCurrency: Array<{ currency: string; totalValue: number; weightedValue: number; count: number }>;
+    relationshipsNeedingAttentionCount: number;
+  };
+  opportunitiesByStage: Array<{
+    stageId: string;
+    stageName: string;
+    stageColor: string;
+    count: number;
+    totalValue: number;
+    currencySummary: string;
+  }>;
+  recentInteractions: Array<CrmInteraction & { companyName?: string; personName?: string }>;
+  todaysFollowUpTasks: Array<LeadTask & { companyName?: string; personName?: string }>;
+  overdueFollowUpTasks: Array<LeadTask & { companyName?: string; personName?: string }>;
+  upcomingMeetings: Array<{
+    id: string;
+    source: 'task' | 'interaction';
+    title: string;
+    scheduledAt: string;
+    leadId?: string;
+    companyName?: string;
+    personId?: string;
+    personName?: string;
+  }>;
+  recentlyUpdatedCompanies: Array<{
+    id: string;
+    companyName: string;
+    industry: string;
+    country?: string;
+    relationshipStatus: CrmRelationshipStatus;
+    updatedAt: string;
+    lastInteractionAt?: string;
+  }>;
+  recentlyContactedPeople: Array<{
+    id: string;
+    fullName: string;
+    jobTitle?: string;
+    companyName?: string;
+    leadId?: string;
+    lastContactDate: string;
+    lastInteractionType?: CrmInteractionType;
+  }>;
+  relationshipsNeedingAttention: Array<{
+    entityType: 'company' | 'person';
+    id: string;
+    name: string;
+    subtitle?: string;
+    reason: string;
+    daysSinceLastInteraction: number | null;
+    overdueTasksCount: number;
+    relationshipStatus: CrmRelationshipStatus;
+  }>;
+  reminderCounts: CrmReminderCenterResponse['counts'];
+}
+
+export interface CrmCompanySearchFilter {
+  search?: string;
+  countryCode?: string;
+  industry?: string;
+  businessType?: string;
+  companyStatus?: string;
+  pipelineStageId?: string;
+  relationshipStatus?: CrmRelationshipStatus | 'all';
+  minQualityScore?: number;
+  qualityGrade?: 'A' | 'B' | 'C' | 'D' | 'F' | 'all';
+  lastInteractionWithinDays?: number;
+  noInteractionForDays?: number;
+  followUpDue?: 'all' | 'overdue' | 'today' | 'upcoming' | 'has_date';
+  tags?: string[];
+}
+
+export interface CrmPersonSearchFilter {
+  search?: string;
+  leadId?: string;
+  roleCategory?: string;
+  department?: string;
+  seniority?: string;
+  country?: string;
+  verificationStatus?: string;
+  employmentStatus?: 'current' | 'former' | 'all';
+  relationshipStatus?: CrmRelationshipStatus | 'all';
+  lastInteractionWithinDays?: number;
+  noInteractionForDays?: number;
+  followUpDue?: 'all' | 'overdue' | 'today' | 'upcoming' | 'has_date';
+  tags?: string[];
+}
+
 
 

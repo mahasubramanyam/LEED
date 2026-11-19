@@ -56,6 +56,46 @@ import {
   previewPersonEnrichment,
 } from './server/enrichment/enrichmentOrchestrator.js';
 import {
+  createCrmInteraction,
+  createCrmOpportunity,
+  createCrmPrivateNote,
+  createCrmStorageFacade,
+  createExtendedTask,
+  deleteCrmInteraction,
+  deleteCrmOpportunity,
+  deleteCrmPrivateNote,
+  deleteExtendedTask,
+  deleteSavedView,
+  listAllCrmInteractions,
+  listAllCrmOpportunities,
+  listAllCrmPrivateNotes,
+  listAllExtendedTasks,
+  listSavedViews,
+  saveCrmView,
+  updateCompanyRelationshipMeta,
+  updateCrmInteraction,
+  updateCrmOpportunity,
+  updateCrmPrivateNote,
+  updateExtendedTask,
+  updatePersonRelationshipMeta,
+} from './server/crm/crmStoreHelper.js';
+import {
+  buildCompanyRelationshipProfile,
+  buildPersonRelationshipProfile,
+} from './server/crm/relationshipEngine.js';
+import { buildReminderCenter } from './server/crm/reminderEngine.js';
+import { buildCrmDashboardSummary } from './server/crm/crmDashboardService.js';
+import {
+  searchSegmentedCompanies,
+  searchSegmentedPersons,
+} from './server/crm/crmSegmentationService.js';
+import {
+  CRM_INTERACTION_TYPE_SET,
+  CRM_OPPORTUNITY_STATUS_SET,
+  CRM_RELATIONSHIP_STATUS_SET,
+  CRM_TASK_STATUS_SET,
+} from './shared/crmSpecs.js';
+import {
   requireOwnerAuth,
   setSessionCookie,
   clearSessionCookie,
@@ -2574,11 +2614,19 @@ protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
   }
 });
 
-// Tasks
+// Tasks (Phase 13 extended metadata + full backward compatibility)
 protectedApi.get('/tasks', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
-    const tasks = isPg ? await postgresStorage.getTasks() : storage.getTasks();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const tasks = await listAllExtendedTasks(facade, {
+      leadId: typeof req.query.leadId === 'string' ? req.query.leadId : undefined,
+      personId: typeof req.query.personId === 'string' ? req.query.personId : undefined,
+      opportunityId: typeof req.query.opportunityId === 'string' ? req.query.opportunityId : undefined,
+      status: typeof req.query.status === 'string' ? req.query.status : undefined,
+      priority: typeof req.query.priority === 'string' ? req.query.priority : undefined,
+      category: typeof req.query.category === 'string' ? req.query.category : undefined,
+    });
     res.json(tasks);
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch tasks.') });
@@ -2594,8 +2642,36 @@ protectedApi.post('/tasks', async (req: Request, res: Response) => {
   const author = req.owner?.fullName || 'Lead Intelligence Operator';
   try {
     const { isPg } = checkStorageEngine();
-    const payload = { ...validated.data, assignedTo: validated.data.assignedTo || author };
-    const task = isPg ? await postgresStorage.createTask(payload) : storage.createTask(payload);
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const body = (req.body || {}) as Record<string, any>;
+    const task = await createExtendedTask(facade, {
+      ...validated.data,
+      assignedTo: validated.data.assignedTo || author,
+      personId: typeof body.personId === 'string' ? body.personId : undefined,
+      opportunityId: typeof body.opportunityId === 'string' ? body.opportunityId : undefined,
+      description: typeof body.description === 'string' ? body.description : undefined,
+      reminderDate: typeof body.reminderDate === 'string' ? body.reminderDate : undefined,
+      category: typeof body.category === 'string' ? (body.category as any) : 'follow_up',
+      status:
+        typeof body.status === 'string' && CRM_TASK_STATUS_SET.has(body.status)
+          ? (body.status as any)
+          : validated.data.completed
+            ? 'completed'
+            : 'pending',
+      notes: typeof body.notes === 'string' ? body.notes : undefined,
+      outcome: typeof body.outcome === 'string' ? body.outcome : undefined,
+      recurrence: body.recurrence && typeof body.recurrence === 'object' ? body.recurrence : undefined,
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_TASK_CREATED',
+        req.owner.email,
+        'task',
+        task.id,
+        { leadId: task.leadId, personId: task.personId, priority: task.priority, status: task.status },
+        normalizeClientIp(req)
+      );
+    }
     res.status(201).json(task);
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to create task.') });
@@ -2603,21 +2679,51 @@ protectedApi.post('/tasks', async (req: Request, res: Response) => {
 });
 
 protectedApi.put('/tasks/:id', async (req: Request, res: Response) => {
-  const validated = validateTaskUpdateBody(req.body);
-  if (!validated.ok || !validated.data) {
-    res.status(400).json({ error: validated.error || 'Invalid task update payload.' });
+  const body = (req.body || {}) as Record<string, any>;
+  if (body.title !== undefined || body.priority !== undefined || body.dueDate !== undefined || body.completed !== undefined) {
+    const validated = validateTaskUpdateBody(body);
+    if (!validated.ok) {
+      res.status(400).json({ error: validated.error || 'Invalid task update payload.' });
+      return;
+    }
+  }
+  if (body.status !== undefined && !CRM_TASK_STATUS_SET.has(String(body.status))) {
+    res.status(400).json({ error: 'Invalid task status.' });
     return;
   }
   try {
     const { isPg } = checkStorageEngine();
-    const updated = isPg
-      ? await postgresStorage.updateTask(req.params.id, validated.data)
-      : storage.updateTask(req.params.id, validated.data);
-    if (!updated) {
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const result = await updateExtendedTask(facade, req.params.id, {
+      title: typeof body.title === 'string' ? body.title : undefined,
+      dueDate: typeof body.dueDate === 'string' ? body.dueDate : undefined,
+      priority: body.priority,
+      completed: typeof body.completed === 'boolean' ? body.completed : undefined,
+      personId: body.personId !== undefined ? String(body.personId || '') : undefined,
+      opportunityId: body.opportunityId !== undefined ? String(body.opportunityId || '') : undefined,
+      description: body.description !== undefined ? String(body.description || '') : undefined,
+      reminderDate: body.reminderDate !== undefined ? String(body.reminderDate || '') : undefined,
+      category: body.category,
+      status: body.status,
+      notes: body.notes !== undefined ? String(body.notes || '') : undefined,
+      outcome: body.outcome !== undefined ? String(body.outcome || '') : undefined,
+      recurrence: body.recurrence,
+    });
+    if (!result) {
       res.status(404).json({ error: 'Task not found' });
       return;
     }
-    res.json(updated);
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_TASK_UPDATED',
+        req.owner.email,
+        'task',
+        result.task.id,
+        { status: result.task.status, completed: result.task.completed, spawnedRecurring: Boolean(result.recurringFollowUpTask) },
+        normalizeClientIp(req)
+      );
+    }
+    res.json(result.recurringFollowUpTask ? { ...result.task, recurringFollowUpTask: result.recurringFollowUpTask } : result.task);
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to update task.') });
   }
@@ -2626,7 +2732,18 @@ protectedApi.put('/tasks/:id', async (req: Request, res: Response) => {
 protectedApi.delete('/tasks/:id', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
-    const success = isPg ? await postgresStorage.deleteTask(req.params.id) : storage.deleteTask(req.params.id);
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const success = await deleteExtendedTask(facade, req.params.id);
+    if (success && isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_TASK_DELETED',
+        req.owner.email,
+        'task',
+        req.params.id,
+        {},
+        normalizeClientIp(req)
+      );
+    }
     res.json({ success });
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to delete task.') });
@@ -5230,6 +5347,596 @@ protectedApi.post('/enrichment/schedule', async (req: Request, res: Response) =>
     res.json({ schedulePolicy });
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to update re-verification policy.') });
+  }
+});
+
+// ============================================================================
+// PHASE 13: PERSONAL CRM & RELATIONSHIP MANAGEMENT (OWNER-ONLY ROUTES)
+// ============================================================================
+
+protectedApi.get('/crm/dashboard', async (_req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const summary = await buildCrmDashboardSummary(facade);
+    res.json(summary);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to build Personal CRM dashboard summary.') });
+  }
+});
+
+protectedApi.get('/crm/reminders', async (_req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const reminderCenter = await buildReminderCenter(facade);
+    res.json(reminderCenter);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load reminder centre.') });
+  }
+});
+
+protectedApi.get('/crm/company/:leadId/profile', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const profile = await buildCompanyRelationshipProfile(facade, req.params.leadId);
+    if (!profile) {
+      res.status(404).json({ error: 'Company lead not found.' });
+      return;
+    }
+    res.json(profile);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load company relationship profile.') });
+  }
+});
+
+protectedApi.put('/crm/company/:leadId/relationship', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (body.relationshipStatus !== undefined && !CRM_RELATIONSHIP_STATUS_SET.has(String(body.relationshipStatus))) {
+    res.status(400).json({ error: 'Invalid relationshipStatus value.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const updated = await updateCompanyRelationshipMeta(facade, req.params.leadId, {
+      relationshipStatus: body.relationshipStatus,
+      nextFollowUpDate: body.nextFollowUpDate,
+      scheduledReviewDate: body.scheduledReviewDate,
+      tags: Array.isArray(body.tags) ? body.tags : undefined,
+      ownerOverrideLevel: body.ownerOverrideLevel,
+      ownerAnnotation: body.ownerAnnotation,
+    });
+    if (!updated) {
+      res.status(404).json({ error: 'Company lead not found.' });
+      return;
+    }
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_COMPANY_RELATIONSHIP_UPDATED',
+        req.owner.email,
+        'lead',
+        req.params.leadId,
+        {
+          relationshipStatus: updated.relationshipMeta.relationshipStatus,
+          ownerOverrideLevel: updated.relationshipMeta.ownerOverrideLevel || null,
+        },
+        normalizeClientIp(req)
+      );
+    }
+    const profile = await buildCompanyRelationshipProfile(facade, req.params.leadId);
+    res.json(profile || updated);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update company relationship settings.') });
+  }
+});
+
+protectedApi.get('/crm/person/:personId/profile', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const profile = await buildPersonRelationshipProfile(facade, req.params.personId);
+    if (!profile) {
+      res.status(404).json({ error: 'Person contact not found.' });
+      return;
+    }
+    res.json(profile);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load person relationship profile.') });
+  }
+});
+
+protectedApi.put('/crm/person/:personId/relationship', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (body.relationshipStatus !== undefined && !CRM_RELATIONSHIP_STATUS_SET.has(String(body.relationshipStatus))) {
+    res.status(400).json({ error: 'Invalid relationshipStatus value.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const updated = await updatePersonRelationshipMeta(facade, req.params.personId, {
+      relationshipStatus: body.relationshipStatus,
+      nextFollowUpDate: body.nextFollowUpDate,
+      scheduledReviewDate: body.scheduledReviewDate,
+      tags: Array.isArray(body.tags) ? body.tags : undefined,
+      ownerOverrideLevel: body.ownerOverrideLevel,
+      ownerAnnotation: body.ownerAnnotation,
+    });
+    if (!updated) {
+      res.status(404).json({ error: 'Person contact not found.' });
+      return;
+    }
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_PERSON_RELATIONSHIP_UPDATED',
+        req.owner.email,
+        'person',
+        req.params.personId,
+        {
+          relationshipStatus: updated.relationshipMeta.relationshipStatus,
+          ownerOverrideLevel: updated.relationshipMeta.ownerOverrideLevel || null,
+        },
+        normalizeClientIp(req)
+      );
+    }
+    const profile = await buildPersonRelationshipProfile(facade, req.params.personId);
+    res.json(profile || updated);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update person relationship settings.') });
+  }
+});
+
+// Interactions & Communication Timeline (Strictly manual owner recording)
+protectedApi.get('/crm/interactions', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const interactions = await listAllCrmInteractions(facade, {
+      leadId: typeof req.query.leadId === 'string' ? req.query.leadId : undefined,
+      personId: typeof req.query.personId === 'string' ? req.query.personId : undefined,
+      opportunityId: typeof req.query.opportunityId === 'string' ? req.query.opportunityId : undefined,
+      type: typeof req.query.type === 'string' ? req.query.type : undefined,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+      limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+    });
+    res.json({ total: interactions.length, interactions });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load interactions.') });
+  }
+});
+
+protectedApi.post('/crm/interactions', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.summary || typeof body.summary !== 'string' || !body.summary.trim()) {
+    res.status(400).json({ error: 'Interaction summary is required.' });
+    return;
+  }
+  if (body.type && !CRM_INTERACTION_TYPE_SET.has(String(body.type))) {
+    res.status(400).json({ error: 'Unsupported interaction type.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const created = await createCrmInteraction(facade, {
+      leadId: typeof body.leadId === 'string' ? body.leadId : undefined,
+      personId: typeof body.personId === 'string' ? body.personId : undefined,
+      opportunityId: typeof body.opportunityId === 'string' ? body.opportunityId : undefined,
+      type: body.type || 'note',
+      customTypeLabel: typeof body.customTypeLabel === 'string' ? body.customTypeLabel : undefined,
+      occurredAt: typeof body.occurredAt === 'string' ? body.occurredAt : undefined,
+      summary: body.summary,
+      detailedNotes: typeof body.detailedNotes === 'string' ? body.detailedNotes : undefined,
+      outcome: typeof body.outcome === 'string' ? body.outcome : undefined,
+      nextAction: typeof body.nextAction === 'string' ? body.nextAction : undefined,
+      followUpDate: typeof body.followUpDate === 'string' ? body.followUpDate : undefined,
+      attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
+      recordedBy: req.owner?.fullName || req.owner?.email || 'Owner',
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_INTERACTION_RECORDED',
+        req.owner.email,
+        'interaction',
+        created.id,
+        { type: created.type, leadId: created.leadId, personId: created.personId, recordingMode: 'manual' },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(201).json(created);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to record interaction.') });
+  }
+});
+
+protectedApi.put('/crm/interactions/:id', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (body.type !== undefined && !CRM_INTERACTION_TYPE_SET.has(String(body.type))) {
+    res.status(400).json({ error: 'Unsupported interaction type.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const updated = await updateCrmInteraction(facade, req.params.id, body);
+    if (!updated) {
+      res.status(404).json({ error: 'Interaction not found.' });
+      return;
+    }
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_INTERACTION_UPDATED',
+        req.owner.email,
+        'interaction',
+        updated.id,
+        { type: updated.type },
+        normalizeClientIp(req)
+      );
+    }
+    res.json(updated);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update interaction.') });
+  }
+});
+
+protectedApi.delete('/crm/interactions/:id', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const deleted = await deleteCrmInteraction(facade, req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Interaction not found.' });
+      return;
+    }
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_INTERACTION_DELETED',
+        req.owner.email,
+        'interaction',
+        req.params.id,
+        {},
+        normalizeClientIp(req)
+      );
+    }
+    res.json({ success: true });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to delete interaction.') });
+  }
+});
+
+// Private Owner-Only Notes (Strict owner-only protection, never exposed publicly)
+protectedApi.get('/crm/notes', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const notes = await listAllCrmPrivateNotes(facade, {
+      entityType: typeof req.query.entityType === 'string' ? req.query.entityType : undefined,
+      leadId: typeof req.query.leadId === 'string' ? req.query.leadId : undefined,
+      personId: typeof req.query.personId === 'string' ? req.query.personId : undefined,
+      interactionId: typeof req.query.interactionId === 'string' ? req.query.interactionId : undefined,
+      opportunityId: typeof req.query.opportunityId === 'string' ? req.query.opportunityId : undefined,
+      category: typeof req.query.category === 'string' ? req.query.category : undefined,
+      tag: typeof req.query.tag === 'string' ? req.query.tag : undefined,
+      pinnedOnly: req.query.pinnedOnly === 'true',
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+    });
+    res.json({ total: notes.length, notes });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to search private notes.') });
+  }
+});
+
+protectedApi.post('/crm/notes', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.content || typeof body.content !== 'string' || !body.content.trim()) {
+    res.status(400).json({ error: 'Note content is required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const created = await createCrmPrivateNote(facade, {
+      entityType: body.entityType || (body.personId ? 'person' : 'company'),
+      leadId: typeof body.leadId === 'string' ? body.leadId : undefined,
+      personId: typeof body.personId === 'string' ? body.personId : undefined,
+      interactionId: typeof body.interactionId === 'string' ? body.interactionId : undefined,
+      opportunityId: typeof body.opportunityId === 'string' ? body.opportunityId : undefined,
+      title: typeof body.title === 'string' ? body.title : undefined,
+      content: body.content,
+      category: body.category || 'general',
+      tags: Array.isArray(body.tags) ? body.tags : undefined,
+      pinned: Boolean(body.pinned),
+      author: req.owner?.fullName || req.owner?.email || 'Owner',
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_PRIVATE_NOTE_CREATED',
+        req.owner.email,
+        'note',
+        created.id,
+        { entityType: created.entityType, leadId: created.leadId, personId: created.personId, pinned: created.pinned },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(201).json(created);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to create private note.') });
+  }
+});
+
+protectedApi.put('/crm/notes/:id', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const updated = await updateCrmPrivateNote(facade, req.params.id, {
+      title: body.title,
+      content: body.content,
+      category: body.category,
+      tags: Array.isArray(body.tags) ? body.tags : undefined,
+      pinned: typeof body.pinned === 'boolean' ? body.pinned : undefined,
+    });
+    if (!updated) {
+      res.status(404).json({ error: 'Private note not found.' });
+      return;
+    }
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_PRIVATE_NOTE_UPDATED',
+        req.owner.email,
+        'note',
+        updated.id,
+        { pinned: updated.pinned },
+        normalizeClientIp(req)
+      );
+    }
+    res.json(updated);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update private note.') });
+  }
+});
+
+protectedApi.delete('/crm/notes/:id', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const deleted = await deleteCrmPrivateNote(facade, req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Private note not found.' });
+      return;
+    }
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_PRIVATE_NOTE_DELETED',
+        req.owner.email,
+        'note',
+        req.params.id,
+        {},
+        normalizeClientIp(req)
+      );
+    }
+    res.json({ success: true });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to delete private note.') });
+  }
+});
+
+// Opportunities & Deals (Multiple Opportunities per Company + Immutable Stage History)
+protectedApi.get('/crm/opportunities', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const opportunities = await listAllCrmOpportunities(facade, {
+      leadId: typeof req.query.leadId === 'string' ? req.query.leadId : undefined,
+      personId: typeof req.query.personId === 'string' ? req.query.personId : undefined,
+      stageId: typeof req.query.stageId === 'string' ? req.query.stageId : undefined,
+      status: typeof req.query.status === 'string' ? req.query.status : undefined,
+    });
+    res.json({ total: opportunities.length, opportunities });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load opportunities.') });
+  }
+});
+
+protectedApi.post('/crm/opportunities', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.leadId || typeof body.leadId !== 'string') {
+    res.status(400).json({ error: 'leadId is required for an opportunity.' });
+    return;
+  }
+  if (!body.title || typeof body.title !== 'string' || !body.title.trim()) {
+    res.status(400).json({ error: 'Opportunity title is required.' });
+    return;
+  }
+  if (body.status !== undefined && !CRM_OPPORTUNITY_STATUS_SET.has(String(body.status))) {
+    res.status(400).json({ error: 'Invalid opportunity status.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const created = await createCrmOpportunity(facade, {
+      leadId: body.leadId,
+      personId: typeof body.personId === 'string' ? body.personId : undefined,
+      title: body.title,
+      description: typeof body.description === 'string' ? body.description : undefined,
+      estimatedValue: body.estimatedValue !== undefined ? Number(body.estimatedValue) : 0,
+      currency: typeof body.currency === 'string' ? body.currency : undefined,
+      expectedCloseDate: typeof body.expectedCloseDate === 'string' ? body.expectedCloseDate : undefined,
+      pipelineStageId: typeof body.pipelineStageId === 'string' ? body.pipelineStageId : undefined,
+      probability: body.probability !== undefined ? Number(body.probability) : 30,
+      source: typeof body.source === 'string' ? body.source : undefined,
+      nextAction: typeof body.nextAction === 'string' ? body.nextAction : undefined,
+      nextActionDate: typeof body.nextActionDate === 'string' ? body.nextActionDate : undefined,
+      notes: typeof body.notes === 'string' ? body.notes : undefined,
+      status: body.status,
+      changedBy: req.owner?.fullName || req.owner?.email || 'Owner',
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_OPPORTUNITY_CREATED',
+        req.owner.email,
+        'opportunity',
+        created.id,
+        { leadId: created.leadId, estimatedValue: created.estimatedValue, currency: created.currency, stage: created.pipelineStageId },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(201).json(created);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    const status = msg.includes('not found') ? 404 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to create opportunity.') });
+  }
+});
+
+protectedApi.put('/crm/opportunities/:id', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (body.status !== undefined && !CRM_OPPORTUNITY_STATUS_SET.has(String(body.status))) {
+    res.status(400).json({ error: 'Invalid opportunity status.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const updated = await updateCrmOpportunity(facade, req.params.id, {
+      ...body,
+      changedBy: req.owner?.fullName || req.owner?.email || 'Owner',
+    });
+    if (!updated) {
+      res.status(404).json({ error: 'Opportunity not found.' });
+      return;
+    }
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_OPPORTUNITY_UPDATED',
+        req.owner.email,
+        'opportunity',
+        updated.id,
+        { stage: updated.pipelineStageId, status: updated.status, estimatedValue: updated.estimatedValue },
+        normalizeClientIp(req)
+      );
+    }
+    res.json(updated);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update opportunity.') });
+  }
+});
+
+protectedApi.delete('/crm/opportunities/:id', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const deleted = await deleteCrmOpportunity(facade, req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Opportunity not found.' });
+      return;
+    }
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_OPPORTUNITY_DELETED',
+        req.owner.email,
+        'opportunity',
+        req.params.id,
+        {},
+        normalizeClientIp(req)
+      );
+    }
+    res.json({ success: true });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to delete opportunity.') });
+  }
+});
+
+// Saved Views (Reusable owner-defined company & person filters)
+protectedApi.get('/crm/saved-views', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const entityType =
+      req.query.entityType === 'company' || req.query.entityType === 'person'
+        ? req.query.entityType
+        : undefined;
+    const views = await listSavedViews(facade, entityType);
+    res.json({ views });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load saved views.') });
+  }
+});
+
+protectedApi.post('/crm/saved-views', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.name || typeof body.name !== 'string' || !body.name.trim()) {
+    res.status(400).json({ error: 'Saved view name is required.' });
+    return;
+  }
+  if (body.entityType !== 'company' && body.entityType !== 'person') {
+    res.status(400).json({ error: 'entityType must be company or person.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const saved = await saveCrmView(facade, {
+      id: typeof body.id === 'string' ? body.id : undefined,
+      name: body.name,
+      entityType: body.entityType,
+      description: typeof body.description === 'string' ? body.description : undefined,
+      filters: body.filters && typeof body.filters === 'object' ? body.filters : {},
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'CRM_SAVED_VIEW_UPSERTED',
+        req.owner.email,
+        'saved_view',
+        saved.id,
+        { entityType: saved.entityType, name: saved.name },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(201).json(saved);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to save CRM view.') });
+  }
+});
+
+protectedApi.delete('/crm/saved-views/:id', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const deleted = await deleteSavedView(facade, req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Saved view not found.' });
+      return;
+    }
+    res.json({ success: true });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to delete saved view.') });
+  }
+});
+
+// Advanced Segmentation Search (Companies & Persons)
+protectedApi.post('/crm/search/companies', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const result = await searchSegmentedCompanies(facade, (req.body || {}) as any);
+    res.json(result);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to filter companies.') });
+  }
+});
+
+protectedApi.post('/crm/search/persons', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const result = await searchSegmentedPersons(facade, (req.body || {}) as any);
+    res.json(result);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to filter decision-makers.') });
   }
 });
 

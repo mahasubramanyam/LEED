@@ -9,7 +9,8 @@ import {
   Menu,
   Key,
   Shield,
-  X
+  X,
+  Bell,
 } from 'lucide-react';
 import { CanonicalLead } from '../types.ts';
 
@@ -24,6 +25,8 @@ interface TopBarProps {
   onMobileMenuToggle: () => void;
   leads: CanonicalLead[];
   onSelectLead: (lead: CanonicalLead) => void;
+  reminderCount?: number;
+  onOpenReminders?: () => void;
 }
 
 export function TopBar({
@@ -37,18 +40,20 @@ export function TopBar({
   onMobileMenuToggle,
   leads,
   onSelectLead,
+  reminderCount = 0,
+  onOpenReminders,
 }: TopBarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
 
   // Tab label titles
   const tabTitles: Record<string, { title: string; subtitle: string }> = {
-    dashboard: { title: 'Executive Dashboard', subtitle: 'Platform KPI overview, registry status, and pipeline health' },
+    dashboard: { title: 'Personal CRM Dashboard', subtitle: 'Relationships, follow-ups, opportunities, recent interactions, and pipeline health' },
     discovery: { title: 'Registry Discovery', subtitle: 'Live query engine across Norway (Brreg), UK (Companies House), Australia (ABN), & OSM' },
-    leads: { title: 'Leads Intelligence', subtitle: 'Canonical CRM database with official registration numbers & confidence scores' },
-    import: { title: 'Import & Data Processing Hub', subtitle: 'CSV & Excel parsing, field normalization, dedupe preview, audit ledger, and M:N contacts' },
-    pipeline: { title: 'Pipeline Kanban', subtitle: 'Stage progression, opportunity values, and deal velocity' },
-    tasks: { title: 'Tasks & Follow-ups', subtitle: 'Owner scheduled engagements and priority tracking' },
+    leads: { title: 'Leads & Relationship Directory', subtitle: 'Canonical CRM database with segmentation, saved views, and verified provenance' },
+    import: { title: 'Import & Decision-Makers Hub', subtitle: 'CSV & Excel parsing, field normalization, audit ledger, and M:N person relationships' },
+    pipeline: { title: 'Pipeline & Opportunities', subtitle: 'Company pipeline and multi-opportunity stage progression with stage history' },
+    tasks: { title: 'Tasks & Follow-Up Manager', subtitle: 'Owner scheduled engagements, outcomes, recurrence, and reminders' },
     outreach: { title: 'Campaigns & HITL Approval', subtitle: 'Human-in-the-Loop email outreach approval queue' },
     dedupe: { title: 'Deduplication Hub', subtitle: 'Cross-registry deduplication, deterministic matching, and rollback ledger' },
     'ai-agent': { title: 'AI Sales Agent', subtitle: 'Gemini-powered pitch generation, meeting briefings, and market analysis' },
@@ -165,6 +170,24 @@ export function TopBar({
           <span>Neon PG 18.6</span>
           <span className={`w-1.5 h-1.5 rounded-full ${isDbConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
         </div>
+
+        {/* In-App Reminder Centre Trigger */}
+        {onOpenReminders && (
+          <button
+            type="button"
+            onClick={onOpenReminders}
+            title="Open In-App Reminder Centre"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors shadow-2xs"
+          >
+            <Bell className={`w-3.5 h-3.5 ${reminderCount > 0 ? 'text-amber-500' : 'text-slate-400'}`} />
+            <span className="hidden md:inline">Reminders</span>
+            {reminderCount > 0 && (
+              <span className="font-mono text-[11px] font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                ({reminderCount})
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Quick CSV Export */}
         <button

@@ -16,6 +16,8 @@ import { ImportModal } from './components/ImportModal.tsx';
 import { ImportWorkspace } from './components/ImportWorkspace.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { CountryMatrixView } from './components/CountryMatrixView.tsx';
+import { PersonRelationshipDrawer } from './components/PersonRelationshipDrawer.tsx';
+import { ReminderCenterDrawer } from './components/ReminderCenterDrawer.tsx';
 import {
   CanonicalLead,
   PipelineStage,
@@ -71,6 +73,9 @@ export default function App() {
   const [isDbConnected, setIsDbConnected] = useState<boolean>(false);
 
   const [selectedLeadForDetail, setSelectedLeadForDetail] = useState<CanonicalLead | null>(null);
+  const [selectedPersonIdForDrawer, setSelectedPersonIdForDrawer] = useState<string | null>(null);
+  const [isReminderDrawerOpen, setIsReminderDrawerOpen] = useState<boolean>(false);
+  const [reminderCount, setReminderCount] = useState<number>(0);
   const [discoveryInitialCountry, setDiscoveryInitialCountry] = useState<string | undefined>(undefined);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(true);
@@ -197,13 +202,14 @@ export default function App() {
   // Fetch all domain data
   const fetchAllData = async () => {
     try {
-      const [leadsRes, stagesRes, tasksRes, campsRes, connsRes, settRes] = await Promise.all([
+      const [leadsRes, stagesRes, tasksRes, campsRes, connsRes, settRes, remRes] = await Promise.all([
         apiFetch('/api/leads'),
         apiFetch('/api/pipeline/stages'),
         apiFetch('/api/tasks'),
         apiFetch('/api/campaigns'),
         apiFetch('/api/connectors'),
         apiFetch('/api/settings'),
+        apiFetch('/api/crm/reminders'),
       ]);
 
       if (leadsRes.ok) {
@@ -229,6 +235,10 @@ export default function App() {
       if (settRes.ok) {
         const settData = await settRes.json();
         setSettings(settData || settings);
+      }
+      if (remRes.ok) {
+        const remData = await remRes.json();
+        setReminderCount(typeof remData?.counts?.total === 'number' ? remData.counts.total : 0);
       }
     } catch (err) {
       console.error('Failed to load application records', err);
@@ -451,10 +461,35 @@ export default function App() {
       const res = await apiFetch(`/api/tasks/${taskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completed }),
+        body: JSON.stringify({ completed, status: completed ? 'completed' : 'pending' }),
       });
       if (res.ok) {
-        setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, completed } : t)));
+        const data = await res.json();
+        const { recurringFollowUpTask, ...updatedTask } = data;
+        setTasks((prev) => {
+          const next = prev.map((t) => (t.id === taskId ? { ...t, ...updatedTask } : t));
+          return recurringFollowUpTask ? [recurringFollowUpTask, ...next] : next;
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateTask = async (taskId: string, updates: Partial<LeadTask>) => {
+    try {
+      const res = await apiFetch(`/api/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const { recurringFollowUpTask, ...updatedTask } = data;
+        setTasks((prev) => {
+          const next = prev.map((t) => (t.id === taskId ? { ...t, ...updatedTask } : t));
+          return recurringFollowUpTask ? [recurringFollowUpTask, ...next] : next;
+        });
       }
     } catch (err) {
       console.error(err);
@@ -598,6 +633,8 @@ export default function App() {
           onMobileMenuToggle={() => setMobileMenuOpen(true)}
           leads={leads}
           onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+          reminderCount={reminderCount}
+          onOpenReminders={() => setIsReminderDrawerOpen(true)}
         />
 
         {/* Dynamic Main Workspace */}
@@ -620,6 +657,8 @@ export default function App() {
                   onNavigateTab={setCurrentTab}
                   onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
                   onOpenImport={() => setIsImportModalOpen(true)}
+                  onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
+                  onOpenReminderCenter={() => setIsReminderDrawerOpen(true)}
                 />
               )}
 
@@ -651,6 +690,7 @@ export default function App() {
                   existingLeads={leads}
                   onImportComplete={() => fetchAllData()}
                   onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
                 />
               )}
 
@@ -710,8 +750,11 @@ export default function App() {
                   leads={leads}
                   onToggleTask={handleToggleTask}
                   onCreateTask={handleCreateTask}
+                  onUpdateTask={handleUpdateTask}
                   onDeleteTask={handleDeleteTask}
                   onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
+                  onOpenReminderCenter={() => setIsReminderDrawerOpen(true)}
                 />
               )}
 
@@ -750,7 +793,47 @@ export default function App() {
         onAddNote={handleAddNote}
         onAddActivity={handleAddActivity}
         onInspectUrl={handleInspectUrl}
+        onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
+        onRefreshData={fetchAllData}
       />
+
+      {/* Unified Person Relationship Profile Drawer (Phase 13) */}
+      {selectedPersonIdForDrawer && (
+        <PersonRelationshipDrawer
+          personId={selectedPersonIdForDrawer}
+          onClose={() => setSelectedPersonIdForDrawer(null)}
+          onOpenCompany={(leadId) => {
+            const found = leads.find((l) => l.id === leadId);
+            if (found) {
+              setSelectedPersonIdForDrawer(null);
+              setSelectedLeadForDetail(found);
+            }
+          }}
+          onDataMutated={fetchAllData}
+        />
+      )}
+
+      {/* In-App Reminder Centre Drawer (Phase 13) */}
+      {isReminderDrawerOpen && (
+        <ReminderCenterDrawer
+          onClose={() => setIsReminderDrawerOpen(false)}
+          onOpenCompany={(leadId) => {
+            const found = leads.find((l) => l.id === leadId);
+            if (found) {
+              setIsReminderDrawerOpen(false);
+              setSelectedLeadForDetail(found);
+            }
+          }}
+          onOpenPerson={(personId) => {
+            setIsReminderDrawerOpen(false);
+            setSelectedPersonIdForDrawer(personId);
+          }}
+          onNavigateTasks={() => {
+            setIsReminderDrawerOpen(false);
+            setCurrentTab('tasks');
+          }}
+        />
+      )}
 
       {/* CSV Import Modal */}
       {isImportModalOpen && (
