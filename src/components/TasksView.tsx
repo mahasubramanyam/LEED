@@ -11,8 +11,9 @@ import {
   Bell,
   Info,
   Save,
+  Bot,
 } from 'lucide-react';
-import { LeadTask, CanonicalLead, PersonRecord, CrmOpportunity } from '../types.ts';
+import { LeadTask, CanonicalLead, PersonRecord, CrmOpportunity, AiAgentLaunchContext } from '../types.ts';
 import {
   CRM_RECURRENCE_FREQUENCIES,
   CRM_TASK_CATEGORIES,
@@ -31,6 +32,7 @@ interface TasksViewProps {
   onSelectLead: (lead: CanonicalLead) => void;
   onOpenPersonProfile?: (personId: string) => void;
   onOpenReminderCenter?: () => void;
+  onOpenAiAgent?: (ctx: AiAgentLaunchContext) => void;
 }
 
 type TaskFilterTab =
@@ -53,6 +55,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
   onSelectLead,
   onOpenPersonProfile,
   onOpenReminderCenter,
+  onOpenAiAgent,
 }) => {
   const [filter, setFilter] = useState<TaskFilterTab>('all');
   const [isCreating, setIsCreating] = useState(false);
@@ -212,6 +215,15 @@ export const TasksView: React.FC<TasksViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {onOpenAiAgent && (
+            <button
+              onClick={() => onOpenAiAgent({ tab: 'briefing' })}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <Bot className="w-3.5 h-3.5" />
+              AI Follow-Up Briefing
+            </button>
+          )}
           {onOpenReminderCenter && (
             <button
               onClick={onOpenReminderCenter}

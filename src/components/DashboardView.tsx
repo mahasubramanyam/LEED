@@ -13,6 +13,7 @@ import {
   Bell,
   Briefcase,
   RefreshCw,
+  Bot,
 } from 'lucide-react';
 import {
   CanonicalLead,
@@ -20,6 +21,7 @@ import {
   LeadTask,
   ConnectorStatus,
   CrmDashboardSummary,
+  AiAgentLaunchContext,
 } from '../types.ts';
 import {
   summarizeValuesByCurrency,
@@ -43,6 +45,7 @@ interface DashboardViewProps {
   onOpenImport: () => void;
   onOpenPersonProfile?: (personId: string) => void;
   onOpenReminderCenter?: () => void;
+  onOpenAiAgent?: (ctx: AiAgentLaunchContext) => void;
 }
 
 export function DashboardView({
@@ -55,6 +58,7 @@ export function DashboardView({
   onOpenImport,
   onOpenPersonProfile,
   onOpenReminderCenter,
+  onOpenAiAgent,
 }: DashboardViewProps) {
   const [crmSummary, setCrmSummary] = useState<CrmDashboardSummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -143,6 +147,15 @@ export function DashboardView({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {onOpenAiAgent && (
+            <button
+              onClick={() => onOpenAiAgent({ tab: 'briefing' })}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-blue-600 text-white text-xs font-medium hover:opacity-90 inline-flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span>AI Daily Briefing</span>
+            </button>
+          )}
           {onOpenReminderCenter && (
             <button
               onClick={onOpenReminderCenter}

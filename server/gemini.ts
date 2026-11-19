@@ -29,7 +29,7 @@ export async function analyzeLeadWithAi(lead: CanonicalLead): Promise<{
   missingDataGaps: string[];
   recommendedStrategy: string;
   suggestedQualificationQuestions: string[];
-  engine: 'gemini-3.8-flash' | 'deterministic-pipeline';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
 }> {
   const ai = getAiClient();
 
@@ -67,7 +67,7 @@ Respond with a JSON object following this exact structure:
 }`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -76,7 +76,7 @@ Respond with a JSON object following this exact structure:
 
       const text = (response.text ?? '{}').trim();
       const parsed = JSON.parse(text);
-      return { ...parsed, engine: 'gemini-3.8-flash' };
+      return { ...parsed, engine: 'gemini-4-hydrogen' };
     } catch (err) {
       console.warn('Gemini API call returned error, switching to deterministic pipeline engine:', err);
     }
@@ -127,7 +127,7 @@ export async function generateSalesPitchWithAi(
   linkedInMessage: string;
   coldCallOpener: string;
   rationale: string;
-  engine: 'gemini-3.8-flash' | 'deterministic-pipeline';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
 }> {
   const userProp =
     valueProposition?.trim() ||
@@ -163,7 +163,7 @@ Respond with a JSON object with this exact structure:
 }`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -172,7 +172,7 @@ Respond with a JSON object with this exact structure:
 
       const text = (response.text ?? '{}').trim();
       const parsed = JSON.parse(text);
-      return { ...parsed, engine: 'gemini-3.8-flash' };
+      return { ...parsed, engine: 'gemini-4-hydrogen' };
     } catch (err) {
       console.warn('Gemini pitch generation returned error, using factual copy engine:', err);
     }
@@ -195,7 +195,7 @@ export async function generateMeetingBriefWithAi(lead: CanonicalLead): Promise<{
   discussionTopics: string[];
   potentialObjections: Array<{ objection: string; suggestedRebuttal: string }>;
   closingGoal: string;
-  engine: 'gemini-3.8-flash' | 'deterministic-pipeline';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
 }> {
   const ai = getAiClient();
 
@@ -221,7 +221,7 @@ Return a JSON object:
 }`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -230,7 +230,7 @@ Return a JSON object:
 
       const text = (response.text ?? '{}').trim();
       const parsed = JSON.parse(text);
-      return { ...parsed, engine: 'gemini-3.8-flash' };
+      return { ...parsed, engine: 'gemini-4-hydrogen' };
     } catch (err) {
       console.warn('Gemini meeting brief returned error, using factual briefing engine:', err);
     }
@@ -272,7 +272,7 @@ export async function generateMarketReportWithAi(
   underservedNiches: string[];
   recommendedOutreachStrategy: string;
   competitorOrRegulatoryContext: string;
-  engine: 'gemini-3.8-flash' | 'deterministic-pipeline';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
 }> {
   const ai = getAiClient();
 
@@ -292,7 +292,7 @@ Provide an actionable market intelligence brief in JSON:
 }`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -301,7 +301,7 @@ Provide an actionable market intelligence brief in JSON:
 
       const text = (response.text ?? '{}').trim();
       const parsed = JSON.parse(text);
-      return { ...parsed, engine: 'gemini-3.8-flash' };
+      return { ...parsed, engine: 'gemini-4-hydrogen' };
     } catch (err) {
       console.warn('Gemini market report returned error, using fallback market engine:', err);
     }

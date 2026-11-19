@@ -49,7 +49,8 @@ import {
   LinkedPersonWithRelationship,
   DecisionMakerCandidate,
   DecisionMakerDiscoveryResponse,
-} from '../types.js';
+  AiAgentLaunchContext,
+} from '../types.ts';
 import { GeoSelector } from './GeoSelector.tsx';
 import { LeadEnrichmentPanel } from './LeadEnrichmentPanel.tsx';
 import { CompanyRelationshipPanel } from './CompanyRelationshipPanel.tsx';
@@ -239,6 +240,7 @@ interface LeadDetailModalProps {
   onAddActivity: (leadId: string, activity: any) => void;
   onInspectUrl: (url: string, leadId: string) => Promise<any>;
   onOpenPersonProfile?: (personId: string) => void;
+  onOpenAiAgent?: (ctx: AiAgentLaunchContext) => void;
   onRefreshData?: () => void;
 }
 
@@ -252,6 +254,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   onAddActivity,
   onInspectUrl,
   onOpenPersonProfile,
+  onOpenAiAgent,
   onRefreshData,
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'relationship' | 'enrichment' | 'contacts' | 'web' | 'ai' | 'timeline' | 'notes'>('overview');
@@ -956,7 +959,34 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            {onOpenAiAgent && (
+              <>
+                <button
+                  onClick={() => onOpenAiAgent({ tab: 'company_intel', leadId: lead.id })}
+                  className="px-2.5 py-1 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-500 text-white inline-flex items-center gap-1 whitespace-nowrap"
+                  title="Open Company Sales Intelligence in AI Sales Agent"
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>AI Intel</span>
+                </button>
+                <button
+                  onClick={() => onOpenAiAgent({ tab: 'meeting_prep', leadId: lead.id })}
+                  className="px-2.5 py-1 text-xs font-medium rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800 whitespace-nowrap"
+                  title="Prepare Meeting Brief"
+                >
+                  Prep Meeting
+                </button>
+                <button
+                  onClick={() => onOpenAiAgent({ tab: 'drafting', leadId: lead.id })}
+                  className="px-2.5 py-1 text-xs font-medium rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800 whitespace-nowrap"
+                  title="Draft Sales Message"
+                >
+                  Draft
+                </button>
+              </>
+            )}
+
             {/* Confidence Score Pill */}
             <div className="text-right">
               <span

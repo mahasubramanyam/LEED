@@ -14,8 +14,10 @@ import {
   Trash2,
   User,
   X,
+  Bot,
 } from 'lucide-react';
 import {
+  AiAgentLaunchContext,
   CrmInteractionType,
   CrmNoteCategory,
   CrmRelationshipStatus,
@@ -38,6 +40,7 @@ interface PersonRelationshipDrawerProps {
   personId: string;
   onClose: () => void;
   onOpenCompany?: (leadId: string) => void;
+  onOpenAiAgent?: (ctx: AiAgentLaunchContext) => void;
   onDataMutated?: () => void;
 }
 
@@ -45,6 +48,7 @@ export const PersonRelationshipDrawer: React.FC<PersonRelationshipDrawerProps> =
   personId,
   onClose,
   onOpenCompany,
+  onOpenAiAgent,
   onDataMutated,
 }) => {
   const [profile, setProfile] = useState<PersonRelationshipProfile | null>(null);
@@ -276,13 +280,44 @@ export const PersonRelationshipDrawer: React.FC<PersonRelationshipDrawerProps> =
               </div>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-            title="Close drawer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {onOpenAiAgent && profile && (
+              <>
+                <button
+                  onClick={() =>
+                    onOpenAiAgent({
+                      tab: 'meeting_prep',
+                      personId: profile.person.id,
+                      leadId: profile.currentCompanies[0]?.company?.id,
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium inline-flex items-center gap-1 whitespace-nowrap"
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  AI Prep
+                </button>
+                <button
+                  onClick={() =>
+                    onOpenAiAgent({
+                      tab: 'drafting',
+                      personId: profile.person.id,
+                      leadId: profile.currentCompanies[0]?.company?.id,
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800 text-xs font-medium whitespace-nowrap"
+                >
+                  AI Draft
+                </button>
+              </>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              title="Close drawer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}

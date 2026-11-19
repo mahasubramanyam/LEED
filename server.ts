@@ -96,6 +96,37 @@ import {
   CRM_TASK_STATUS_SET,
 } from './shared/crmSpecs.js';
 import {
+  AI_DRAFT_TYPE_SET,
+} from './shared/aiAgentSpecs.js';
+import { getAiProviderStatus } from './server/ai/aiProvider.js';
+import {
+  createAiConversation,
+  deleteAiConversation,
+  deleteIcpProfile,
+  getAiWorkspaceState,
+  listAiActionProposals,
+  listAiConversations,
+  listIcpProfiles,
+  listSavedDrafts,
+  updateOwnerSalesGoals,
+  upsertIcpProfile,
+} from './server/ai/aiStoreHelper.js';
+import { evaluateCompanyAgainstIcp } from './server/ai/icpEngine.js';
+import { prioritizeCrmLeads } from './server/ai/prioritizationEngine.js';
+import {
+  executeControlledAgentTool,
+  listAuthorizedAgentTools,
+} from './server/ai/agentTools.js';
+import {
+  approveAndExecuteActionProposal,
+  generateCompanySalesIntelligence,
+  generateDailySalesBriefing,
+  generateMeetingPreparation,
+  generateSalesCommunicationDraft,
+  rejectActionProposal,
+  runSalesAgentConversationTurn,
+} from './server/ai/salesIntelligenceService.js';
+import {
   requireOwnerAuth,
   setSessionCookie,
   clearSessionCookie,
@@ -5937,6 +5968,528 @@ protectedApi.post('/crm/search/persons', async (req: Request, res: Response) => 
     res.json(result);
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to filter decision-makers.') });
+  }
+});
+
+// ============================================================================
+// PHASE 14 — AI Sales Agent & Intelligent Sales Assistance (Owner-Only)
+// ============================================================================
+
+protectedApi.get('/ai/status', async (_req: Request, res: Response) => {
+  try {
+    const status = getAiProviderStatus();
+    res.json({
+      ...status,
+      authorizedTools: listAuthorizedAgentTools(),
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to check AI provider status.') });
+  }
+});
+
+// Owner Sales Goals & Offerings Context
+protectedApi.get('/ai/goals', async (_req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const ws = await getAiWorkspaceState(facade);
+    res.json({ goals: ws.ownerSalesGoals });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load owner sales goals.') });
+  }
+});
+
+protectedApi.put('/ai/goals', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const updated = await updateOwnerSalesGoals(facade, (req.body || {}) as any);
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'AI_OWNER_GOALS_UPDATED',
+        req.owner.email,
+        'ai_goals',
+        'owner_goals',
+        { businessName: updated.businessName, productsCount: updated.productsAndServices.length },
+        normalizeClientIp(req)
+      );
+    }
+    res.json({ goals: updated });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update owner sales goals.') });
+  }
+});
+
+// Multi-ICP Profiles CRUD & Evaluation
+protectedApi.get('/ai/icp', async (_req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const icpProfiles = await listIcpProfiles(facade);
+    res.json({ total: icpProfiles.length, icpProfiles });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load ICP profiles.') });
+  }
+});
+
+protectedApi.post('/ai/icp', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.name || typeof body.name !== 'string' || !body.name.trim()) {
+    res.status(400).json({ error: 'ICP profile name is required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const saved = await upsertIcpProfile(facade, body as any);
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'AI_ICP_SAVED',
+        req.owner.email,
+        'icp_profile',
+        saved.id,
+        { name: saved.name, isDefault: saved.isDefault },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(201).json(saved);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to save ICP profile.') });
+  }
+});
+
+protectedApi.put('/ai/icp/:id', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.name || typeof body.name !== 'string' || !body.name.trim()) {
+    res.status(400).json({ error: 'ICP profile name is required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const saved = await upsertIcpProfile(facade, { ...body, id: req.params.id } as any);
+    res.json(saved);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update ICP profile.') });
+  }
+});
+
+protectedApi.delete('/ai/icp/:id', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const deleted = await deleteIcpProfile(facade, req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'ICP profile not found.' });
+      return;
+    }
+    res.json({ success: true });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to delete ICP profile.') });
+  }
+});
+
+protectedApi.post('/ai/icp/:id/evaluate', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const icps = await listIcpProfiles(facade);
+    const icp = icps.find((p) => p.id === req.params.id);
+    if (!icp) {
+      res.status(404).json({ error: 'ICP profile not found.' });
+      return;
+    }
+
+    if (body.candidate && typeof body.candidate === 'object') {
+      const result = evaluateCompanyAgainstIcp({ icp, candidate: body.candidate });
+      res.json({ results: [result] });
+      return;
+    }
+
+    if (typeof body.leadId === 'string' && body.leadId.trim()) {
+      const profile = await buildCompanyRelationshipProfile(facade, body.leadId.trim());
+      if (!profile) {
+        res.status(404).json({ error: 'Company lead not found.' });
+        return;
+      }
+      const result = evaluateCompanyAgainstIcp({
+        icp,
+        lead: profile.lead,
+        decisionMakers: profile.decisionMakers,
+      });
+      res.json({ results: [result] });
+      return;
+    }
+
+    // Evaluate across all CRM companies (or provided leadIds)
+    const [leads, persons, rels] = await Promise.all([
+      facade.getLeads(),
+      facade.getPersons(),
+      facade.getCompanyPersonRelationships(),
+    ]);
+    const personMap = new Map(persons.map((p) => [p.id, p]));
+    const dmsByLead = new Map<string, any[]>();
+    for (const rel of rels) {
+      const person = personMap.get(rel.personId);
+      if (!person) continue;
+      const arr = dmsByLead.get(rel.leadId) || [];
+      arr.push({ person, relationship: rel });
+      dmsByLead.set(rel.leadId, arr);
+    }
+
+    const filterIds = Array.isArray(body.leadIds) && body.leadIds.length > 0 ? new Set(body.leadIds) : null;
+    const targets = filterIds ? leads.filter((l) => filterIds.has(l.id)) : leads;
+    const results = targets
+      .map((lead) =>
+        evaluateCompanyAgainstIcp({
+          icp,
+          lead,
+          decisionMakers: dmsByLead.get(lead.id) || [],
+        })
+      )
+      .sort((a, b) => b.overallScore - a.overallScore);
+
+    res.json({ total: results.length, icpName: icp.name, results });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to evaluate ICP fit.') });
+  }
+});
+
+// Lead Prioritization Engine
+protectedApi.post('/ai/prioritize', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const icps = await listIcpProfiles(facade);
+    const icp =
+      typeof body.icpId === 'string' && body.icpId.trim()
+        ? icps.find((p) => p.id === body.icpId.trim())
+        : icps.find((p) => p.isDefault) || icps[0];
+
+    const prioritized = await prioritizeCrmLeads(facade, {
+      icp,
+      leadIds: Array.isArray(body.leadIds) ? body.leadIds.map(String) : undefined,
+      limit: Number.isFinite(Number(body.limit)) ? Math.min(100, Math.max(1, Number(body.limit))) : 50,
+    });
+    res.json({
+      total: prioritized.length,
+      icpUsed: icp ? { id: icp.id, name: icp.name } : null,
+      prioritizedLeads: prioritized,
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to prioritize leads.') });
+  }
+});
+
+// On-Demand Daily Sales Briefing (No fake scheduler)
+protectedApi.post('/ai/daily-briefing', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const briefing = await generateDailySalesBriefing(facade, {
+      icpId: typeof body.icpId === 'string' ? body.icpId : undefined,
+    });
+    if (isPg) await postgresStorage.recordConnectorActivity('conn-gemini', briefing.aiStatus.mode === 'ai_assisted');
+    else storage.recordConnectorActivity('conn-gemini', briefing.aiStatus.mode === 'ai_assisted');
+    res.json(briefing);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to generate daily sales briefing.') });
+  }
+});
+
+// Company Sales Intelligence Report
+protectedApi.post('/ai/company-intelligence', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.leadId || typeof body.leadId !== 'string') {
+    res.status(400).json({ error: 'leadId string is required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const report = await generateCompanySalesIntelligence(facade, {
+      leadId: body.leadId.trim(),
+      icpId: typeof body.icpId === 'string' ? body.icpId.trim() : undefined,
+      includePrivateNotes: body.includePrivateNotes === true,
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'AI_COMPANY_INTELLIGENCE_GENERATED',
+        req.owner.email,
+        'company',
+        report.leadId,
+        {
+          mode: report.aiStatus.mode,
+          privateNotesAuthorized: report.contextAudit.privateNotesAuthorized,
+          proposedActionsCount: report.proposedActions.length,
+        },
+        normalizeClientIp(req)
+      );
+    }
+    res.json(report);
+  } catch (err: unknown) {
+    const status = err instanceof Error && err.message.includes('not found') ? 404 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to generate company intelligence report.') });
+  }
+});
+
+// Meeting Preparation Intelligence
+protectedApi.post('/ai/meeting-prep', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.leadId && !body.personId && !body.opportunityId) {
+    res.status(400).json({ error: 'Provide leadId, personId, or opportunityId.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const report = await generateMeetingPreparation(facade, {
+      leadId: typeof body.leadId === 'string' ? body.leadId.trim() : undefined,
+      personId: typeof body.personId === 'string' ? body.personId.trim() : undefined,
+      opportunityId: typeof body.opportunityId === 'string' ? body.opportunityId.trim() : undefined,
+      meetingGoal: typeof body.meetingGoal === 'string' ? body.meetingGoal.slice(0, 600) : undefined,
+      includePrivateNotes: body.includePrivateNotes === true,
+    });
+    res.json(report);
+  } catch (err: unknown) {
+    const status = err instanceof Error && err.message.includes('not found') ? 404 : 500;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to generate meeting preparation brief.') });
+  }
+});
+
+// Communication Drafting (Strictly draft_only — never sends)
+protectedApi.post('/ai/draft-message', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (body.draftType && !AI_DRAFT_TYPE_SET.has(String(body.draftType))) {
+    res.status(400).json({ error: 'Unsupported draftType.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const draft = await generateSalesCommunicationDraft(facade, {
+      leadId: typeof body.leadId === 'string' ? body.leadId.trim() : undefined,
+      personId: typeof body.personId === 'string' ? body.personId.trim() : undefined,
+      opportunityId: typeof body.opportunityId === 'string' ? body.opportunityId.trim() : undefined,
+      draftType: (body.draftType || 'intro_email') as any,
+      tone: body.tone as any,
+      customInstructions: typeof body.customInstructions === 'string' ? body.customInstructions.slice(0, 1000) : undefined,
+      includePrivateNotes: body.includePrivateNotes === true,
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'AI_COMMUNICATION_DRAFT_CREATED',
+        req.owner.email,
+        'draft',
+        draft.id,
+        {
+          draftType: draft.draftType,
+          channel: draft.channel,
+          status: draft.status,
+          autoSent: draft.autoSent,
+          leadId: draft.leadId,
+        },
+        normalizeClientIp(req)
+      );
+    }
+    res.status(201).json(draft);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to draft sales communication.') });
+  }
+});
+
+protectedApi.get('/ai/drafts', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const drafts = await listSavedDrafts(facade, {
+      leadId: typeof req.query.leadId === 'string' ? req.query.leadId : undefined,
+      personId: typeof req.query.personId === 'string' ? req.query.personId : undefined,
+    });
+    res.json({ total: drafts.length, drafts });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load saved drafts.') });
+  }
+});
+
+// Conversational AI Sales Agent
+protectedApi.get('/ai/conversations', async (_req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const conversations = await listAiConversations(facade);
+    res.json({ total: conversations.length, conversations });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load AI conversations.') });
+  }
+});
+
+protectedApi.post('/ai/conversations', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const conv = await createAiConversation(facade, {
+      title: typeof body.title === 'string' ? body.title : undefined,
+      contextScope: body.contextScope || { scopeType: 'portfolio', includePrivateNotes: false },
+    });
+    res.status(201).json(conv);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to create conversation.') });
+  }
+});
+
+protectedApi.delete('/ai/conversations/:id', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const deleted = await deleteAiConversation(facade, req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Conversation not found.' });
+      return;
+    }
+    res.json({ success: true });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to delete conversation.') });
+  }
+});
+
+protectedApi.post('/ai/conversations/:id/messages', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.message || typeof body.message !== 'string' || !body.message.trim()) {
+    res.status(400).json({ error: 'message string is required.' });
+    return;
+  }
+  if (body.message.length > 4000) {
+    res.status(400).json({ error: 'message exceeds 4000 character limit.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const result = await runSalesAgentConversationTurn(facade, {
+      conversationId: req.params.id === 'new' ? undefined : req.params.id,
+      userMessage: body.message,
+      contextScope: body.contextScope,
+      includePrivateNotes:
+        body.includePrivateNotes !== undefined ? body.includePrivateNotes === true : undefined,
+    });
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'AI_AGENT_CONVERSATION_TURN',
+        req.owner.email,
+        'conversation',
+        result.conversation.id,
+        {
+          scopeType: result.conversation.contextScope.scopeType,
+          toolsUsed: (result.assistantMessage.toolsUsed || []).map((t) => t.toolName),
+          privateNotesAuthorized: Boolean(result.assistantMessage.contextAudit?.privateNotesAuthorized),
+          proposedActionsCount: result.proposedActions.length,
+        },
+        normalizeClientIp(req)
+      );
+    }
+    res.json(result);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to process AI sales agent message.') });
+  }
+});
+
+// CRM Action Recommendations & Explicit Owner Approval Workflow
+protectedApi.get('/ai/actions', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const status = typeof req.query.status === 'string' ? (req.query.status as any) : 'all';
+    const actions = await listAiActionProposals(facade, status);
+    res.json({ total: actions.length, actions });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to load AI action proposals.') });
+  }
+});
+
+protectedApi.post('/ai/actions/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const result = await approveAndExecuteActionProposal(facade, req.params.id, actor);
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'AI_ACTION_PROPOSAL_APPROVED_EXECUTED',
+        req.owner.email,
+        'ai_action_proposal',
+        result.proposal.id,
+        {
+          actionType: result.proposal.actionType,
+          affectedEntity: result.proposal.affectedEntity,
+          executedEntityId: result.executedEntityId,
+        },
+        normalizeClientIp(req)
+      );
+    }
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    const status = msg.includes('not found') ? 404 : msg.includes('already') ? 409 : 400;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to approve and execute action proposal.') });
+  }
+});
+
+protectedApi.post('/ai/actions/:id/reject', async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const actor = req.owner?.fullName || req.owner?.email || 'Owner';
+    const rejected = await rejectActionProposal(
+      facade,
+      req.params.id,
+      actor,
+      typeof body.reason === 'string' ? body.reason : undefined
+    );
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'AI_ACTION_PROPOSAL_REJECTED',
+        req.owner.email,
+        'ai_action_proposal',
+        rejected.id,
+        { actionType: rejected.actionType, reason: rejected.rejectionReason },
+        normalizeClientIp(req)
+      );
+    }
+    res.json({ proposal: rejected });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    const status = msg.includes('not found') ? 404 : msg.includes('already') ? 409 : 400;
+    res.status(status).json({ error: sanitizeApiError(err, 'Failed to reject action proposal.') });
+  }
+});
+
+// Controlled Authorized Tool Execution Endpoint
+protectedApi.post('/ai/tools/execute', createRateLimitMiddleware(aiRateLimiter), async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, any>;
+  if (!body.toolName || typeof body.toolName !== 'string') {
+    res.status(400).json({ error: 'toolName string is required.' });
+    return;
+  }
+  try {
+    const { isPg } = checkStorageEngine();
+    const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const result = await executeControlledAgentTool(
+      {
+        facade,
+        includePrivateNotes: body.includePrivateNotes === true,
+      },
+      body.toolName.trim(),
+      body.args && typeof body.args === 'object' ? body.args : {}
+    );
+    res.json(result);
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Controlled tool execution rejected.') });
   }
 });
 

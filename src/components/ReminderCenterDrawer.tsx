@@ -9,8 +9,9 @@ import {
   Building2,
   User,
   Info,
+  Bot,
 } from 'lucide-react';
-import { CrmReminderCenterResponse, CrmReminderItem } from '../types.ts';
+import { AiAgentLaunchContext, CrmReminderCenterResponse, CrmReminderItem } from '../types.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
 
 interface ReminderCenterDrawerProps {
@@ -18,6 +19,7 @@ interface ReminderCenterDrawerProps {
   onOpenCompany: (leadId: string) => void;
   onOpenPerson: (personId: string) => void;
   onNavigateTasks: () => void;
+  onOpenAiAgent?: (ctx: AiAgentLaunchContext) => void;
 }
 
 export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
@@ -25,6 +27,7 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
   onOpenCompany,
   onOpenPerson,
   onNavigateTasks,
+  onOpenAiAgent,
 }) => {
   const [data, setData] = useState<CrmReminderCenterResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,6 +71,16 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
             </p>
           </div>
           <div className="flex items-center gap-1.5">
+            {onOpenAiAgent && (
+              <button
+                onClick={() => onOpenAiAgent({ tab: 'briefing' })}
+                className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap"
+                title="Open AI Daily Briefing"
+              >
+                <Bot className="w-3.5 h-3.5" />
+                AI Briefing
+              </button>
+            )}
             <button
               onClick={load}
               className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"

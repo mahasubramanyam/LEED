@@ -25,6 +25,7 @@ import {
   OutreachCampaign,
   ConnectorStatus,
   AppSettings,
+  AiAgentLaunchContext,
 } from './types.ts';
 
 interface OwnerProfile {
@@ -78,8 +79,17 @@ export default function App() {
   const [reminderCount, setReminderCount] = useState<number>(0);
   const [discoveryInitialCountry, setDiscoveryInitialCountry] = useState<string | undefined>(undefined);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [aiLaunchContext, setAiLaunchContext] = useState<AiAgentLaunchContext | null>(null);
   const [aiAvailable, setAiAvailable] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+
+  const openAiAgent = useCallback((ctx: AiAgentLaunchContext) => {
+    setSelectedLeadForDetail(null);
+    setSelectedPersonIdForDrawer(null);
+    setIsReminderDrawerOpen(false);
+    setAiLaunchContext({ ...ctx, nonce: Date.now() });
+    setCurrentTab('ai-agent');
+  }, []);
 
   // Sync theme with HTML class and localStorage
   useEffect(() => {
@@ -659,6 +669,7 @@ export default function App() {
                   onOpenImport={() => setIsImportModalOpen(true)}
                   onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
                   onOpenReminderCenter={() => setIsReminderDrawerOpen(true)}
+                  onOpenAiAgent={openAiAgent}
                 />
               )}
 
@@ -710,11 +721,13 @@ export default function App() {
                 <AiSalesAgent
                   leads={leads}
                   selectedLeadId={selectedLeadForDetail?.id}
+                  launchContext={aiLaunchContext}
                   onLeadSelect={(id) => {
                     const found = leads.find((l) => l.id === id);
                     if (found) setSelectedLeadForDetail(found);
                   }}
                   onAddActivityToLead={handleAddActivity}
+                  onDataMutated={fetchAllData}
                 />
               )}
 
@@ -755,6 +768,7 @@ export default function App() {
                   onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
                   onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
                   onOpenReminderCenter={() => setIsReminderDrawerOpen(true)}
+                  onOpenAiAgent={openAiAgent}
                 />
               )}
 
@@ -794,6 +808,7 @@ export default function App() {
         onAddActivity={handleAddActivity}
         onInspectUrl={handleInspectUrl}
         onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
+        onOpenAiAgent={openAiAgent}
         onRefreshData={fetchAllData}
       />
 
@@ -809,6 +824,7 @@ export default function App() {
               setSelectedLeadForDetail(found);
             }
           }}
+          onOpenAiAgent={openAiAgent}
           onDataMutated={fetchAllData}
         />
       )}
@@ -832,6 +848,7 @@ export default function App() {
             setIsReminderDrawerOpen(false);
             setCurrentTab('tasks');
           }}
+          onOpenAiAgent={openAiAgent}
         />
       )}
 

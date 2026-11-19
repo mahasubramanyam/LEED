@@ -1804,5 +1804,493 @@ export interface CrmPersonSearchFilter {
   tags?: string[];
 }
 
+// ============================================================================
+// PHASE 14 — AI Sales Agent & Intelligent Sales Assistance
+// ============================================================================
+
+export type AiClaimClassification =
+  | 'verified_fact'
+  | 'source_reported'
+  | 'ai_analysis'
+  | 'hypothesis'
+  | 'unknown';
+
+export type AiDraftType =
+  | 'intro_email'
+  | 'cold_outreach'
+  | 'warm_intro'
+  | 'follow_up'
+  | 'meeting_request'
+  | 'meeting_follow_up'
+  | 'partnership_proposal'
+  | 'business_inquiry'
+  | 'negotiation_follow_up'
+  | 'linkedin_message'
+  | 're_engagement'
+  | 'custom';
+
+export type AiDraftTone =
+  | 'consultative'
+  | 'executive'
+  | 'warm_professional'
+  | 'direct'
+  | 'formal';
+
+export type AiActionProposalType =
+  | 'create_task'
+  | 'schedule_review'
+  | 'update_relationship_status'
+  | 'create_opportunity'
+  | 'update_opportunity'
+  | 'record_interaction'
+  | 'prepare_draft'
+  | 'research_company'
+  | 'enrich_company'
+  | 'verify_contact'
+  | 'prioritize_lead';
+
+export type AiPriorityTier = 'critical' | 'high' | 'medium' | 'low';
+
+export interface AiProviderStatus {
+  provider: 'gemini';
+  configured: boolean;
+  available: boolean;
+  model: string;
+  mode: 'ai_assisted' | 'deterministic_fallback';
+  warning?: string;
+  capabilities: {
+    conversationalAgent: boolean;
+    companyIntelligence: boolean;
+    icpMatching: boolean;
+    leadPrioritization: boolean;
+    dailyBriefingOnDemand: boolean;
+    meetingPrep: boolean;
+    messageDrafting: boolean;
+    crmActionProposals: boolean;
+    automatedBackgroundBriefingScheduler: false;
+    automatedEmailOrMessageSending: false;
+  };
+  honestDisclosures: string[];
+}
+
+export interface OwnerSalesGoals {
+  businessName?: string;
+  valueProposition?: string;
+  productsAndServices: string[];
+  targetRegions: string[];
+  preferredDealSize?: string;
+  salesPriorities: string[];
+  communicationStyle?: AiDraftTone;
+  updatedAt: string;
+}
+
+export interface IcpProfile {
+  id: string;
+  name: string;
+  description?: string;
+  isDefault: boolean;
+  targetIndustries: string[];
+  excludedIndustries: string[];
+  targetCountries: string[];
+  targetBusinessTypes: string[];
+  preferredKeywords: string[];
+  targetDecisionMakerRoles: string[];
+  minDataQualityScore?: number;
+  minConfidenceScore?: number;
+  requireVerifiedContact?: boolean;
+  requireWebsite?: boolean;
+  preferredSizeNotes?: string;
+  strategicNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IcpCriterionEvaluation {
+  criterion: string;
+  status: 'matched' | 'partial' | 'mismatch' | 'excluded' | 'missing';
+  pointsAwarded: number;
+  maxPoints: number;
+  evidence: string;
+  factSource: AiClaimClassification;
+}
+
+export interface IcpMatchResult {
+  icpId: string;
+  icpName: string;
+  targetType: 'crm_company' | 'discovery_candidate';
+  leadId?: string;
+  companyName: string;
+  overallScore: number;
+  fitLabel: 'strong_fit' | 'good_fit' | 'partial_fit' | 'poor_fit' | 'excluded';
+  confidenceScore: number;
+  isInferred: true;
+  transparencyLabel: string;
+  matchingCriteria: IcpCriterionEvaluation[];
+  nonMatchingCriteria: IcpCriterionEvaluation[];
+  missingInformation: string[];
+  evidenceSummary: string[];
+  aiRationale?: string;
+  evaluatedAt: string;
+}
+
+export interface LeadPriorityFactor {
+  factor: string;
+  points: number;
+  maxPoints: number;
+  detail: string;
+  basis: 'verified_fact' | 'crm_activity' | 'derived_score';
+}
+
+export interface LeadPriorityAssessment {
+  leadId: string;
+  companyName: string;
+  industry: string;
+  country?: string;
+  priorityScore: number;
+  priorityTier: AiPriorityTier;
+  urgency: 'immediate' | 'this_week' | 'this_month' | 'monitor';
+  confidenceScore: number;
+  isDerived: true;
+  icpScore?: number;
+  icpName?: string;
+  dataQualityScore?: number;
+  dataQualityGrade?: string;
+  decisionMakerCount: number;
+  seniorDecisionMakerCount: number;
+  openOpportunityValue: number;
+  currency: string;
+  overdueTasksCount: number;
+  daysSinceLastInteraction: number | null;
+  factors: LeadPriorityFactor[];
+  explanation: string;
+  recommendedNextAction: string;
+  aiStrategicNote?: string;
+  evaluatedAt: string;
+}
+
+export interface AiEvidenceSource {
+  id: string;
+  entityType: 'company' | 'person' | 'interaction' | 'opportunity' | 'task' | 'private_note' | 'registry' | 'website' | 'enrichment' | 'icp';
+  entityId?: string;
+  label: string;
+  classification: AiClaimClassification;
+  excerpt?: string;
+  sourceUrl?: string;
+  timestamp?: string;
+}
+
+export interface AiClaimItem {
+  statement: string;
+  classification: AiClaimClassification;
+  evidenceRefIds: string[];
+  confidence?: number;
+}
+
+export interface AiContextScope {
+  scopeType: 'portfolio' | 'company' | 'person' | 'opportunity' | 'group';
+  leadId?: string;
+  personId?: string;
+  opportunityId?: string;
+  leadIds?: string[];
+  includePrivateNotes?: boolean;
+}
+
+export interface AiContextAudit {
+  scopeType: AiContextScope['scopeType'];
+  includedEntities: {
+    companies: number;
+    persons: number;
+    interactions: number;
+    opportunities: number;
+    tasks: number;
+    privateNotesIncluded: number;
+    privateNotesRedactedCount: number;
+  };
+  privateNotesAuthorized: boolean;
+  privateNotesNotice: string;
+}
+
+export interface CompanySalesIntelligenceReport {
+  id: string;
+  leadId: string;
+  companyName: string;
+  generatedAt: string;
+  aiStatus: {
+    mode: 'ai_assisted' | 'deterministic_fallback';
+    model: string;
+    warning?: string;
+  };
+  executiveSummary: string;
+  verifiedFacts: AiClaimItem[];
+  sourceReportedFacts: AiClaimItem[];
+  aiAnalysis: AiClaimItem[];
+  hypotheses: AiClaimItem[];
+  unknownInformation: string[];
+  businessModelOverview: string;
+  decisionMakersSummary: Array<{
+    personId: string;
+    fullName: string;
+    jobTitle?: string;
+    relationshipType: string;
+    isPrimaryContact: boolean;
+    verificationStatus: string;
+    contactAvailability: string;
+  }>;
+  icpFit?: IcpMatchResult;
+  priorityAssessment: LeadPriorityAssessment;
+  recommendedOutreachStrategy: string;
+  recommendedAngles: string[];
+  risksAndGaps: string[];
+  recommendedNextSteps: string[];
+  evidenceSources: AiEvidenceSource[];
+  contextAudit: AiContextAudit;
+  proposedActions: AiActionProposal[];
+}
+
+export interface MeetingPreparationReport {
+  id: string;
+  leadId?: string;
+  personId?: string;
+  opportunityId?: string;
+  meetingTitle: string;
+  meetingGoal?: string;
+  generatedAt: string;
+  aiStatus: {
+    mode: 'ai_assisted' | 'deterministic_fallback';
+    model: string;
+    warning?: string;
+  };
+  companySummary: string;
+  personSummary?: string;
+  opportunitySummary?: string;
+  relationshipHistorySummary: string;
+  previousInteractions: Array<{
+    id: string;
+    type: string;
+    occurredAt: string;
+    summary: string;
+    outcome?: string;
+    nextAction?: string;
+  }>;
+  openTasks: Array<{
+    id: string;
+    title: string;
+    dueDate: string;
+    priority: string;
+    status?: string;
+  }>;
+  suggestedObjectives: string[];
+  keyDiscussionTopics: string[];
+  strategicQuestions: string[];
+  likelyObjections: Array<{
+    objection: string;
+    suggestedResponse: string;
+    classification: 'ai_analysis' | 'hypothesis';
+  }>;
+  unknownsToVerify: string[];
+  recommendedOutcome: string;
+  followUpSuggestions: string[];
+  evidenceSources: AiEvidenceSource[];
+  contextAudit: AiContextAudit;
+  honestGroundingNote: string;
+}
+
+export interface DailySalesBriefing {
+  id: string;
+  generatedAt: string;
+  briefingDate: string;
+  deliveryMode: 'on_demand_manual';
+  schedulerActive: false;
+  schedulerDisclosure: string;
+  aiStatus: {
+    mode: 'ai_assisted' | 'deterministic_fallback';
+    model: string;
+    warning?: string;
+  };
+  executiveFocus: string;
+  summaryMetrics: {
+    totalCompanies: number;
+    overdueTasksCount: number;
+    todayFollowUpsCount: number;
+    upcomingMeetingsCount: number;
+    openOpportunitiesCount: number;
+    openPipelineValue: number;
+    companiesNeedingResearchCount: number;
+  };
+  priorityCompaniesToContact: Array<{
+    leadId: string;
+    companyName: string;
+    priorityScore: number;
+    priorityTier: AiPriorityTier;
+    urgency: string;
+    reason: string;
+    recommendedAction: string;
+  }>;
+  overdueAndDueFollowUps: Array<{
+    id: string;
+    category: string;
+    severity: string;
+    title: string;
+    dueDate?: string;
+    entityName: string;
+    leadId?: string;
+    personId?: string;
+  }>;
+  upcomingMeetings: Array<{
+    id: string;
+    title: string;
+    dueDate?: string;
+    entityName: string;
+    leadId?: string;
+    personId?: string;
+  }>;
+  opportunitiesRequiringAttention: Array<{
+    opportunityId: string;
+    leadId: string;
+    companyName: string;
+    title: string;
+    estimatedValue: number;
+    currency: string;
+    reason: string;
+    nextAction?: string;
+  }>;
+  companiesNeedingResearchOrEnrichment: Array<{
+    leadId: string;
+    companyName: string;
+    dataQualityScore: number;
+    dataQualityGrade: string;
+    missingKeyFields: string[];
+  }>;
+  highPotentialLeads: Array<{
+    leadId: string;
+    companyName: string;
+    icpScore?: number;
+    priorityScore: number;
+    highlight: string;
+  }>;
+  recentRelationshipUpdates: Array<{
+    entityType: 'company' | 'interaction';
+    id: string;
+    title: string;
+    subtitle: string;
+    timestamp: string;
+  }>;
+  recommendedActions: string[];
+  evidenceSources: AiEvidenceSource[];
+}
+
+export interface AiCommunicationDraft {
+  id: string;
+  draftType: AiDraftType;
+  channel: 'email' | 'linkedin' | 'custom';
+  tone: AiDraftTone;
+  status: 'draft_only';
+  autoSent: false;
+  sendingNotice: string;
+  leadId?: string;
+  companyName?: string;
+  personId?: string;
+  recipientName?: string;
+  recipientRole?: string;
+  opportunityId?: string;
+  subject?: string;
+  body: string;
+  personalizationBasis: AiClaimItem[];
+  caveatsAndPlaceholders: string[];
+  evidenceSources: AiEvidenceSource[];
+  contextAudit: AiContextAudit;
+  aiStatus: {
+    mode: 'ai_assisted' | 'deterministic_fallback';
+    model: string;
+    warning?: string;
+  };
+  createdAt: string;
+}
+
+export interface AiActionProposal {
+  id: string;
+  actionType: AiActionProposalType;
+  title: string;
+  rationale: string;
+  status: 'pending_approval' | 'approved_executed' | 'rejected';
+  affectedEntity: {
+    entityType: 'company' | 'person' | 'opportunity' | 'task' | 'draft';
+    entityId?: string;
+    entityName: string;
+  };
+  proposedChanges: Record<string, unknown>;
+  evidenceRefIds: string[];
+  conversationId?: string;
+  sourceReportId?: string;
+  createdAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  rejectionReason?: string;
+  executionSummary?: string;
+  executedEntityId?: string;
+}
+
+export interface AiToolExecutionRecord {
+  toolName: string;
+  mode: 'read_only' | 'proposal_only';
+  executedAt: string;
+  durationMs: number;
+  success: boolean;
+  summary: string;
+  error?: string;
+}
+
+export interface AiAgentMessage {
+  id: string;
+  role: 'owner' | 'assistant';
+  content: string;
+  createdAt: string;
+  aiStatus?: {
+    mode: 'ai_assisted' | 'deterministic_fallback';
+    model: string;
+    warning?: string;
+  };
+  toolsUsed?: AiToolExecutionRecord[];
+  evidenceSources?: AiEvidenceSource[];
+  claimsBreakdown?: {
+    verifiedFactsCount: number;
+    sourceReportedCount: number;
+    aiAnalysisCount: number;
+    hypothesesCount: number;
+    unknownsCount: number;
+  };
+  proposedActionIds?: string[];
+  contextAudit?: AiContextAudit;
+}
+
+export interface AiAgentConversation {
+  id: string;
+  title: string;
+  contextScope: AiContextScope;
+  messages: AiAgentMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiWorkspaceState {
+  version: 1;
+  ownerSalesGoals: OwnerSalesGoals;
+  icpProfiles: IcpProfile[];
+  conversations: AiAgentConversation[];
+  actionProposals: AiActionProposal[];
+  savedDrafts: AiCommunicationDraft[];
+  savedReports: Array<{
+    id: string;
+    reportType: 'company_intelligence' | 'meeting_prep' | 'daily_briefing';
+    leadId?: string;
+    personId?: string;
+    title: string;
+    createdAt: string;
+    summary: string;
+  }>;
+  updatedAt: string;
+}
+
+
 
 
