@@ -316,15 +316,31 @@ function findMatchingCrmLeadForCompany(
   return { kind: 'none', conflicts };
 }
 
-export function findMatchingPerson(
-  person: NormalizedImportPerson,
+export interface UncertainPersonCandidate {
+  personId: string;
+  fullName: string;
+  reason: string;
+  companyNames?: string[];
+}
+
+export function evaluatePersonIdentityMatches(
+  person: {
+    fullName?: string;
+    normalizedName: string;
+    email?: string;
+    linkedinSlug?: string;
+    phoneNormalized?: string;
+    relationshipType?: string;
+  },
   matchedLeadId: string | undefined,
   existingPersons: PersonRecord[],
-  existingRelationships: CompanyPersonRelationship[]
+  existingRelationships: CompanyPersonRelationship[],
+  leadNameById?: Map<string, string>
 ): {
   matchedPerson?: PersonRecord;
   matchedBy?: 'email' | 'linkedin' | 'phone' | 'name_company';
   matchedRelationship?: CompanyPersonRelationship;
+  uncertainMatches: UncertainPersonCandidate[];
 } {
   let matchedPerson: PersonRecord | undefined;
   let matchedBy: 'email' | 'linkedin' | 'phone' | 'name_company' | undefined;
@@ -360,14 +376,55 @@ export function findMatchingPerson(
 
   let matchedRelationship: CompanyPersonRelationship | undefined;
   if (matchedPerson && matchedLeadId) {
+    const targetRelType = (person.relationshipType || 'contact').toLowerCase();
     matchedRelationship = existingRelationships.find(
       (r) =>
         r.leadId === matchedLeadId &&
         r.personId === matchedPerson!.id &&
-        r.relationshipType.toLowerCase() === person.relationshipType.toLowerCase()
+        r.relationshipType.toLowerCase() === targetRelType
     );
   }
 
+  // Flag same-name individuals NOT auto-merged (e.g. identical name at another company without email/LinkedIn corroboration)
+  const uncertainMatches: UncertainPersonCandidate[] = [];
+  if (person.normalizedName) {
+    const sameNameOthers = existingPersons.filter(
+      (p) => p.normalizedName === person.normalizedName && p.id !== matchedPerson?.id
+    );
+    for (const candidate of sameNameOthers) {
+      const compNames = existingRelationships
+        .filter((r) => r.personId === candidate.id)
+        .map((r) => leadNameById?.get(r.leadId) || r.leadId);
+      uncertainMatches.push({
+        personId: candidate.id,
+        fullName: candidate.fullName,
+        reason: matchedPerson
+          ? 'Another separate CRM person record shares the same normalized name.'
+          : 'Shares identical normalized name at a different company without corroborating email, phone, or LinkedIn URL — preserved separately until owner review.',
+        companyNames: Array.from(new Set(compNames)),
+      });
+    }
+  }
+
+  return { matchedPerson, matchedBy, matchedRelationship, uncertainMatches };
+}
+
+export function findMatchingPerson(
+  person: NormalizedImportPerson,
+  matchedLeadId: string | undefined,
+  existingPersons: PersonRecord[],
+  existingRelationships: CompanyPersonRelationship[]
+): {
+  matchedPerson?: PersonRecord;
+  matchedBy?: 'email' | 'linkedin' | 'phone' | 'name_company';
+  matchedRelationship?: CompanyPersonRelationship;
+} {
+  const { matchedPerson, matchedBy, matchedRelationship } = evaluatePersonIdentityMatches(
+    { ...person, normalizedName: person.normalizedName || '' },
+    matchedLeadId,
+    existingPersons,
+    existingRelationships
+  );
   return { matchedPerson, matchedBy, matchedRelationship };
 }
 

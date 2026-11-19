@@ -2401,11 +2401,11 @@ export class PostgresStorage {
         leadId: input.leadId,
         personId,
         person: input.person,
-        filename: 'Manual CRM Entry',
+        filename: input.person.relationshipProvenance?.sourceName || 'Manual CRM Entry',
         rowNumber: 1,
         now,
       });
-      rel.sourceName = 'Owner Manual Entry';
+      rel.sourceName = input.person.relationshipProvenance?.sourceName || 'Owner Manual Entry';
       await this.upsertRelationshipInTransaction(client, rel, now);
 
       await client.query('COMMIT');
@@ -2416,6 +2416,263 @@ export class PostgresStorage {
       client.release();
     }
     return this.getLeadPersons(input.leadId);
+  }
+
+  public async linkExistingPersonToLead(input: {
+    personId: string;
+    leadId: string;
+    relationshipType: string;
+    jobTitle?: string;
+    designation?: string;
+    department?: string;
+    decisionMakerCategory?: string;
+    isPrimaryContact?: boolean;
+    sourceName?: string;
+    actorEmail: string;
+  }): Promise<LinkedPersonWithRelationship[]> {
+    const pool = this.getClient();
+    const client = await pool.connect();
+    const now = new Date().toISOString();
+    try {
+      await client.query('BEGIN');
+      await this.ensureMigration005Tables(client);
+
+      const pRes = await client.query('SELECT * FROM persons WHERE id = $1', [input.personId]);
+      if (pRes.rows.length === 0) throw new Error(`Person "${input.personId}" not found.`);
+      const person = this.mapRowToPerson(pRes.rows[0]);
+
+      const rel: CompanyPersonRelationship = {
+        id: `cpr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        leadId: input.leadId,
+        personId: input.personId,
+        relationshipType: input.relationshipType || 'contact',
+        jobTitle: input.jobTitle,
+        designation: input.designation,
+        department: input.department,
+        decisionMakerCategory: input.decisionMakerCategory,
+        isPrimaryContact: Boolean(input.isPrimaryContact),
+        sourceName: input.sourceName || 'Owner Manual Link',
+        provenance: {
+          sourceName: input.sourceName || 'Owner Manual Link',
+          sourceType: 'owner_manual',
+          employmentStatus: 'current',
+          firstObservedAt: now,
+          lastObservedAt: now,
+          reviewedByOwner: true,
+          linkedBy: input.actorEmail,
+        },
+        confidenceScore: person.confidenceScore || 75,
+        verificationStatus: 'user_provided',
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.upsertRelationshipInTransaction(client, rel, now);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+    return this.getLeadPersons(input.leadId);
+  }
+
+  public async updatePersonRecord(
+    personId: string,
+    updates: Partial<{
+      fullName: string;
+      email: string | null;
+      phone: string | null;
+      linkedinUrl: string | null;
+      city: string | null;
+      country: string | null;
+      countryCode: string | null;
+      bioSummary: string | null;
+      officialBioUrl: string | null;
+      seniority: string | null;
+      decisionMakingFunction: string | null;
+      verificationStatus: PersonRecord['verificationStatus'];
+    }>
+  ): Promise<PersonRecord | null> {
+    const pool = this.getClient();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await this.ensureMigration005Tables(client);
+
+      const curRes = await client.query('SELECT * FROM persons WHERE id = $1 FOR UPDATE', [personId]);
+      if (curRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      const cur = this.mapRowToPerson(curRes.rows[0]);
+      const cf = { ...(cur.customFields || {}) };
+      if (updates.bioSummary !== undefined) {
+        if (updates.bioSummary) cf.bioSummary = updates.bioSummary;
+        else delete cf.bioSummary;
+      }
+      if (updates.officialBioUrl !== undefined) {
+        if (updates.officialBioUrl) cf.officialBioUrl = updates.officialBioUrl;
+        else delete cf.officialBioUrl;
+      }
+      if (updates.seniority !== undefined) {
+        if (updates.seniority) cf.seniority = updates.seniority;
+        else delete cf.seniority;
+      }
+      if (updates.decisionMakingFunction !== undefined) {
+        if (updates.decisionMakingFunction) cf.decisionMakingFunction = updates.decisionMakingFunction;
+        else delete cf.decisionMakingFunction;
+      }
+
+      const nextFullName = updates.fullName?.trim() || cur.fullName;
+      const normalizedName = nextFullName
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+      const nextLinkedin =
+        updates.linkedinUrl === null ? null : updates.linkedinUrl ?? cur.linkedinUrl ?? null;
+      const nextSlug = nextLinkedin
+        ? nextLinkedin.match(/linkedin\.com\/in\/([^/?#]+)/i)?.[1]?.toLowerCase() || null
+        : null;
+      const nextEmail = updates.email === null ? null : updates.email ?? cur.email ?? null;
+      const nextEmailStatus =
+        updates.email === null
+          ? 'unavailable'
+          : updates.email
+          ? 'syntax_valid'
+          : cur.emailStatus;
+
+      const { rows } = await client.query(
+        `UPDATE persons SET
+          full_name = $2,
+          normalized_name = $3,
+          email = $4,
+          email_status = $5,
+          phone = $6,
+          linkedin_url = $7,
+          linkedin_slug = $8,
+          city = $9,
+          country = $10,
+          country_code = $11,
+          verification_status = $12,
+          custom_fields = $13,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+        [
+          personId,
+          nextFullName,
+          normalizedName,
+          nextEmail,
+          nextEmailStatus,
+          updates.phone === null ? null : updates.phone ?? cur.phone ?? null,
+          nextLinkedin,
+          nextSlug ?? cur.linkedinSlug ?? null,
+          updates.city === null ? null : updates.city ?? cur.city ?? null,
+          updates.country === null ? null : updates.country ?? cur.country ?? null,
+          updates.countryCode === null ? null : updates.countryCode ?? cur.countryCode ?? null,
+          updates.verificationStatus ?? cur.verificationStatus,
+          Object.keys(cf).length > 0 ? JSON.stringify(cf) : null,
+        ]
+      );
+      await client.query('COMMIT');
+      return rows[0] ? this.mapRowToPerson(rows[0]) : null;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  public async updateRelationshipRecord(
+    leadId: string,
+    relationshipId: string,
+    updates: Partial<{
+      relationshipType: string;
+      jobTitle: string | null;
+      designation: string | null;
+      department: string | null;
+      decisionMakerCategory: string | null;
+      isPrimaryContact: boolean;
+      employmentStatus: 'current' | 'historical' | 'unknown';
+      endedAt: string | null;
+      uncertainMatch: boolean;
+      reviewedByOwner: boolean;
+    }>
+  ): Promise<CompanyPersonRelationship | null> {
+    const pool = this.getClient();
+    const client = await pool.connect();
+    const now = new Date().toISOString();
+    try {
+      await client.query('BEGIN');
+      await this.ensureMigration005Tables(client);
+
+      const curRes = await client.query(
+        `SELECT * FROM company_person_relationships WHERE id = $1 AND lead_id = $2 FOR UPDATE`,
+        [relationshipId, leadId]
+      );
+      if (curRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      const cur = this.mapRowToRelationship(curRes.rows[0]);
+
+      if (updates.isPrimaryContact) {
+        await client.query(
+          `UPDATE company_person_relationships SET is_primary_contact = FALSE, updated_at = NOW()
+           WHERE lead_id = $1 AND is_primary_contact = TRUE AND id <> $2`,
+          [leadId, relationshipId]
+        );
+      }
+
+      const nextProv = {
+        ...(cur.provenance || {}),
+        ...(updates.employmentStatus ? { employmentStatus: updates.employmentStatus } : {}),
+        ...(updates.endedAt !== undefined ? { endedAt: updates.endedAt || undefined } : {}),
+        ...(updates.employmentStatus === 'historical' && !cur.provenance?.endedAt && updates.endedAt === undefined
+          ? { endedAt: now.slice(0, 10) }
+          : {}),
+        ...(updates.uncertainMatch !== undefined ? { uncertainMatch: updates.uncertainMatch } : {}),
+        ...(updates.reviewedByOwner !== undefined ? { reviewedByOwner: updates.reviewedByOwner } : {}),
+      };
+
+      const { rows } = await client.query(
+        `UPDATE company_person_relationships SET
+          relationship_type = $3,
+          job_title = $4,
+          designation = $5,
+          department = $6,
+          decision_maker_category = $7,
+          is_primary_contact = $8,
+          provenance = $9,
+          updated_at = NOW()
+        WHERE id = $1 AND lead_id = $2
+        RETURNING *`,
+        [
+          relationshipId,
+          leadId,
+          updates.relationshipType ?? cur.relationshipType,
+          updates.jobTitle === null ? null : updates.jobTitle ?? cur.jobTitle ?? null,
+          updates.designation === null ? null : updates.designation ?? cur.designation ?? null,
+          updates.department === null ? null : updates.department ?? cur.department ?? null,
+          updates.decisionMakerCategory === null
+            ? null
+            : updates.decisionMakerCategory ?? cur.decisionMakerCategory ?? null,
+          updates.isPrimaryContact ?? cur.isPrimaryContact,
+          JSON.stringify(nextProv),
+        ]
+      );
+      await client.query('COMMIT');
+      return rows[0] ? this.mapRowToRelationship(rows[0]) : null;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   public async setPrimaryContact(leadId: string, relationshipId: string): Promise<LinkedPersonWithRelationship[]> {
@@ -3355,6 +3612,12 @@ export class PostgresStorage {
         country_code = COALESCE(persons.country_code, EXCLUDED.country_code),
         city = COALESCE(persons.city, EXCLUDED.city),
         sources = EXCLUDED.sources,
+        confidence_score = GREATEST(COALESCE(persons.confidence_score, 0), COALESCE(EXCLUDED.confidence_score, 0)),
+        verification_status = CASE
+          WHEN persons.verification_status = 'officially_verified' THEN persons.verification_status
+          ELSE EXCLUDED.verification_status
+        END,
+        custom_fields = COALESCE(persons.custom_fields, '{}'::jsonb) || COALESCE(EXCLUDED.custom_fields, '{}'::jsonb),
         updated_at = NOW()`,
       [
         person.id,
@@ -3413,6 +3676,13 @@ export class PostgresStorage {
         department = COALESCE(company_person_relationships.department, EXCLUDED.department),
         decision_maker_category = COALESCE(company_person_relationships.decision_maker_category, EXCLUDED.decision_maker_category),
         is_primary_contact = company_person_relationships.is_primary_contact OR EXCLUDED.is_primary_contact,
+        source_name = COALESCE(company_person_relationships.source_name, EXCLUDED.source_name),
+        provenance = COALESCE(company_person_relationships.provenance, '{}'::jsonb) || COALESCE(EXCLUDED.provenance, '{}'::jsonb),
+        confidence_score = GREATEST(COALESCE(company_person_relationships.confidence_score, 0), COALESCE(EXCLUDED.confidence_score, 0)),
+        verification_status = CASE
+          WHEN company_person_relationships.verification_status = 'officially_verified' THEN company_person_relationships.verification_status
+          ELSE EXCLUDED.verification_status
+        END,
         updated_at = NOW()`,
       [
         rel.id,
@@ -3435,6 +3705,11 @@ export class PostgresStorage {
   }
 
   private mapRowToPerson(r: any): PersonRecord {
+    const cf = r.custom_fields
+      ? typeof r.custom_fields === 'string'
+        ? JSON.parse(r.custom_fields)
+        : r.custom_fields
+      : undefined;
     return {
       id: r.id,
       fullName: r.full_name,
@@ -3453,11 +3728,12 @@ export class PostgresStorage {
       sources: typeof r.sources === 'string' ? JSON.parse(r.sources) : r.sources || [],
       confidenceScore: Number(r.confidence_score ?? 50),
       verificationStatus: (r.verification_status || 'user_provided') as PersonRecord['verificationStatus'],
-      customFields: r.custom_fields
-        ? typeof r.custom_fields === 'string'
-          ? JSON.parse(r.custom_fields)
-          : r.custom_fields
-        : undefined,
+      bioSummary: cf?.bioSummary || undefined,
+      officialBioUrl: cf?.officialBioUrl || undefined,
+      seniority: cf?.seniority || undefined,
+      decisionMakingFunction: cf?.decisionMakingFunction || undefined,
+      attributeProvenance: cf?.attributeProvenance || undefined,
+      customFields: cf,
       createdAt: new Date(r.created_at).toISOString(),
       updatedAt: new Date(r.updated_at).toISOString(),
     };

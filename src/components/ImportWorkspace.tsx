@@ -14,6 +14,15 @@ import {
   Phone,
   Linkedin,
   Eye,
+  ExternalLink,
+  AlertTriangle,
+  Edit3,
+  Link2,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp,
+  Info,
+  X,
 } from 'lucide-react';
 import {
   CanonicalLead,
@@ -21,9 +30,14 @@ import {
   ImportBatchRowRecord,
   ImportMappingTemplate,
   PersonRecord,
+  SocialProviderDoc,
 } from '../types.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
 import { ImportWizard } from './ImportWizard.tsx';
+import {
+  EXPANDED_RELATIONSHIP_TYPES,
+  ROLE_TAXONOMY_SPECS,
+} from '../../shared/decisionMakerRoles.ts';
 
 interface ImportWorkspaceProps {
   existingLeads: CanonicalLead[];
@@ -31,15 +45,50 @@ interface ImportWorkspaceProps {
   onSelectLead: (lead: CanonicalLead) => void;
 }
 
+interface EnrichedPersonCompanyLink {
+  relationshipId: string;
+  leadId: string;
+  companyName: string;
+  companyCountryCode?: string;
+  relationshipType: string;
+  jobTitle?: string;
+  designation?: string;
+  department?: string;
+  decisionMakerCategory?: string;
+  isPrimaryContact: boolean;
+  sourceName?: string;
+  provenance?: Record<string, any>;
+  confidenceScore?: number;
+  verificationStatus?: string;
+  employmentStatus?: 'current' | 'historical' | 'unknown';
+  endedAt?: string;
+}
+
 interface EnrichedPersonItem extends PersonRecord {
-  companies?: Array<{
-    relationshipId: string;
-    leadId: string;
-    companyName: string;
-    relationshipType: string;
-    jobTitle?: string;
-    isPrimaryContact: boolean;
-  }>;
+  companies?: EnrichedPersonCompanyLink[];
+  possibleDuplicatePersonIds?: string[];
+}
+
+function formatRoleLabel(role: string): string {
+  const spec = ROLE_TAXONOMY_SPECS[role as keyof typeof ROLE_TAXONOMY_SPECS];
+  return spec ? spec.label : role.replace(/_/g, ' ');
+}
+
+function formatVerificationLabel(status?: string): string {
+  switch (status) {
+    case 'officially_verified':
+      return 'Officially Verified';
+    case 'directory_listed':
+      return 'Directory / Provider';
+    case 'web_observed':
+      return 'Company Website';
+    case 'syntax_validated':
+      return 'Syntax Validated';
+    case 'unverified':
+      return 'Unverified Search';
+    default:
+      return 'User Provided';
+  }
 }
 
 export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
@@ -63,10 +112,46 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
     rows: ImportBatchRowRecord[];
   } | null>(null);
 
-  // Persons directory
+  // Persons directory & Phase 11 filters
   const [persons, setPersons] = useState<EnrichedPersonItem[]>([]);
   const [personsSearch, setPersonsSearch] = useState('');
+  const [filterLeadId, setFilterLeadId] = useState('');
+  const [filterCountry, setFilterCountry] = useState('');
+  const [filterRole, setFilterRole] = useState('all');
+  const [filterDepartment, setFilterDepartment] = useState('');
+  const [filterVerification, setFilterVerification] = useState('all');
+  const [filterEmployment, setFilterEmployment] = useState('all');
   const [loadingPersons, setLoadingPersons] = useState(false);
+  const [personActionFeedback, setPersonActionFeedback] = useState<string | null>(null);
+
+  // Source coverage matrix
+  const [showProvidersMatrix, setShowProvidersMatrix] = useState(false);
+  const [socialProviders, setSocialProviders] = useState<SocialProviderDoc[]>([]);
+  const [loadingProviders, setLoadingProviders] = useState(false);
+
+  // Inline Edit Person & Link Company & Provenance expansion
+  const [expandedProvenanceId, setExpandedProvenanceId] = useState<string | null>(null);
+  const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
+  const [editPersonForm, setEditPersonForm] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    linkedinUrl: '',
+    city: '',
+    countryCode: '',
+    bioSummary: '',
+  });
+  const [savingPersonEdit, setSavingPersonEdit] = useState(false);
+
+  const [linkingPersonId, setLinkingPersonId] = useState<string | null>(null);
+  const [linkCompanyForm, setLinkCompanyForm] = useState({
+    leadId: '',
+    relationshipType: 'director',
+    jobTitle: '',
+    department: '',
+    isPrimaryContact: false,
+  });
+  const [savingLink, setSavingLink] = useState(false);
 
   const loadTemplates = useCallback(async () => {
     setLoadingTemplates(true);
@@ -94,11 +179,23 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
     }
   }, []);
 
-  const loadPersons = useCallback(async (search = '') => {
+  const loadPersons = useCallback(async () => {
     setLoadingPersons(true);
     try {
-      const q = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : '';
-      const res = await apiFetch(`/api/persons${q}`);
+      const params = new URLSearchParams();
+      if (personsSearch.trim()) params.set('search', personsSearch.trim());
+      if (filterLeadId) params.set('leadId', filterLeadId);
+      if (filterCountry.trim()) params.set('countryCode', filterCountry.trim().toUpperCase());
+      if (filterRole && filterRole !== 'all') params.set('relationshipType', filterRole);
+      if (filterDepartment.trim()) params.set('department', filterDepartment.trim());
+      if (filterVerification && filterVerification !== 'all') {
+        params.set('verificationStatus', filterVerification);
+      }
+      if (filterEmployment && filterEmployment !== 'all') {
+        params.set('employmentStatus', filterEmployment);
+      }
+      const qs = params.toString();
+      const res = await apiFetch(`/api/persons${qs ? `?${qs}` : ''}`);
       if (res.ok) {
         const data = await res.json();
         setPersons(data.persons || []);
@@ -106,13 +203,125 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
     } finally {
       setLoadingPersons(false);
     }
+  }, [
+    personsSearch,
+    filterLeadId,
+    filterCountry,
+    filterRole,
+    filterDepartment,
+    filterVerification,
+    filterEmployment,
+  ]);
+
+  const loadSocialProviders = useCallback(async () => {
+    setLoadingProviders(true);
+    try {
+      const res = await apiFetch('/api/decision-makers/providers');
+      if (res.ok) {
+        const data = await res.json();
+        setSocialProviders(data.providers || []);
+      }
+    } finally {
+      setLoadingProviders(false);
+    }
   }, []);
 
   useEffect(() => {
     if (activeSubTab === 'templates') loadTemplates();
     if (activeSubTab === 'batches') loadBatches();
-    if (activeSubTab === 'persons') loadPersons(personsSearch);
+    if (activeSubTab === 'persons') loadPersons();
   }, [activeSubTab, loadTemplates, loadBatches, loadPersons]);
+
+  const handleToggleProvidersMatrix = () => {
+    const next = !showProvidersMatrix;
+    setShowProvidersMatrix(next);
+    if (next && socialProviders.length === 0) {
+      loadSocialProviders();
+    }
+  };
+
+  const handleStartEditPerson = (p: EnrichedPersonItem) => {
+    setEditingPersonId(p.id);
+    setLinkingPersonId(null);
+    setEditPersonForm({
+      fullName: p.fullName || '',
+      email: p.email || '',
+      phone: p.phoneNormalized || p.phone || '',
+      linkedinUrl: p.linkedinUrl || '',
+      city: p.city || '',
+      countryCode: p.countryCode || '',
+      bioSummary: p.bioSummary || '',
+    });
+  };
+
+  const handleSavePersonEdit = async (e: React.FormEvent, personId: string) => {
+    e.preventDefault();
+    setSavingPersonEdit(true);
+    setPersonActionFeedback(null);
+    try {
+      const res = await apiFetch(`/api/persons/${personId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editPersonForm),
+      });
+      if (res.ok) {
+        setEditingPersonId(null);
+        setPersonActionFeedback('Updated person profile.');
+        await loadPersons();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setPersonActionFeedback(err.error || 'Failed to update person.');
+      }
+    } finally {
+      setSavingPersonEdit(false);
+    }
+  };
+
+  const handleStartLinkCompany = (personId: string) => {
+    setLinkingPersonId(personId);
+    setEditingPersonId(null);
+    setLinkCompanyForm({
+      leadId: existingLeads[0]?.id || '',
+      relationshipType: 'director',
+      jobTitle: '',
+      department: '',
+      isPrimaryContact: false,
+    });
+  };
+
+  const handleSaveCompanyLink = async (e: React.FormEvent, personId: string) => {
+    e.preventDefault();
+    if (!linkCompanyForm.leadId) return;
+    setSavingLink(true);
+    setPersonActionFeedback(null);
+    try {
+      const res = await apiFetch(`/api/persons/${personId}/link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(linkCompanyForm),
+      });
+      if (res.ok) {
+        setLinkingPersonId(null);
+        setPersonActionFeedback('Linked person to company.');
+        await loadPersons();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setPersonActionFeedback(err.error || 'Failed to link person to company.');
+      }
+    } finally {
+      setSavingLink(false);
+    }
+  };
+
+  const handleUnlinkCompany = async (leadId: string, relationshipId: string) => {
+    const res = await apiFetch(`/api/leads/${leadId}/persons/${relationshipId}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) {
+      setPersonActionFeedback('Unlinked relationship.');
+      await loadPersons();
+    }
+  };
 
   const handleDeleteTemplate = async (id: string) => {
     const res = await apiFetch(`/api/import/templates/${id}`, { method: 'DELETE' });
@@ -169,7 +378,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveSubTab(tab.id as any)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium border transition ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium border transition whitespace-nowrap shrink-0 ${
                   active
                     ? 'bg-blue-600 text-white border-blue-600'
                     : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
@@ -206,7 +415,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
             <button
               type="button"
               onClick={loadTemplates}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 whitespace-nowrap shrink-0"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loadingTemplates ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
@@ -271,7 +480,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
             <button
               type="button"
               onClick={loadBatches}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 whitespace-nowrap shrink-0"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loadingBatches ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
@@ -320,16 +529,16 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                           {b.status}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 font-mono">
+                      <td className="px-3 py-2.5 font-mono tabular-nums">
                         +{b.createdCompanies} / ~{b.updatedCompanies}
                       </td>
-                      <td className="px-3 py-2.5 font-mono">
+                      <td className="px-3 py-2.5 font-mono tabular-nums">
                         +{b.createdPersons} / {b.createdRelationships + b.updatedRelationships} links
                       </td>
-                      <td className="px-3 py-2.5 font-mono">
+                      <td className="px-3 py-2.5 font-mono tabular-nums">
                         {b.skippedRows} skip · {b.failedRows} fail
                       </td>
-                      <td className="px-3 py-2.5 text-[11px] text-slate-500 font-mono">
+                      <td className="px-3 py-2.5 text-[11px] text-slate-500 font-mono tabular-nums">
                         {new Date(b.createdAt).toLocaleString()}
                       </td>
                       <td className="px-3 py-2.5 text-right space-x-1.5">
@@ -409,114 +618,596 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
         </div>
       )}
 
-      {/* 4. DECISION-MAKERS DIRECTORY */}
+      {/* 4. DECISION-MAKERS GLOBAL DIRECTORY */}
       {activeSubTab === 'persons' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-              Decision-Makers &amp; Contacts Directory ({persons.length})
-            </h3>
-            <div className="flex gap-2">
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                <input
-                  type="text"
-                  value={personsSearch}
-                  onChange={(e) => setPersonsSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && loadPersons(personsSearch)}
-                  placeholder="Search person, email, or company..."
-                  className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                />
-              </div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                Decision-Makers &amp; Contacts Directory ({persons.length})
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Global M:N person directory across all CRM companies with role taxonomy, employment status, and source provenance.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => loadPersons(personsSearch)}
-                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 text-white"
+                onClick={handleToggleProvidersMatrix}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0"
               >
-                {loadingPersons ? 'Loading...' : 'Search'}
+                <Info className="w-3.5 h-3.5 text-blue-500" />
+                <span>{showProvidersMatrix ? 'Hide Source Coverage' : 'Source Coverage'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => loadPersons()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap shrink-0"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingPersons ? 'animate-spin' : ''}`} />
+                <span>Apply Filters</span>
               </button>
             </div>
           </div>
 
+          {/* Honest Decision-Maker Source Coverage Matrix */}
+          {showProvidersMatrix && (
+            <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 space-y-3 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold text-slate-900 dark:text-white">
+                  Permitted Decision-Maker Intelligence Sources &amp; Compliance Boundaries
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowProvidersMatrix(false)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              {loadingProviders ? (
+                <div className="text-slate-500">Loading provider matrix...</div>
+              ) : (
+                <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2">Source</th>
+                        <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2">Coverage &amp; Auth</th>
+                        <th className="px-3 py-2">Compliance &amp; Limitations</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {socialProviders.map((prov) => (
+                        <tr key={prov.id}>
+                          <td className="px-3 py-2 align-top">
+                            <div className="font-semibold text-slate-900 dark:text-white">{prov.name}</div>
+                            <div className="text-[10px] text-slate-500">{prov.officialProvider}</div>
+                          </td>
+                          <td className="px-3 py-2 align-top font-mono">
+                            <span
+                              className={
+                                prov.availability === 'operational'
+                                  ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                                  : prov.availability === 'credential_dependent'
+                                  ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                                  : 'text-rose-600 dark:text-rose-400 font-semibold'
+                              }
+                            >
+                              {prov.availability.replace(/_/g, ' ')}
+                            </span>
+                            {prov.availability === 'credential_dependent' && (
+                              <div className="text-[10px] text-slate-500">
+                                {prov.configuredInVault ? 'Configured in Vault' : 'Needs Vault Key'}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 align-top text-slate-600 dark:text-slate-300">
+                            <div>{prov.countryCoverage}</div>
+                            <div className="text-[10px] text-slate-500">{prov.authentication}</div>
+                          </td>
+                          <td className="px-3 py-2 align-top text-slate-600 dark:text-slate-400">
+                            {prov.honestStatusNote}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Multi-Dimensional Filter Strip */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              <input
+                type="text"
+                value={personsSearch}
+                onChange={(e) => setPersonsSearch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && loadPersons()}
+                placeholder="Name, email, title, company..."
+                className="w-full pl-8 pr-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+              />
+            </div>
+
+            <select
+              value={filterLeadId}
+              onChange={(e) => setFilterLeadId(e.target.value)}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+            >
+              <option value="">All Companies ({existingLeads.length})</option>
+              {existingLeads.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.companyName}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={filterRole}
+              onChange={(e) => setFilterRole(e.target.value)}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+            >
+              <option value="all">All Decision-Maker Roles</option>
+              {EXPANDED_RELATIONSHIP_TYPES.map((role) => (
+                <option key={role} value={role}>
+                  {formatRoleLabel(role)}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={filterEmployment}
+              onChange={(e) => setFilterEmployment(e.target.value)}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+            >
+              <option value="all">All Employment Statuses</option>
+              <option value="current">Current Only</option>
+              <option value="historical">Historical / Former</option>
+              <option value="unknown">Unknown Tenure</option>
+            </select>
+
+            <input
+              type="text"
+              value={filterDepartment}
+              onChange={(e) => setFilterDepartment(e.target.value)}
+              placeholder="Filter department (e.g. Procurement)"
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+            />
+
+            <input
+              type="text"
+              maxLength={2}
+              value={filterCountry}
+              onChange={(e) => setFilterCountry(e.target.value.toUpperCase())}
+              placeholder="Country ISO (e.g. NO, GB)"
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono uppercase"
+            />
+
+            <select
+              value={filterVerification}
+              onChange={(e) => setFilterVerification(e.target.value)}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+            >
+              <option value="all">All Verification Levels</option>
+              <option value="officially_verified">Officially Verified</option>
+              <option value="web_observed">Company Website</option>
+              <option value="directory_listed">Directory / Provider</option>
+              <option value="syntax_validated">Syntax Validated</option>
+              <option value="user_provided">User Provided</option>
+              <option value="unverified">Unverified Search</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPersonsSearch('');
+                setFilterLeadId('');
+                setFilterCountry('');
+                setFilterRole('all');
+                setFilterDepartment('');
+                setFilterVerification('all');
+                setFilterEmployment('all');
+              }}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              Reset Filters
+            </button>
+          </div>
+
+          {personActionFeedback && (
+            <div className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs text-slate-700 dark:text-slate-300 flex items-center justify-between">
+              <span>{personActionFeedback}</span>
+              <button
+                type="button"
+                onClick={() => setPersonActionFeedback(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {persons.length === 0 ? (
             <div className="p-8 text-center text-xs text-slate-500">
-              No decision-makers or contacts stored yet. Import a CSV/XLSX with contact columns or add decision-makers inside any Lead profile.
+              No decision-makers match your filters. Discover decision-makers from any Lead profile or Discovery candidate, or import a contact spreadsheet.
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {persons.map((p) => (
-                <div
-                  key={p.id}
-                  className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 space-y-2 text-xs"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-bold text-slate-900 dark:text-white text-sm">
-                        {p.fullName}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {persons.map((p) => {
+                const provExpanded = expandedProvenanceId === p.id;
+                const isEditing = editingPersonId === p.id;
+                const isLinking = linkingPersonId === p.id;
+
+                return (
+                  <div
+                    key={p.id}
+                    className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 space-y-2.5 text-xs"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-900 dark:text-white text-sm truncate">
+                          {p.fullName}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          {[
+                            p.seniority ? p.seniority.replace(/_/g, ' ') : undefined,
+                            p.decisionMakingFunction,
+                            [p.city, p.countryCode].filter(Boolean).join(', '),
+                          ]
+                            .filter(Boolean)
+                            .join(' · ') || 'Location unspecified'}
+                        </div>
                       </div>
-                      <div className="text-[11px] text-slate-500">
-                        {[p.city, p.countryCode].filter(Boolean).join(', ') || 'Location unspecified'}
+                      <div className="text-right shrink-0">
+                        <div className="text-[11px] font-medium text-slate-700 dark:text-slate-300 flex items-center justify-end gap-1">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>{formatVerificationLabel(p.verificationStatus)}</span>
+                        </div>
+                        <div className="text-[10px] font-mono text-slate-500 tabular-nums">
+                          {p.confidenceScore}% confidence
+                        </div>
                       </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                      {p.verificationStatus}
-                    </span>
-                  </div>
 
-                  <div className="flex flex-wrap gap-3 text-[11px] text-slate-600 dark:text-slate-300">
-                    {p.email && (
-                      <span className="inline-flex items-center gap-1 font-mono">
-                        <Mail className="w-3 h-3 text-cyan-500" />
-                        {p.email}
-                      </span>
+                    {p.possibleDuplicatePersonIds && p.possibleDuplicatePersonIds.length > 0 && (
+                      <div className="px-2.5 py-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 text-[11px] flex items-start gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>
+                          Same name exists on {p.possibleDuplicatePersonIds.length} other person record(s). Not auto-merged without corroborating email/LinkedIn/company.
+                        </span>
+                      </div>
                     )}
-                    {(p.phoneNormalized || p.phone) && (
-                      <span className="inline-flex items-center gap-1 font-mono">
-                        <Phone className="w-3 h-3 text-emerald-500" />
-                        {p.phoneNormalized || p.phone}
-                      </span>
+
+                    {p.bioSummary && (
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                        {p.bioSummary}
+                      </p>
                     )}
-                    {sanitizeExternalUrl(p.linkedinUrl) && (
-                      <a
-                        href={sanitizeExternalUrl(p.linkedinUrl)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-blue-500 hover:underline"
+
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                      {p.email && (
+                        <span className="inline-flex items-center gap-1 font-mono">
+                          <Mail className="w-3 h-3 text-cyan-500" />
+                          {p.email}
+                        </span>
+                      )}
+                      {(p.phoneNormalized || p.phone) && (
+                        <span className="inline-flex items-center gap-1 font-mono">
+                          <Phone className="w-3 h-3 text-emerald-500" />
+                          {p.phoneNormalized || p.phone}
+                        </span>
+                      )}
+                      {sanitizeExternalUrl(p.linkedinUrl) && (
+                        <a
+                          href={sanitizeExternalUrl(p.linkedinUrl)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          <Linkedin className="w-3 h-3" />
+                          <span>LinkedIn</span>
+                        </a>
+                      )}
+                      {sanitizeExternalUrl(p.officialBioUrl) && (
+                        <a
+                          href={sanitizeExternalUrl(p.officialBioUrl)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Official Bio</span>
+                        </a>
+                      )}
+                    </div>
+
+                    {/* Linked Companies (M:N) */}
+                    {p.companies && p.companies.length > 0 && (
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+                        <div className="text-[10px] uppercase font-semibold text-slate-500">
+                          Linked Companies ({p.companies.length})
+                        </div>
+                        <div className="space-y-1">
+                          {p.companies.map((c) => {
+                            const leadObj = existingLeads.find((l) => l.id === c.leadId);
+                            const isHistorical = c.employmentStatus === 'historical';
+                            return (
+                              <div
+                                key={c.relationshipId}
+                                className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+                              >
+                                <div className="min-w-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => leadObj && onSelectLead(leadObj)}
+                                    className="inline-flex items-center gap-1 font-semibold text-slate-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition text-left"
+                                  >
+                                    <Building2 className="w-3 h-3 text-blue-500 shrink-0" />
+                                    <span className="truncate">{c.companyName}</span>
+                                  </button>
+                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                    {c.jobTitle || formatRoleLabel(c.relationshipType)}
+                                    {c.department ? ` · ${c.department}` : ''}
+                                    {c.isPrimaryContact ? ' · Primary' : ''}
+                                    {isHistorical
+                                      ? ` · Historical${c.endedAt ? ` (ended ${c.endedAt})` : ''}`
+                                      : c.employmentStatus === 'unknown'
+                                      ? ' · Tenure unknown'
+                                      : ' · Current'}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnlinkCompany(c.leadId, c.relationshipId)}
+                                  className="text-slate-400 hover:text-rose-500 p-1 shrink-0"
+                                  title="Unlink relationship"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Bar */}
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap text-[11px]">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            isEditing ? setEditingPersonId(null) : handleStartEditPerson(p)
+                          }
+                          className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>{isEditing ? 'Cancel Edit' : 'Edit'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            isLinking ? setLinkingPersonId(null) : handleStartLinkCompany(p.id)
+                          }
+                          className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium"
+                        >
+                          <Link2 className="w-3 h-3" />
+                          <span>{isLinking ? 'Cancel Link' : 'Link Company'}</span>
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedProvenanceId(provExpanded ? null : p.id)}
+                        className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                       >
-                        <Linkedin className="w-3 h-3" />
-                        LinkedIn
-                      </a>
+                        <span>Provenance</span>
+                        {provExpanded ? (
+                          <ChevronUp className="w-3 h-3" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Inline Edit Form */}
+                    {isEditing && (
+                      <form
+                        onSubmit={(e) => handleSavePersonEdit(e, p.id)}
+                        className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 space-y-2"
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            required
+                            value={editPersonForm.fullName}
+                            onChange={(e) =>
+                              setEditPersonForm((f) => ({ ...f, fullName: e.target.value }))
+                            }
+                            placeholder="Full name"
+                            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs"
+                          />
+                          <input
+                            type="email"
+                            value={editPersonForm.email}
+                            onChange={(e) =>
+                              setEditPersonForm((f) => ({ ...f, email: e.target.value }))
+                            }
+                            placeholder="Business email"
+                            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-mono"
+                          />
+                          <input
+                            type="text"
+                            value={editPersonForm.phone}
+                            onChange={(e) =>
+                              setEditPersonForm((f) => ({ ...f, phone: e.target.value }))
+                            }
+                            placeholder="Phone"
+                            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-mono"
+                          />
+                          <input
+                            type="url"
+                            value={editPersonForm.linkedinUrl}
+                            onChange={(e) =>
+                              setEditPersonForm((f) => ({ ...f, linkedinUrl: e.target.value }))
+                            }
+                            placeholder="https://linkedin.com/in/..."
+                            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-mono"
+                          />
+                        </div>
+                        <textarea
+                          rows={2}
+                          value={editPersonForm.bioSummary}
+                          onChange={(e) =>
+                            setEditPersonForm((f) => ({ ...f, bioSummary: e.target.value }))
+                          }
+                          placeholder="Executive summary / public bio note"
+                          className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingPersonId(null)}
+                            className="px-2.5 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={savingPersonEdit}
+                            className="px-3 py-1 rounded bg-blue-600 text-white font-semibold text-xs disabled:opacity-50"
+                          >
+                            {savingPersonEdit ? 'Saving...' : 'Save Changes'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {/* Inline Link to Existing Company Form */}
+                    {isLinking && (
+                      <form
+                        onSubmit={(e) => handleSaveCompanyLink(e, p.id)}
+                        className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 space-y-2"
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <select
+                            required
+                            value={linkCompanyForm.leadId}
+                            onChange={(e) =>
+                              setLinkCompanyForm((f) => ({ ...f, leadId: e.target.value }))
+                            }
+                            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs"
+                          >
+                            <option value="">Select CRM company...</option>
+                            {existingLeads.map((l) => (
+                              <option key={l.id} value={l.id}>
+                                {l.companyName}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={linkCompanyForm.relationshipType}
+                            onChange={(e) =>
+                              setLinkCompanyForm((f) => ({
+                                ...f,
+                                relationshipType: e.target.value,
+                              }))
+                            }
+                            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs"
+                          >
+                            {EXPANDED_RELATIONSHIP_TYPES.map((role) => (
+                              <option key={role} value={role}>
+                                {formatRoleLabel(role)}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="text"
+                            value={linkCompanyForm.jobTitle}
+                            onChange={(e) =>
+                              setLinkCompanyForm((f) => ({ ...f, jobTitle: e.target.value }))
+                            }
+                            placeholder="Job Title (e.g. Board Chair)"
+                            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs"
+                          />
+                          <input
+                            type="text"
+                            value={linkCompanyForm.department}
+                            onChange={(e) =>
+                              setLinkCompanyForm((f) => ({ ...f, department: e.target.value }))
+                            }
+                            placeholder="Department"
+                            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={linkCompanyForm.isPrimaryContact}
+                              onChange={(e) =>
+                                setLinkCompanyForm((f) => ({
+                                  ...f,
+                                  isPrimaryContact: e.target.checked,
+                                }))
+                              }
+                            />
+                            <span>Set as Primary Contact</span>
+                          </label>
+                          <button
+                            type="submit"
+                            disabled={savingLink || !linkCompanyForm.leadId}
+                            className="px-3 py-1 rounded bg-indigo-600 text-white font-semibold text-xs disabled:opacity-50"
+                          >
+                            {savingLink ? 'Linking...' : 'Link to Company'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {/* Expandable Provenance & Attribution Ledger */}
+                    {provExpanded && (
+                      <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1.5 text-[11px]">
+                        <div className="font-semibold text-slate-700 dark:text-slate-200">
+                          Sources &amp; Attribute Provenance
+                        </div>
+                        {p.sources && p.sources.length > 0 ? (
+                          <div className="space-y-1">
+                            {p.sources.map((s, idx) => (
+                              <div key={idx} className="flex items-center justify-between gap-2 text-slate-500">
+                                <span className="truncate">
+                                  {s.sourceName}
+                                  {s.attribution ? ` · ${s.attribution}` : ''}
+                                </span>
+                                <span className="font-mono text-[10px] shrink-0 tabular-nums">
+                                  {s.retrievedAt ? new Date(s.retrievedAt).toLocaleDateString() : ''}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-slate-500">No external discovery sources recorded.</div>
+                        )}
+                        {p.attributeProvenance && Object.keys(p.attributeProvenance).length > 0 && (
+                          <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                            {Object.values(p.attributeProvenance).map((ap, idx) => (
+                              <div key={idx} className="flex items-center justify-between gap-2 text-[10px] text-slate-500">
+                                <span className="font-mono text-slate-700 dark:text-slate-300">
+                                  {ap.attribute}: {ap.sourceType}
+                                </span>
+                                <span className="truncate">{ap.sourceName}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
-
-                  {p.companies && p.companies.length > 0 && (
-                    <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1">
-                      <div className="text-[10px] uppercase font-semibold text-slate-500">
-                        Linked Companies (M:N)
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {p.companies.map((c) => {
-                          const leadObj = existingLeads.find((l) => l.id === c.leadId);
-                          return (
-                            <button
-                              key={c.relationshipId}
-                              type="button"
-                              onClick={() => leadObj && onSelectLead(leadObj)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] hover:border-blue-500 transition"
-                            >
-                              <Building2 className="w-3 h-3 text-blue-500" />
-                              <span className="font-semibold">{c.companyName}</span>
-                              <span className="text-slate-400">
-                                ({c.jobTitle || c.relationshipType})
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -524,3 +1215,4 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
     </div>
   );
 };
+

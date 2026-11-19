@@ -1,4 +1,5 @@
 import { AbnConnector } from './adapters/abnAdapter.js';
+import { ApolloPeopleConnector } from './adapters/apolloPeopleAdapter.js';
 import { BraveSearchConnector } from './adapters/braveSearchAdapter.js';
 import { BrregConnector } from './adapters/brregAdapter.js';
 import { ChZefixConnector } from './adapters/chZefixAdapter.js';
@@ -58,6 +59,7 @@ export function ensureConnectorsRegistered(registry: ConnectorRegistry = connect
     new OpenCorporatesConnector(),
     new BraveSearchConnector(),
     new GoogleCseConnector(),
+    new ApolloPeopleConnector(),
     new WebInspectorConnector(),
     new GeminiConnector(),
   ];
@@ -283,6 +285,7 @@ export {
   OpenCorporatesConnector,
   BraveSearchConnector,
   GoogleCseConnector,
+  ApolloPeopleConnector,
   WebInspectorConnector,
   GeminiConnector,
 };

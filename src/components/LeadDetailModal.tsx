@@ -31,6 +31,11 @@ import {
   Linkedin,
   Trash2,
   Briefcase,
+  Search,
+  Star,
+  History,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import {
   AttributeSourceProvenance,
@@ -42,9 +47,15 @@ import {
   VerificationHistoryEntry,
   RegistryVerificationState,
   LinkedPersonWithRelationship,
+  DecisionMakerCandidate,
+  DecisionMakerDiscoveryResponse,
 } from '../types.js';
 import { GeoSelector } from './GeoSelector.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
+import {
+  EXPANDED_RELATIONSHIP_TYPES,
+  ROLE_TAXONOMY_SPECS,
+} from '../../shared/decisionMakerRoles.ts';
 import {
   getUiIdentifierOptions,
   canonicalizeIdentifierType,
@@ -305,6 +316,39 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
     isPrimaryContact: false,
   });
 
+  // Phase 11 Decision-Maker Discovery & Approval state
+  const [dmTargetJobTitle, setDmTargetJobTitle] = useState('');
+  const [dmTargetDepartment, setDmTargetDepartment] = useState('');
+  const [dmTargetRole, setDmTargetRole] = useState('');
+  const [dmIncludeHistorical, setDmIncludeHistorical] = useState(true);
+  const [isDiscoveringDm, setIsDiscoveringDm] = useState(false);
+  const [dmDiscoveryResult, setDmDiscoveryResult] = useState<DecisionMakerDiscoveryResponse | null>(null);
+  const [dmError, setDmError] = useState<string | null>(null);
+  const [selectedDmIds, setSelectedDmIds] = useState<Set<string>>(new Set());
+  const [isApprovingDm, setIsApprovingDm] = useState(false);
+  const [dmSaveBanner, setDmSaveBanner] = useState<string | null>(null);
+  const [dmAiPlan, setDmAiPlan] = useState<{
+    suggestedQueries: string[];
+    targetTitles: string[];
+    rationale: string;
+    engine: string;
+  } | null>(null);
+  const [isPlanningDmAi, setIsPlanningDmAi] = useState(false);
+
+  // Inline Edit & Provenance for saved linked contacts
+  const [expandedContactProvId, setExpandedContactProvId] = useState<string | null>(null);
+  const [editingRelId, setEditingRelId] = useState<string | null>(null);
+  const [editContactForm, setEditContactForm] = useState({
+    personId: '',
+    fullName: '',
+    email: '',
+    phone: '',
+    linkedinUrl: '',
+    relationshipType: 'director',
+    jobTitle: '',
+    department: '',
+  });
+
   const fetchLinkedPersons = async (leadId: string) => {
     setLoadingPersons(true);
     try {
@@ -348,6 +392,13 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
     setVerificationError(null);
     setIsAddingPerson(false);
     setPersonError(null);
+    setDmDiscoveryResult(null);
+    setDmError(null);
+    setSelectedDmIds(new Set());
+    setDmSaveBanner(null);
+    setDmAiPlan(null);
+    setEditingRelId(null);
+    setExpandedContactProvId(null);
     fetchLinkedPersons(lead.id);
   }, [lead?.id]);
 
@@ -439,6 +490,186 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
       }
     } catch {
       // ignore
+    }
+  };
+
+  const handleSetPrimaryContact = async (relationshipId: string) => {
+    try {
+      const res = await apiFetch(`/api/leads/${lead.id}/persons/${relationshipId}/primary`, {
+        method: 'PUT',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLinkedPersons(data.persons || []);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleToggleEmploymentStatus = async (relationshipId: string, currentStatus?: string) => {
+    const nextStatus = currentStatus === 'historical' ? 'current' : 'historical';
+    try {
+      const res = await apiFetch(`/api/leads/${lead.id}/persons/${relationshipId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employmentStatus: nextStatus,
+          endedAt: nextStatus === 'historical' ? new Date().toISOString().slice(0, 10) : undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLinkedPersons(data.persons || []);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleStartEditContact = (item: LinkedPersonWithRelationship) => {
+    setEditingRelId(item.relationship.id);
+    setEditContactForm({
+      personId: item.person.id,
+      fullName: item.person.fullName,
+      email: item.person.email || '',
+      phone: item.person.phoneNormalized || item.person.phone || '',
+      linkedinUrl: item.person.linkedinUrl || '',
+      relationshipType: item.relationship.relationshipType || 'director',
+      jobTitle: item.relationship.jobTitle || '',
+      department: item.relationship.department || '',
+    });
+  };
+
+  const handleSaveEditContact = async (e: React.FormEvent, relationshipId: string) => {
+    e.preventDefault();
+    try {
+      await apiFetch(`/api/persons/${editContactForm.personId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: editContactForm.fullName,
+          email: editContactForm.email || undefined,
+          phone: editContactForm.phone || undefined,
+          linkedinUrl: editContactForm.linkedinUrl || undefined,
+        }),
+      });
+      const relRes = await apiFetch(`/api/leads/${lead.id}/persons/${relationshipId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          relationshipType: editContactForm.relationshipType,
+          jobTitle: editContactForm.jobTitle || undefined,
+          department: editContactForm.department || undefined,
+        }),
+      });
+      if (relRes.ok) {
+        const data = await relRes.json();
+        setLinkedPersons(data.persons || []);
+        setEditingRelId(null);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleGenerateDmAiPlan = async () => {
+    setIsPlanningDmAi(true);
+    setDmError(null);
+    try {
+      const res = await apiFetch('/api/decision-makers/ai-queries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: lead.companyName,
+          domain: lead.domain,
+          countryCode: lead.address?.countryCode,
+          industry: lead.industry,
+          targetJobTitle: dmTargetJobTitle.trim() || undefined,
+          targetDepartment: dmTargetDepartment.trim() || undefined,
+          targetRelationshipType: dmTargetRole || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate AI query plan');
+      setDmAiPlan(data);
+    } catch (err: unknown) {
+      setDmError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsPlanningDmAi(false);
+    }
+  };
+
+  const handleDiscoverDecisionMakers = async () => {
+    setIsDiscoveringDm(true);
+    setDmError(null);
+    setDmSaveBanner(null);
+    try {
+      const res = await apiFetch('/api/decision-makers/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadId: lead.id,
+          companyName: lead.companyName,
+          domain: lead.domain,
+          website: lead.website,
+          countryCode: lead.address?.countryCode,
+          registrationNumber: lead.registrationNumber,
+          registrationType: lead.registrationType,
+          industry: lead.industry,
+          targetJobTitle: dmTargetJobTitle.trim() || undefined,
+          targetDepartment: dmTargetDepartment.trim() || undefined,
+          targetRelationshipType: dmTargetRole || undefined,
+          includeHistorical: dmIncludeHistorical,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Decision-maker discovery failed');
+      setDmDiscoveryResult(data);
+      setSelectedDmIds(new Set());
+      if (data.aiQueryPlan) setDmAiPlan(data.aiQueryPlan);
+    } catch (err: unknown) {
+      setDmError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDiscoveringDm(false);
+    }
+  };
+
+  const toggleDmCandidate = (candidateId: string) => {
+    setSelectedDmIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(candidateId)) next.delete(candidateId);
+      else next.add(candidateId);
+      return next;
+    });
+  };
+
+  const handleApproveSelectedDm = async () => {
+    if (!dmDiscoveryResult || selectedDmIds.size === 0) return;
+    const approved: DecisionMakerCandidate[] = dmDiscoveryResult.candidates.filter((c) =>
+      selectedDmIds.has(c.candidateId)
+    );
+    if (approved.length === 0) return;
+    setIsApprovingDm(true);
+    setDmError(null);
+    try {
+      const res = await apiFetch('/api/decision-makers/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadId: lead.id,
+          candidates: approved,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to approve and save contacts');
+      setLinkedPersons(data.persons || []);
+      setSelectedDmIds(new Set());
+      setDmSaveBanner(`Saved ${approved.length} approved decision-maker(s) into CRM with provenance.`);
+    } catch (err: unknown) {
+      setDmError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsApprovingDm(false);
     }
   };
 
@@ -1438,21 +1669,310 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
           {/* 1B. DECISION-MAKERS & M:N RELATIONSHIPS TAB */}
           {activeTab === 'contacts' && (
             <div className="space-y-4 text-xs">
+              {/* Company-to-Person Discovery Panel (Explicit Owner Review & Approval) */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
+                      <Search className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Discover Decision-Makers for {lead.companyName}</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Queries official website leadership pages, corporate officer registries, Wikidata, and configured authorized providers. Discovered candidates require explicit approval before CRM save.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleGenerateDmAiPlan}
+                      disabled={isPlanningDmAi}
+                      className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-medium rounded flex items-center gap-1 text-xs transition whitespace-nowrap shrink-0 disabled:opacity-50"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>{isPlanningDmAi ? 'Planning...' : 'AI Query Plan'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDiscoverDecisionMakers}
+                      disabled={isDiscoveringDm}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded flex items-center gap-1.5 text-xs transition whitespace-nowrap shrink-0 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isDiscoveringDm ? 'animate-spin' : ''}`} />
+                      <span>{isDiscoveringDm ? 'Discovering...' : 'Discover Decision-Makers'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Role & Tenure Filters */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1">
+                  <select
+                    value={dmTargetRole}
+                    onChange={(e) => setDmTargetRole(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1.5 text-xs"
+                  >
+                    <option value="">All Roles</option>
+                    {EXPANDED_RELATIONSHIP_TYPES.map((role) => (
+                      <option key={role} value={role}>
+                        {ROLE_TAXONOMY_SPECS[role].label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={dmTargetJobTitle}
+                    onChange={(e) => setDmTargetJobTitle(e.target.value)}
+                    placeholder="Target title (e.g. Procurement)"
+                    className="bg-slate-900 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={dmTargetDepartment}
+                    onChange={(e) => setDmTargetDepartment(e.target.value)}
+                    placeholder="Department (e.g. Finance)"
+                    className="bg-slate-900 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                  />
+                  <label className="inline-flex items-center gap-2 text-[11px] text-slate-300 px-2">
+                    <input
+                      type="checkbox"
+                      checked={dmIncludeHistorical}
+                      onChange={(e) => setDmIncludeHistorical(e.target.checked)}
+                      className="rounded border-slate-600"
+                    />
+                    <span>Include historical / former</span>
+                  </label>
+                </div>
+
+                {dmError && (
+                  <div className="p-2.5 bg-rose-950/40 border border-rose-800 rounded text-rose-300 text-xs">
+                    {dmError}
+                  </div>
+                )}
+
+                {dmSaveBanner && (
+                  <div className="p-2.5 bg-emerald-950/40 border border-emerald-800 rounded text-emerald-300 text-xs flex items-center justify-between">
+                    <span>{dmSaveBanner}</span>
+                    <button
+                      type="button"
+                      onClick={() => setDmSaveBanner(null)}
+                      className="text-emerald-400 hover:text-white"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+
+                {dmAiPlan && (
+                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-1.5 text-[11px]">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-indigo-300">
+                        AI Query &amp; Role Plan (Inferred · {dmAiPlan.engine})
+                      </span>
+                      <span className="text-slate-400">
+                        Recommended titles: {dmAiPlan.targetTitles.slice(0, 5).join(', ')}
+                      </span>
+                    </div>
+                    <p className="text-slate-400">{dmAiPlan.rationale}</p>
+                    <div className="text-slate-300 font-mono text-[10px] space-y-0.5">
+                      {dmAiPlan.suggestedQueries.slice(0, 4).map((q, i) => (
+                        <div key={i}>• {q}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {dmDiscoveryResult && (
+                  <div className="space-y-3 pt-1">
+                    <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-lg text-[11px] text-slate-300 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span>{dmDiscoveryResult.honestStatusNote}</span>
+                        <span className="font-mono text-slate-400 tabular-nums shrink-0">
+                          {dmDiscoveryResult.durationMs}ms
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                        {dmDiscoveryResult.sourceSummaries.map((s) => (
+                          <span key={s.sourceId} className="font-mono">
+                            <span
+                              className={
+                                s.status === 'success'
+                                  ? 'text-emerald-400'
+                                  : s.status === 'skipped_missing_credentials'
+                                  ? 'text-amber-400'
+                                  : 'text-slate-500'
+                              }
+                            >
+                              {s.sourceName}
+                            </span>
+                            : {s.status === 'success' ? `${s.candidatesFound} found` : s.status.replace(/_/g, ' ')}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {dmDiscoveryResult.candidates.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-semibold text-slate-300">
+                            Discovered Candidates ({dmDiscoveryResult.candidates.length}) — {selectedDmIds.size} selected
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedDmIds(
+                                  selectedDmIds.size === dmDiscoveryResult.candidates.length
+                                    ? new Set()
+                                    : new Set(dmDiscoveryResult.candidates.map((c) => c.candidateId))
+                                )
+                              }
+                              className="px-2 py-1 text-[11px] rounded border border-slate-700 text-slate-300 hover:bg-slate-800"
+                            >
+                              {selectedDmIds.size === dmDiscoveryResult.candidates.length ? 'Clear All' : 'Select All'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={selectedDmIds.size === 0 || isApprovingDm}
+                              onClick={handleApproveSelectedDm}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold rounded text-[11px] whitespace-nowrap shrink-0"
+                            >
+                              {isApprovingDm
+                                ? 'Saving...'
+                                : `Approve & Save Selected (${selectedDmIds.size})`}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                          {dmDiscoveryResult.candidates.map((cand) => {
+                            const checked = selectedDmIds.has(cand.candidateId);
+                            const roleSpec =
+                              ROLE_TAXONOMY_SPECS[cand.relationshipType as keyof typeof ROLE_TAXONOMY_SPECS];
+                            return (
+                              <div
+                                key={cand.candidateId}
+                                className={`p-3 rounded-lg border transition space-y-1.5 ${
+                                  checked
+                                    ? 'bg-indigo-950/30 border-indigo-500/60'
+                                    : 'bg-slate-900 border-slate-800'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleDmCandidate(cand.candidateId)}
+                                    className="flex items-start gap-2 text-left min-w-0"
+                                  >
+                                    {checked ? (
+                                      <CheckSquare className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                                    ) : (
+                                      <Square className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                                    )}
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-white">
+                                        {cand.fullName}{' '}
+                                        <span className="font-normal text-slate-400">
+                                          · {cand.jobTitle || roleSpec?.label || cand.relationshipType}
+                                        </span>
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 mt-0.5">
+                                        {cand.department || roleSpec?.defaultDepartment || 'General'} ·{' '}
+                                        {cand.employmentStatus === 'historical'
+                                          ? `Historical${cand.endedAt ? ` (ended ${cand.endedAt})` : ''}`
+                                          : cand.employmentStatus === 'unknown'
+                                          ? 'Tenure unknown'
+                                          : 'Current'}{' '}
+                                        · {cand.isExplicitlyPublished ? 'Explicitly published' : 'Inferred'}
+                                      </div>
+                                    </div>
+                                  </button>
+                                  <div className="text-right shrink-0 font-mono text-[10px] tabular-nums">
+                                    <div className="text-emerald-400 font-semibold">
+                                      {cand.verificationTier.replace(/_/g, ' ')}
+                                    </div>
+                                    <div className="text-slate-400">{cand.confidenceScore}% conf</div>
+                                  </div>
+                                </div>
+
+                                {cand.uncertainMatch && cand.uncertainMatchReasons && (
+                                  <div className="px-2 py-1 rounded bg-amber-950/40 border border-amber-800/70 text-amber-300 text-[10px]">
+                                    Uncertain CRM identity match (not auto-merged): {cand.uncertainMatchReasons[0]}
+                                  </div>
+                                )}
+
+                                {cand.outdatedSignalNote && (
+                                  <div className="px-2 py-1 rounded bg-amber-950/30 border border-amber-900/60 text-amber-300 text-[10px]">
+                                    {cand.outdatedSignalNote}
+                                  </div>
+                                )}
+
+                                {(cand.bioSummary || cand.relevanceExplanation) && (
+                                  <div className="text-[11px] text-slate-300 space-y-0.5">
+                                    {cand.bioSummary && <p>{cand.bioSummary}</p>}
+                                    {cand.relevanceExplanation && (
+                                      <p className="text-slate-400 text-[10px]">
+                                        Relevance (Inferred): {cand.relevanceExplanation}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+
+                                <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
+                                  {cand.email && <span className="font-mono text-cyan-400">{cand.email}</span>}
+                                  {cand.phone && <span className="font-mono text-emerald-400">{cand.phone}</span>}
+                                  {sanitizeExternalUrl(cand.linkedinUrl) && (
+                                    <a
+                                      href={sanitizeExternalUrl(cand.linkedinUrl)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-400 hover:underline"
+                                    >
+                                      LinkedIn
+                                    </a>
+                                  )}
+                                  {cand.sources.map((src, i) => (
+                                    <span key={i}>
+                                      {sanitizeExternalUrl(src.sourceUrl) ? (
+                                        <a
+                                          href={sanitizeExternalUrl(src.sourceUrl)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-indigo-400 hover:underline inline-flex items-center gap-0.5"
+                                        >
+                                          <span>{src.sourceName}</span>
+                                          <ExternalLink className="w-2.5 h-2.5" />
+                                        </a>
+                                      ) : (
+                                        src.sourceName
+                                      )}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Saved CRM Decision-Makers & Manual Link Panel */}
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
                       <Users className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Decision-Makers, Officers &amp; Contacts ({linkedPersons.length})</span>
+                      <span>Linked CRM Decision-Makers, Officers &amp; Contacts ({linkedPersons.length})</span>
                     </h4>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Many-to-many links between persons and companies with role-specific job titles, designations, and departments.
+                      Many-to-many links between persons and companies supporting multiple roles per company and current vs historical tenure.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setIsAddingPerson(!isAddingPerson)}
-                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded flex items-center gap-1 text-xs transition shrink-0"
+                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded flex items-center gap-1 text-xs transition shrink-0 whitespace-nowrap"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>{isAddingPerson ? 'Cancel' : 'Add / Link Contact'}</span>
@@ -1503,16 +2023,11 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           onChange={(e) => setPersonForm((p) => ({ ...p, relationshipType: e.target.value }))}
                           className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2 py-1.5 text-xs"
                         >
-                          <option value="founder">Founder</option>
-                          <option value="owner">Owner</option>
-                          <option value="director">Director</option>
-                          <option value="executive">Executive</option>
-                          <option value="officer">Officer</option>
-                          <option value="procurement_contact">Procurement Contact</option>
-                          <option value="sales_contact">Sales Contact</option>
-                          <option value="advisor">Advisor</option>
-                          <option value="employee">Employee</option>
-                          <option value="contact">Contact</option>
+                          {EXPANDED_RELATIONSHIP_TYPES.map((role) => (
+                            <option key={role} value={role}>
+                              {ROLE_TAXONOMY_SPECS[role].label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
@@ -1587,98 +2102,301 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   <div className="p-6 text-center text-slate-400 text-xs">Loading linked decision-makers...</div>
                 ) : linkedPersons.length === 0 ? (
                   <div className="p-6 text-center text-slate-500 text-xs bg-slate-900/50 rounded-lg">
-                    No decision-makers or contacts linked to this company yet. Import a contact spreadsheet or click &ldquo;Add / Link Contact&rdquo;.
+                    No decision-makers or contacts linked to this company yet. Click &ldquo;Discover Decision-Makers&rdquo; above or &ldquo;Add / Link Contact&rdquo;.
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {linkedPersons.map(({ person, relationship, otherCompanies }) => (
-                      <div
-                        key={relationship.id}
-                        className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl space-y-2"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-bold text-white text-sm">{person.fullName}</span>
-                              {relationship.isPrimaryContact && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                  Primary Contact
+                    {linkedPersons.map((item) => {
+                      const { person, relationship, otherCompanies } = item;
+                      const empStatus = relationship.provenance?.employmentStatus || 'current';
+                      const endedAt = relationship.provenance?.endedAt;
+                      const isEditing = editingRelId === relationship.id;
+                      const showProv = expandedContactProvId === relationship.id;
+                      const roleLabel =
+                        ROLE_TAXONOMY_SPECS[
+                          relationship.relationshipType as keyof typeof ROLE_TAXONOMY_SPECS
+                        ]?.label || relationship.relationshipType.replace(/_/g, ' ');
+
+                      return (
+                        <div
+                          key={relationship.id}
+                          className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl space-y-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-white text-sm">{person.fullName}</span>
+                                <span className="text-[11px] text-indigo-300 font-medium">
+                                  {roleLabel}
                                 </span>
-                              )}
-                              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase">
-                                {relationship.relationshipType}
-                              </span>
+                                {relationship.isPrimaryContact && (
+                                  <span className="text-[10px] font-semibold text-emerald-400">
+                                    · Primary Contact
+                                  </span>
+                                )}
+                                {empStatus === 'historical' && (
+                                  <span className="text-[10px] font-semibold text-amber-400">
+                                    · Historical{endedAt ? ` (ended ${endedAt})` : ''}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-300 flex items-center gap-2 mt-0.5 flex-wrap">
+                                {relationship.jobTitle && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <Briefcase className="w-3 h-3 text-slate-400" />
+                                    {relationship.jobTitle}
+                                  </span>
+                                )}
+                                {relationship.designation && (
+                                  <span className="text-slate-400">· {relationship.designation}</span>
+                                )}
+                                {relationship.department && (
+                                  <span className="text-slate-400">· {relationship.department}</span>
+                                )}
+                                <span className="text-slate-500 font-mono tabular-nums">
+                                  · {relationship.confidenceScore}% conf · {relationship.sourceName}
+                                </span>
+                              </div>
                             </div>
-                            <div className="text-[11px] text-slate-300 flex items-center gap-2 mt-0.5 flex-wrap">
-                              {relationship.jobTitle && (
-                                <span className="inline-flex items-center gap-1">
-                                  <Briefcase className="w-3 h-3 text-slate-400" />
-                                  {relationship.jobTitle}
-                                </span>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {getStatusBadge(person.verificationStatus)}
+                              {!relationship.isPrimaryContact && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetPrimaryContact(relationship.id)}
+                                  className="p-1 text-slate-400 hover:text-amber-400 transition"
+                                  title="Set as Primary Contact"
+                                >
+                                  <Star className="w-3.5 h-3.5" />
+                                </button>
                               )}
-                              {relationship.designation && (
-                                <span className="text-slate-400">· {relationship.designation}</span>
-                              )}
-                              {relationship.department && (
-                                <span className="text-slate-400">· Dept: {relationship.department}</span>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleEmploymentStatus(relationship.id, empStatus)}
+                                className="p-1 text-slate-400 hover:text-cyan-400 transition"
+                                title={
+                                  empStatus === 'historical'
+                                    ? 'Mark as Current Role'
+                                    : 'Mark as Historical / Former'
+                                }
+                              >
+                                <History className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  isEditing ? setEditingRelId(null) : handleStartEditContact(item)
+                                }
+                                className="p-1 text-slate-400 hover:text-indigo-400 transition"
+                                title="Edit contact & role"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUnlinkPerson(relationship.id)}
+                                className="p-1 text-slate-500 hover:text-rose-400 transition"
+                                title="Unlink from company"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2">
-                            {getStatusBadge(person.verificationStatus)}
+                          {person.bioSummary && (
+                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                              {person.bioSummary}
+                            </p>
+                          )}
+
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300">
+                            <div className="flex flex-wrap gap-3">
+                              {person.email && (
+                                <span className="inline-flex items-center gap-1 font-mono text-cyan-400">
+                                  <Mail className="w-3 h-3" />
+                                  {person.email}
+                                </span>
+                              )}
+                              {(person.phoneNormalized || person.phone) && (
+                                <span className="inline-flex items-center gap-1 font-mono text-emerald-400">
+                                  <Phone className="w-3 h-3" />
+                                  {person.phoneNormalized || person.phone}
+                                </span>
+                              )}
+                              {sanitizeExternalUrl(person.linkedinUrl) && (
+                                <a
+                                  href={sanitizeExternalUrl(person.linkedinUrl)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-blue-400 hover:underline"
+                                >
+                                  <Linkedin className="w-3 h-3" />
+                                  <span>LinkedIn</span>
+                                </a>
+                              )}
+                              {sanitizeExternalUrl(person.officialBioUrl) && (
+                                <a
+                                  href={sanitizeExternalUrl(person.officialBioUrl)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-indigo-400 hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span>Official Bio</span>
+                                </a>
+                              )}
+                            </div>
                             <button
                               type="button"
-                              onClick={() => handleUnlinkPerson(relationship.id)}
-                              className="p-1 text-slate-500 hover:text-rose-400 transition"
-                              title="Unlink from company"
+                              onClick={() =>
+                                setExpandedContactProvId(showProv ? null : relationship.id)
+                              }
+                              className="text-[10px] text-slate-400 hover:text-slate-200 underline"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              {showProv ? 'Hide Provenance' : 'Provenance'}
                             </button>
                           </div>
-                        </div>
 
-                        <div className="flex flex-wrap gap-3 text-[11px] text-slate-300">
-                          {person.email && (
-                            <span className="inline-flex items-center gap-1 font-mono text-cyan-400">
-                              <Mail className="w-3 h-3" />
-                              {person.email}
-                            </span>
-                          )}
-                          {(person.phoneNormalized || person.phone) && (
-                            <span className="inline-flex items-center gap-1 font-mono text-emerald-400">
-                              <Phone className="w-3 h-3" />
-                              {person.phoneNormalized || person.phone}
-                            </span>
-                          )}
-                          {sanitizeExternalUrl(person.linkedinUrl) && (
-                            <a
-                              href={sanitizeExternalUrl(person.linkedinUrl)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-blue-400 hover:underline"
+                          {isEditing && (
+                            <form
+                              onSubmit={(e) => handleSaveEditContact(e, relationship.id)}
+                              className="p-3 bg-slate-950 border border-indigo-500/40 rounded-lg space-y-2"
                             >
-                              <Linkedin className="w-3 h-3" />
-                              <span>LinkedIn</span>
-                            </a>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <input
+                                  type="text"
+                                  required
+                                  value={editContactForm.fullName}
+                                  onChange={(e) =>
+                                    setEditContactForm((f) => ({ ...f, fullName: e.target.value }))
+                                  }
+                                  placeholder="Full Name"
+                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                                />
+                                <input
+                                  type="email"
+                                  value={editContactForm.email}
+                                  onChange={(e) =>
+                                    setEditContactForm((f) => ({ ...f, email: e.target.value }))
+                                  }
+                                  placeholder="Email"
+                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs font-mono"
+                                />
+                                <input
+                                  type="text"
+                                  value={editContactForm.phone}
+                                  onChange={(e) =>
+                                    setEditContactForm((f) => ({ ...f, phone: e.target.value }))
+                                  }
+                                  placeholder="Phone"
+                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs font-mono"
+                                />
+                                <select
+                                  value={editContactForm.relationshipType}
+                                  onChange={(e) =>
+                                    setEditContactForm((f) => ({
+                                      ...f,
+                                      relationshipType: e.target.value,
+                                    }))
+                                  }
+                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                                >
+                                  {EXPANDED_RELATIONSHIP_TYPES.map((role) => (
+                                    <option key={role} value={role}>
+                                      {ROLE_TAXONOMY_SPECS[role].label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <input
+                                  type="text"
+                                  value={editContactForm.jobTitle}
+                                  onChange={(e) =>
+                                    setEditContactForm((f) => ({ ...f, jobTitle: e.target.value }))
+                                  }
+                                  placeholder="Job Title"
+                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                                />
+                                <input
+                                  type="text"
+                                  value={editContactForm.department}
+                                  onChange={(e) =>
+                                    setEditContactForm((f) => ({
+                                      ...f,
+                                      department: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="Department"
+                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                                />
+                              </div>
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingRelId(null)}
+                                  className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded text-xs"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="submit"
+                                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded text-xs"
+                                >
+                                  Save Contact
+                                </button>
+                              </div>
+                            </form>
+                          )}
+
+                          {showProv && (
+                            <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-[10px] text-slate-400 space-y-1">
+                              <div>
+                                Source: <span className="text-slate-200">{relationship.sourceName}</span>
+                                {relationship.provenance?.sourceType
+                                  ? ` · Type: ${relationship.provenance.sourceType}`
+                                  : ''}
+                                {relationship.provenance?.reviewedByOwner
+                                  ? ' · Approved by Owner'
+                                  : ''}
+                              </div>
+                              {relationship.provenance?.firstObservedAt && (
+                                <div className="font-mono tabular-nums">
+                                  Observed: {relationship.provenance.firstObservedAt.slice(0, 10)}
+                                  {relationship.provenance.lastObservedAt
+                                    ? ` → ${relationship.provenance.lastObservedAt.slice(0, 10)}`
+                                    : ''}
+                                </div>
+                              )}
+                              {sanitizeExternalUrl(relationship.provenance?.sourceUrl) && (
+                                <a
+                                  href={sanitizeExternalUrl(relationship.provenance?.sourceUrl)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-400 hover:underline inline-flex items-center gap-1"
+                                >
+                                  <span>{relationship.provenance?.sourceUrl}</span>
+                                  <ExternalLink className="w-2.5 h-2.5" />
+                                </a>
+                              )}
+                            </div>
+                          )}
+
+                          {otherCompanies && otherCompanies.length > 0 && (
+                            <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5 text-[10px]">
+                              <span className="text-slate-500 uppercase font-semibold">Also linked to (M:N):</span>
+                              {otherCompanies.map((oc) => (
+                                <span
+                                  key={oc.leadId}
+                                  className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300"
+                                >
+                                  {oc.companyName} ({oc.jobTitle || oc.relationshipType})
+                                </span>
+                              ))}
+                            </div>
                           )}
                         </div>
-
-                        {otherCompanies && otherCompanies.length > 0 && (
-                          <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5 text-[10px]">
-                            <span className="text-slate-500 uppercase font-semibold">Also linked to (M:N):</span>
-                            {otherCompanies.map((oc) => (
-                              <span
-                                key={oc.leadId}
-                                className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300"
-                              >
-                                {oc.companyName} ({oc.jobTitle || oc.relationshipType})
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

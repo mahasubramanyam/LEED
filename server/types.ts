@@ -1,10 +1,12 @@
 export type AttributeProvenanceType =
   | 'official_registry'
   | 'official_website'
+  | 'authorized_provider'
   | 'business_directory'
   | 'search_provider'
   | 'ai_extracted'
   | 'inferred'
+  | 'owner_manual'
   | 'not_verified';
 
 export interface AttributeProvenanceEntry {
@@ -528,19 +530,93 @@ export interface RegistryVerificationReport {
 // PHASE 7: PERSONS, RELATIONSHIPS & LEAD IMPORT ENGINE TYPES
 // ============================================================================
 
+export type EmploymentStatus = 'current' | 'historical' | 'unknown';
+
 export type RelationshipType =
   | 'founder'
+  | 'co_founder'
   | 'owner'
   | 'director'
+  | 'managing_director'
+  | 'ceo'
+  | 'president'
+  | 'chairman'
+  | 'board_member'
+  | 'cfo'
+  | 'coo'
+  | 'cto'
+  | 'cio'
+  | 'chro'
+  | 'cmo'
   | 'executive'
   | 'officer'
+  | 'procurement_manager'
+  | 'chief_procurement_officer'
+  | 'purchasing_manager'
+  | 'sourcing_manager'
+  | 'supply_chain_director'
   | 'procurement_contact'
+  | 'sales_director'
+  | 'business_development_director'
+  | 'business_development_manager'
+  | 'partnership_manager'
+  | 'commercial_director'
   | 'sales_contact'
+  | 'department_head'
+  | 'operations_manager'
+  | 'finance_manager'
+  | 'hr_manager'
+  | 'technical_director'
   | 'employee'
   | 'advisor'
   | 'contact';
 
-export type ImportVerificationStatus = 'user_provided' | 'syntax_validated' | 'officially_verified';
+export type ImportVerificationStatus =
+  | 'user_provided'
+  | 'syntax_validated'
+  | 'officially_verified'
+  | 'directory_listed'
+  | 'web_observed'
+  | 'unverified';
+
+export type PersonVerificationTier =
+  | 'officially_verified'
+  | 'company_website'
+  | 'authorized_provider'
+  | 'directory_listed'
+  | 'search_result'
+  | 'verified_professional'
+  | 'official_registry'
+  | 'official_company_published'
+  | 'ai_extracted'
+  | 'inferred'
+  | 'unknown'
+  | 'user_provided'
+  | 'syntax_validated';
+
+export interface RelationshipProvenanceMeta {
+  filename?: string;
+  rowNumber?: number;
+  importedAt?: string;
+  sourceUrl?: string;
+  sourceName?: string;
+  sourceType?: AttributeProvenanceType;
+  connectorId?: string;
+  verificationTier?: PersonVerificationTier;
+  isExplicitlyPublished?: boolean;
+  employmentStatus?: EmploymentStatus;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+  endedAt?: string;
+  appointedAt?: string;
+  uncertainMatch?: boolean;
+  uncertainReason?: string;
+  aiRelevanceNote?: string;
+  outdatedRiskNote?: string;
+  reviewedByOwner?: boolean;
+  reviewedAt?: string;
+  [key: string]: unknown;
+}
 
 export interface PersonRecord {
   id: string;
@@ -561,6 +637,12 @@ export interface PersonRecord {
   confidenceScore: number;
   verificationStatus: ImportVerificationStatus;
   customFields?: Record<string, string>;
+  attributeProvenance?: Record<string, AttributeProvenanceEntry>;
+  bioSummary?: string;
+  officialBioUrl?: string;
+  seniority?: string;
+  decisionMakingFunction?: string;
+  possibleDuplicateIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -576,7 +658,7 @@ export interface CompanyPersonRelationship {
   decisionMakerCategory?: string;
   isPrimaryContact: boolean;
   sourceName: string;
-  provenance?: Record<string, unknown>;
+  provenance?: RelationshipProvenanceMeta;
   confidenceScore: number;
   verificationStatus: ImportVerificationStatus;
   createdAt: string;
@@ -591,7 +673,112 @@ export interface LinkedPersonWithRelationship {
     companyName: string;
     relationshipType: string;
     jobTitle?: string;
+    employmentStatus?: EmploymentStatus;
   }>;
+}
+
+export interface DecisionMakerCandidateSource {
+  sourceName: string;
+  sourceType: AttributeProvenanceType;
+  sourceUrl?: string;
+  connectorId?: string;
+  retrievedAt: string;
+}
+
+export interface DecisionMakerCandidate {
+  candidateId: string;
+  fullName: string;
+  firstName?: string;
+  lastName?: string;
+  normalizedName: string;
+  jobTitle?: string;
+  designation?: string;
+  department?: string;
+  relationshipType: RelationshipType | string;
+  decisionMakerCategory?: string;
+  roleCategory?: string;
+  seniority?: string;
+  decisionMakingFunction?: string;
+  email?: string;
+  emailStatus: 'verified' | 'syntax_valid' | 'unverified' | 'unavailable';
+  phone?: string;
+  profileUrl?: string;
+  linkedinUrl?: string;
+  officialBioUrl?: string;
+  location?: string;
+  country?: string;
+  countryCode?: string;
+  city?: string;
+  companyName?: string;
+  companyDomain?: string;
+  employmentStatus: EmploymentStatus;
+  appointedAt?: string;
+  endedAt?: string;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+  verificationTier: PersonVerificationTier;
+  confidenceScore: number;
+  isExplicitlyPublished: boolean;
+  sources: DecisionMakerCandidateSource[];
+  provenanceNotes: string[];
+  bioSummary?: string;
+  relevanceExplanation?: string;
+  outdatedSignalNote?: string;
+  matchedCrmPersonId?: string;
+  matchedRelationshipId?: string;
+  uncertainMatch?: boolean;
+  uncertainMatchReasons?: string[];
+  attributeProvenance: Record<string, AttributeProvenanceEntry>;
+}
+
+export interface DecisionMakerDiscoveryRequest {
+  leadId?: string;
+  companyName: string;
+  legalName?: string;
+  website?: string;
+  domain?: string;
+  countryCode?: string;
+  registrationNumber?: string;
+  registrationType?: string;
+  industry?: string;
+  businessType?: string;
+  targetJobTitle?: string;
+  targetDepartment?: string;
+  targetRelationshipType?: string;
+  targetSeniority?: string;
+  targetDecisionFunction?: string;
+  includeHistorical?: boolean;
+  runWebsiteInspection?: boolean;
+  runAiAnalysis?: boolean;
+  sourceIds?: string[];
+  connectorIds?: string[];
+  limit?: number;
+}
+
+export interface DecisionMakerSourceSummary {
+  sourceId: string;
+  connectorId?: string;
+  sourceName: string;
+  status: 'success' | 'no_results' | 'skipped_missing_credentials' | 'skipped_not_applicable' | 'skipped' | 'error';
+  candidatesFound: number;
+  durationMs?: number;
+  message?: string;
+}
+
+export interface DecisionMakerDiscoveryResponse {
+  companyName: string;
+  leadId?: string;
+  candidates: DecisionMakerCandidate[];
+  sourceSummaries: DecisionMakerSourceSummary[];
+  aiQueryPlan?: {
+    suggestedQueries: string[];
+    targetTitles: string[];
+    rationale: string;
+    provenanceType: 'inferred';
+    engine: string;
+  };
+  honestStatusNote: string;
+  durationMs: number;
 }
 
 export type ImportCanonicalField =
@@ -800,6 +987,15 @@ export interface NormalizedImportPerson {
   isPrimaryContact: boolean;
   associatedCompanyName?: string;
   associatedCompanyRegNumber?: string;
+  bioSummary?: string;
+  officialBioUrl?: string;
+  seniority?: string;
+  decisionMakingFunction?: string;
+  verificationStatus?: ImportVerificationStatus;
+  confidenceScore?: number;
+  attributeProvenance?: Record<string, AttributeProvenanceEntry>;
+  sources?: LeadSource[];
+  relationshipProvenance?: RelationshipProvenanceMeta;
   customFields: Record<string, string>;
 }
 

@@ -22,14 +22,18 @@ import {
   analyzeLeadWithAi,
   assessDuplicatePairWithAi,
   extractBusinessIntelFromWebEvidence,
+  generateDecisionMakerQueriesWithAi,
   generateDiscoveryQueriesWithAi,
   generateSalesPitchWithAi,
   generateMeetingBriefWithAi,
   generateMarketReportWithAi,
 } from './server/gemini.js';
 import { buildSearchAndDirectoryProviderMatrix } from './server/connectors/searchProvidersCatalog.js';
+import { buildSocialProviderMatrix } from './server/connectors/socialProvidersCatalog.js';
 import { CanonicalLead, DiscoverySearchRequest } from './server/types.js';
 import { discoveryService } from './server/discovery/discoveryService.js';
+import { discoverCompanyDecisionMakers } from './server/discovery/decisionMakerService.js';
+import { EXPANDED_RELATIONSHIP_TYPES, classifyDecisionMakerRole } from './shared/decisionMakerRoles.js';
 import {
   requireOwnerAuth,
   setSessionCookie,
@@ -3860,11 +3864,346 @@ protectedApi.get('/import/batches/:batchId/export', createRateLimitMiddleware(ex
   }
 });
 
+// Phase 11: Social Intelligence & Decision-Maker Discovery APIs
+protectedApi.get('/decision-makers/providers', async (_req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  try {
+    const { isPg } = checkStorageEngine();
+    const configs = isPg ? await postgresStorage.getConnectorConfigs() : storage.getConnectorConfigs();
+    const runs = isPg ? await postgresStorage.getConnectorRuns(undefined, 200) : storage.getConnectorRuns(undefined, 200);
+    const statsMap = aggregateRunsByConnector(runs);
+    const statuses = await Promise.all(
+      connectorRegistry.listAll().map((c) =>
+        buildUnifiedConnectorStatus(c, { stats: statsMap.get(c.id), config: configs[c.id] })
+      )
+    );
+    const providers = buildSocialProviderMatrix(statuses);
+    res.json({
+      providers,
+      roleTaxonomy: EXPANDED_RELATIONSHIP_TYPES,
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to inspect decision-maker providers.') });
+  }
+});
+
+protectedApi.post('/decision-makers/ai-queries', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const companyName = String(body.companyName || '').trim();
+    if (!companyName) {
+      res.status(400).json({ error: 'companyName is required to plan decision-maker queries.' });
+      return;
+    }
+    const plan = await generateDecisionMakerQueriesWithAi({
+      companyName,
+      domain: body.domain ? String(body.domain) : undefined,
+      countryCode: body.countryCode ? String(body.countryCode) : undefined,
+      industry: body.industry ? String(body.industry) : undefined,
+      targetJobTitle: body.targetJobTitle ? String(body.targetJobTitle) : undefined,
+      targetDepartment: body.targetDepartment ? String(body.targetDepartment) : undefined,
+      targetRelationshipType: body.targetRelationshipType ? String(body.targetRelationshipType) : undefined,
+    });
+    res.json(plan);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to generate AI decision-maker queries.') });
+  }
+});
+
+protectedApi.post('/decision-makers/discover', async (req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  try {
+    const { isPg } = checkStorageEngine();
+    const body = req.body || {};
+
+    let lead: CanonicalLead | undefined;
+    if (typeof body.leadId === 'string' && body.leadId.trim()) {
+      lead = isPg ? (await postgresStorage.getLead(body.leadId.trim())) || undefined : storage.getLead(body.leadId.trim());
+    }
+
+    const companyName = String(body.companyName || lead?.companyName || '').trim();
+    if (!companyName) {
+      res.status(400).json({ error: 'companyName or valid leadId is required for decision-maker discovery.' });
+      return;
+    }
+
+    const [configs, existingPersons, existingRelationships, existingLeads] = await Promise.all([
+      isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+      isPg ? postgresStorage.getPersons() : Promise.resolve(storage.getPersons()),
+      isPg ? postgresStorage.getAllRelationships() : Promise.resolve(storage.getAllRelationships()),
+      isPg ? postgresStorage.getLeads() : Promise.resolve(storage.getLeads()),
+    ]);
+
+    const result = await discoverCompanyDecisionMakers(
+      {
+        leadId: lead?.id || (typeof body.leadId === 'string' ? body.leadId : undefined),
+        companyName,
+        domain: body.domain ? String(body.domain) : lead?.domain,
+        website: body.website ? String(body.website) : lead?.website,
+        countryCode: body.countryCode ? String(body.countryCode) : lead?.address?.countryCode,
+        registrationNumber: body.registrationNumber
+          ? String(body.registrationNumber)
+          : lead?.registrationNumber,
+        registrationType: body.registrationType ? String(body.registrationType) : lead?.registrationType,
+        industry: body.industry ? String(body.industry) : lead?.industry,
+        targetJobTitle: body.targetJobTitle ? String(body.targetJobTitle) : undefined,
+        targetDepartment: body.targetDepartment ? String(body.targetDepartment) : undefined,
+        targetRelationshipType: body.targetRelationshipType
+          ? String(body.targetRelationshipType)
+          : undefined,
+        targetSeniority: body.targetSeniority ? String(body.targetSeniority) : undefined,
+        targetDecisionFunction: body.targetDecisionFunction
+          ? String(body.targetDecisionFunction)
+          : undefined,
+        includeHistorical: body.includeHistorical !== false,
+        sourceIds: Array.isArray(body.sourceIds) ? body.sourceIds.map(String) : undefined,
+      },
+      {
+        registry: connectorRegistry,
+        executionEngine: connectorExecutionEngine,
+        credentialManager,
+        configs,
+        existingPersons,
+        existingRelationships,
+        existingLeads,
+      }
+    );
+
+    if (isPg && req.owner) {
+      await postgresStorage
+        .recordAuditEvent(
+          'DECISION_MAKER_DISCOVERY',
+          req.owner.email,
+          'lead',
+          lead?.id || companyName,
+          { candidatesFound: result.candidates.length },
+          normalizeClientIp(req)
+        )
+        .catch(() => {});
+    }
+
+    res.json(result);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to discover company decision-makers.') });
+  }
+});
+
+protectedApi.post('/decision-makers/approve', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const body = req.body || {};
+    const actorEmail = req.owner?.email || 'Owner';
+    const rawCandidates = Array.isArray(body.candidates) ? body.candidates : [];
+
+    if (rawCandidates.length === 0) {
+      res.status(400).json({ error: 'Select at least one approved decision-maker candidate to save.' });
+      return;
+    }
+
+    let targetLead: CanonicalLead | undefined;
+    if (typeof body.leadId === 'string' && body.leadId.trim()) {
+      targetLead = isPg
+        ? (await postgresStorage.getLead(body.leadId.trim())) || undefined
+        : storage.getLead(body.leadId.trim());
+    }
+
+    if (!targetLead && body.company && typeof body.company === 'object') {
+      const validation = validateLeadCreateOrUpdate(body.company, 'create');
+      if (!validation.ok || !validation.data) {
+        res.status(400).json({ error: validation.error || 'Invalid company payload for CRM save.' });
+        return;
+      }
+      const now = new Date().toISOString();
+      const rawId =
+        typeof body.company.id === 'string' && body.company.id.trim().length > 0 && body.company.id.trim().length <= 120
+          ? body.company.id.trim()
+          : `lead-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const newLead: CanonicalLead = {
+        sources: [],
+        identifiers: [],
+        confidenceSignals: [],
+        confidenceScore: 55,
+        tags: [],
+        notes: [],
+        activities: [],
+        status: 'new',
+        industry: 'B2B Services',
+        category: 'General',
+        currency: 'USD',
+        ...validation.data,
+        id: rawId,
+        companyName: validation.data.companyName,
+        createdAt: now,
+        updatedAt: now,
+      };
+      targetLead = isPg ? await postgresStorage.upsertLead(newLead) : storage.upsertLead(newLead);
+    }
+
+    if (!targetLead) {
+      res.status(404).json({ error: 'Target CRM company not found (provide valid leadId or company payload).' });
+      return;
+    }
+
+    const tierToVerification = (
+      tier?: string
+    ): 'officially_verified' | 'directory_listed' | 'web_observed' | 'user_provided' | 'unverified' => {
+      if (tier === 'officially_verified') return 'officially_verified';
+      if (tier === 'directory_listed' || tier === 'authorized_provider') return 'directory_listed';
+      if (tier === 'company_website') return 'web_observed';
+      if (tier === 'search_result') return 'unverified';
+      return 'user_provided';
+    };
+
+    const now = new Date().toISOString();
+    let latestPersons: any[] = [];
+
+    for (const c of rawCandidates) {
+      const fullName = String(c?.fullName || '').trim();
+      if (!fullName) continue;
+
+      const roleClass = classifyDecisionMakerRole({
+        rawRelationshipType: c.relationshipType,
+        rawJobTitle: c.jobTitle,
+        rawDepartment: c.department,
+      });
+
+      if (typeof c.linkToExistingPersonId === 'string' && c.linkToExistingPersonId.trim()) {
+        latestPersons = isPg
+          ? await postgresStorage.linkExistingPersonToLead({
+              personId: c.linkToExistingPersonId.trim(),
+              leadId: targetLead.id,
+              relationshipType: roleClass.relationshipType,
+              jobTitle: c.jobTitle || roleClass.label,
+              designation: c.designation,
+              department: c.department || roleClass.department,
+              decisionMakerCategory: c.decisionMakerCategory || roleClass.category,
+              isPrimaryContact: Boolean(c.isPrimaryContact),
+              sourceName: Array.isArray(c.sources) && c.sources[0]?.sourceName ? c.sources[0].sourceName : 'Owner Approved Decision-Maker',
+              actorEmail,
+            })
+          : storage.linkExistingPersonToLead({
+              personId: c.linkToExistingPersonId.trim(),
+              leadId: targetLead.id,
+              relationshipType: roleClass.relationshipType,
+              jobTitle: c.jobTitle || roleClass.label,
+              designation: c.designation,
+              department: c.department || roleClass.department,
+              decisionMakerCategory: c.decisionMakerCategory || roleClass.category,
+              isPrimaryContact: Boolean(c.isPrimaryContact),
+              sourceName: Array.isArray(c.sources) && c.sources[0]?.sourceName ? c.sources[0].sourceName : 'Owner Approved Decision-Maker',
+              actorEmail,
+            });
+        continue;
+      }
+
+      const fields: Record<string, string> = {
+        personFullName: fullName,
+        isPrimaryContact: c.isPrimaryContact ? 'true' : 'false',
+        associatedCompanyName: targetLead.companyName,
+      };
+      if (c.email) fields.personEmail = String(c.email);
+      if (c.phone) fields.personPhone = String(c.phone);
+      if (c.linkedinUrl) fields.personLinkedInUrl = String(c.linkedinUrl);
+      if (c.jobTitle) fields.personJobTitle = String(c.jobTitle);
+      if (c.designation) fields.personDesignation = String(c.designation);
+      if (c.department) fields.personDepartment = String(c.department);
+      if (c.relationshipType) fields.relationshipType = String(c.relationshipType);
+      if (c.decisionMakerCategory) fields.decisionMakerCategory = String(c.decisionMakerCategory);
+      if (c.countryCode || targetLead.address?.countryCode) {
+        fields.personCountry = String(c.countryCode || targetLead.address?.countryCode);
+      }
+      if (c.city || targetLead.address?.city) {
+        fields.personCity = String(c.city || targetLead.address?.city);
+      }
+
+      const normalized = normalizeAndValidateMappedRow({
+        rowNumber: 1,
+        fields,
+        customFields: {},
+        options: {
+          defaultCountryCode: targetLead.address?.countryCode || 'US',
+          duplicatePolicy: 'merge_safe',
+          preserveExistingCrmFields: true,
+          atomicRollbackOnError: false,
+          skipRowsWithErrors: true,
+        },
+      });
+      if (!normalized.valid || !normalized.person) continue;
+
+      const primarySrc = Array.isArray(c.sources) && c.sources[0] ? c.sources[0] : undefined;
+      normalized.person.relationshipType = roleClass.relationshipType;
+      normalized.person.department = c.department || roleClass.department;
+      normalized.person.decisionMakerCategory = c.decisionMakerCategory || roleClass.category;
+      normalized.person.bioSummary = c.bioSummary ? String(c.bioSummary) : undefined;
+      normalized.person.officialBioUrl = c.officialBioUrl ? String(c.officialBioUrl) : undefined;
+      normalized.person.seniority = c.seniority ? String(c.seniority) : roleClass.seniority;
+      normalized.person.decisionMakingFunction = c.decisionMakingFunction
+        ? String(c.decisionMakingFunction)
+        : roleClass.functionArea;
+      normalized.person.verificationStatus = tierToVerification(c.verificationTier);
+      normalized.person.confidenceScore = typeof c.confidenceScore === 'number' ? c.confidenceScore : 75;
+      normalized.person.attributeProvenance =
+        c.attributeProvenance && typeof c.attributeProvenance === 'object' ? c.attributeProvenance : undefined;
+      normalized.person.sources = Array.isArray(c.sources)
+        ? c.sources.map((s: any) => ({
+            sourceName: String(s.sourceName || 'Decision-Maker Discovery'),
+            url: s.sourceUrl ? String(s.sourceUrl) : undefined,
+            retrievedAt: s.retrievedAt ? String(s.retrievedAt) : now,
+            attribution: `Approved by ${actorEmail}`,
+          }))
+        : [{ sourceName: 'Decision-Maker Discovery', retrievedAt: now, attribution: `Approved by ${actorEmail}` }];
+      normalized.person.relationshipProvenance = {
+        sourceUrl: primarySrc?.sourceUrl,
+        sourceName: primarySrc?.sourceName || 'Decision-Maker Discovery',
+        sourceType: primarySrc?.sourceType || 'inferred',
+        employmentStatus: c.employmentStatus || 'current',
+        firstObservedAt: c.firstObservedAt || now,
+        lastObservedAt: c.lastObservedAt || now,
+        endedAt: c.endedAt || undefined,
+        uncertainMatch: Boolean(c.uncertainMatch),
+        reviewedByOwner: true,
+        relevanceExplanation: c.relevanceExplanation ? String(c.relevanceExplanation) : undefined,
+      };
+
+      latestPersons = isPg
+        ? await postgresStorage.linkPersonToLead({
+            leadId: targetLead.id,
+            person: normalized.person,
+            actorEmail,
+          })
+        : storage.linkPersonToLead({
+            leadId: targetLead.id,
+            person: normalized.person,
+            actorEmail,
+          });
+    }
+
+    res.status(201).json({
+      lead: targetLead,
+      leadId: targetLead.id,
+      persons: latestPersons,
+    });
+  } catch (err: unknown) {
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    res.status(rawMsg.includes('Migration 005') ? 409 : 500).json({
+      error: sanitizeApiError(err, 'Failed to approve and save decision-makers.'),
+    });
+  }
+});
+
 // Persons & M:N Company-Person Relationships API
 protectedApi.get('/persons', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
     const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+    const leadIdFilter = typeof req.query.leadId === 'string' ? req.query.leadId.trim() : '';
+    const countryFilter = typeof req.query.countryCode === 'string' ? req.query.countryCode.trim().toUpperCase() : '';
+    const jobTitleFilter = typeof req.query.jobTitle === 'string' ? req.query.jobTitle.trim().toLowerCase() : '';
+    const departmentFilter = typeof req.query.department === 'string' ? req.query.department.trim().toLowerCase() : '';
+    const relTypeFilter = typeof req.query.relationshipType === 'string' ? req.query.relationshipType.trim().toLowerCase() : '';
+    const verificationFilter = typeof req.query.verificationStatus === 'string' ? req.query.verificationStatus.trim().toLowerCase() : '';
+    const employmentFilter = typeof req.query.employmentStatus === 'string' ? req.query.employmentStatus.trim().toLowerCase() : '';
+
     const [persons, rels, leads] = await Promise.all([
       isPg ? postgresStorage.getPersons() : Promise.resolve(storage.getPersons()),
       isPg ? postgresStorage.getAllRelationships() : Promise.resolve(storage.getAllRelationships()),
@@ -3878,44 +4217,192 @@ protectedApi.get('/persons', async (req: Request, res: Response) => {
         relationshipId: string;
         leadId: string;
         companyName: string;
+        companyCountryCode?: string;
         relationshipType: string;
         jobTitle?: string;
+        designation?: string;
+        department?: string;
+        decisionMakerCategory?: string;
         isPrimaryContact: boolean;
+        sourceName: string;
+        provenance?: Record<string, any>;
+        confidenceScore: number;
+        verificationStatus: string;
+        employmentStatus: 'current' | 'historical' | 'unknown';
+        endedAt?: string;
       }>
     >();
 
     for (const r of rels) {
+      const lead = leadMap.get(r.leadId);
       const list = relsByPerson.get(r.personId) || [];
+      const empStatus = (r.provenance?.employmentStatus || 'current') as 'current' | 'historical' | 'unknown';
       list.push({
         relationshipId: r.id,
         leadId: r.leadId,
-        companyName: leadMap.get(r.leadId)?.companyName || r.leadId,
+        companyName: lead?.companyName || r.leadId,
+        companyCountryCode: lead?.address?.countryCode,
         relationshipType: r.relationshipType,
         jobTitle: r.jobTitle,
+        designation: r.designation,
+        department: r.department,
+        decisionMakerCategory: r.decisionMakerCategory,
         isPrimaryContact: r.isPrimaryContact,
+        sourceName: r.sourceName,
+        provenance: r.provenance,
+        confidenceScore: r.confidenceScore,
+        verificationStatus: r.verificationStatus,
+        employmentStatus: empStatus,
+        endedAt: r.provenance?.endedAt,
       });
       relsByPerson.set(r.personId, list);
     }
 
+    // Group identical normalized names across distinct person records for uncertain-match review alerts
+    const nameGroups = new Map<string, string[]>();
+    for (const p of persons) {
+      if (!p.normalizedName) continue;
+      const arr = nameGroups.get(p.normalizedName) || [];
+      arr.push(p.id);
+      nameGroups.set(p.normalizedName, arr);
+    }
+
     const enriched = persons
       .filter((p) => {
-        if (!search) return true;
         const comps = relsByPerson.get(p.id) || [];
-        return (
-          p.fullName.toLowerCase().includes(search) ||
-          (p.email && p.email.toLowerCase().includes(search)) ||
-          (p.city && p.city.toLowerCase().includes(search)) ||
-          comps.some((c) => c.companyName.toLowerCase().includes(search))
-        );
+        if (search) {
+          const hit =
+            p.fullName.toLowerCase().includes(search) ||
+            (p.email && p.email.toLowerCase().includes(search)) ||
+            (p.city && p.city.toLowerCase().includes(search)) ||
+            comps.some(
+              (c) =>
+                c.companyName.toLowerCase().includes(search) ||
+                (c.jobTitle && c.jobTitle.toLowerCase().includes(search))
+            );
+          if (!hit) return false;
+        }
+        if (leadIdFilter && !comps.some((c) => c.leadId === leadIdFilter)) return false;
+        if (countryFilter && countryFilter !== 'ALL' && countryFilter !== 'GLOBAL') {
+          const personCc = (p.countryCode || '').toUpperCase();
+          if (personCc !== countryFilter && !comps.some((c) => c.companyCountryCode === countryFilter)) {
+            return false;
+          }
+        }
+        if (
+          jobTitleFilter &&
+          !comps.some((c) => (c.jobTitle || '').toLowerCase().includes(jobTitleFilter))
+        ) {
+          return false;
+        }
+        if (
+          departmentFilter &&
+          !comps.some((c) => (c.department || '').toLowerCase().includes(departmentFilter))
+        ) {
+          return false;
+        }
+        if (
+          relTypeFilter &&
+          relTypeFilter !== 'all' &&
+          !comps.some((c) => c.relationshipType.toLowerCase() === relTypeFilter)
+        ) {
+          return false;
+        }
+        if (
+          verificationFilter &&
+          verificationFilter !== 'all' &&
+          p.verificationStatus.toLowerCase() !== verificationFilter
+        ) {
+          return false;
+        }
+        if (
+          employmentFilter &&
+          employmentFilter !== 'all' &&
+          !comps.some((c) => c.employmentStatus === employmentFilter)
+        ) {
+          return false;
+        }
+        return true;
       })
-      .map((p) => ({
-        ...p,
-        companies: relsByPerson.get(p.id) || [],
-      }));
+      .map((p) => {
+        const dupIds = (nameGroups.get(p.normalizedName) || []).filter((id) => id !== p.id);
+        return {
+          ...p,
+          companies: relsByPerson.get(p.id) || [],
+          possibleDuplicatePersonIds: dupIds.length > 0 ? dupIds : undefined,
+        };
+      });
 
     res.json({ persons: enriched, total: enriched.length });
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch persons directory.') });
+  }
+});
+
+protectedApi.put('/persons/:personId', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const body = req.body || {};
+    const updated = isPg
+      ? await postgresStorage.updatePersonRecord(req.params.personId, body)
+      : storage.updatePersonRecord(req.params.personId, body);
+    if (!updated) {
+      res.status(404).json({ error: 'Person record not found.' });
+      return;
+    }
+    res.json({ person: updated });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update person record.') });
+  }
+});
+
+protectedApi.post('/persons/:personId/link', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const body = req.body || {};
+    const leadId = String(body.leadId || '').trim();
+    if (!leadId) {
+      res.status(400).json({ error: 'leadId is required to link person to a company.' });
+      return;
+    }
+    const roleClass = classifyDecisionMakerRole({
+      rawRelationshipType: body.relationshipType,
+      rawJobTitle: body.jobTitle,
+      rawDepartment: body.department,
+    });
+    const actorEmail = req.owner?.email || 'Owner';
+    const persons = isPg
+      ? await postgresStorage.linkExistingPersonToLead({
+          personId: req.params.personId,
+          leadId,
+          relationshipType: roleClass.relationshipType,
+          jobTitle: body.jobTitle ? String(body.jobTitle) : undefined,
+          designation: body.designation ? String(body.designation) : undefined,
+          department: body.department ? String(body.department) : roleClass.department,
+          decisionMakerCategory: body.decisionMakerCategory
+            ? String(body.decisionMakerCategory)
+            : roleClass.category,
+          isPrimaryContact: Boolean(body.isPrimaryContact),
+          sourceName: body.sourceName ? String(body.sourceName) : 'Owner Manual Link',
+          actorEmail,
+        })
+      : storage.linkExistingPersonToLead({
+          personId: req.params.personId,
+          leadId,
+          relationshipType: roleClass.relationshipType,
+          jobTitle: body.jobTitle ? String(body.jobTitle) : undefined,
+          designation: body.designation ? String(body.designation) : undefined,
+          department: body.department ? String(body.department) : roleClass.department,
+          decisionMakerCategory: body.decisionMakerCategory
+            ? String(body.decisionMakerCategory)
+            : roleClass.category,
+          isPrimaryContact: Boolean(body.isPrimaryContact),
+          sourceName: body.sourceName ? String(body.sourceName) : 'Owner Manual Link',
+          actorEmail,
+        });
+    res.status(201).json({ leadId, persons });
+  } catch (err: unknown) {
+    res.status(400).json({ error: sanitizeApiError(err, 'Failed to link person to company.') });
   }
 });
 
@@ -4006,6 +4493,37 @@ protectedApi.post('/leads/:id/persons', async (req: Request, res: Response) => {
     res.status(rawMsg.includes('Migration 005') ? 409 : 500).json({
       error: sanitizeApiError(err, 'Failed to link person to lead.'),
     });
+  }
+});
+
+protectedApi.put('/leads/:id/persons/:relationshipId', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const updated = isPg
+      ? await postgresStorage.updateRelationshipRecord(req.params.id, req.params.relationshipId, req.body || {})
+      : storage.updateRelationshipRecord(req.params.id, req.params.relationshipId, req.body || {});
+    if (!updated) {
+      res.status(404).json({ error: 'Company-person relationship not found.' });
+      return;
+    }
+    const persons = isPg
+      ? await postgresStorage.getLeadPersons(req.params.id)
+      : storage.getLeadPersons(req.params.id);
+    res.json({ leadId: req.params.id, relationship: updated, persons });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update company-person relationship.') });
+  }
+});
+
+protectedApi.put('/leads/:id/persons/:relationshipId/primary', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const persons = isPg
+      ? await postgresStorage.setPrimaryContact(req.params.id, req.params.relationshipId)
+      : storage.setPrimaryContact(req.params.id, req.params.relationshipId);
+    res.json({ leadId: req.params.id, persons });
+  } catch (err: unknown) {
+    res.status(404).json({ error: sanitizeApiError(err, 'Failed to set primary contact.') });
   }
 });
 

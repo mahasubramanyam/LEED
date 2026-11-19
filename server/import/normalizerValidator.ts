@@ -11,6 +11,7 @@ import {
   getDefaultIdentifierTypeForCountry,
 } from '../../shared/identifierRegistry.js';
 import { normalizeLegalCompanyStatus } from '../connectors/core/normalizer.js';
+import { classifyDecisionMakerRole } from '../../shared/decisionMakerRoles.js';
 import {
   ImportNormalizationOptions,
   ImportValidationIssue,
@@ -305,29 +306,11 @@ export function normalizeLinkedInUrl(
 }
 
 export function normalizeRelationshipType(rawRel?: string, rawJobTitle?: string, rawRole?: string): string {
-  const combined = `${rawRel || ''} ${rawRole || ''}`.trim().toLowerCase();
-  if (!combined) {
-    // Only classify explicit role keywords from job title into standard relationship types if user supplied relationshipType/role;
-    // never invent titles or board links if absent
-    const jt = (rawJobTitle || '').toLowerCase();
-    if (!jt) return 'contact';
-    if (/\b(co-?founder|founder)\b/.test(jt)) return 'founder';
-    if (/\bdirector\b/.test(jt)) return 'director';
-    if (/\b(owner|proprietor)\b/.test(jt)) return 'owner';
-    if (/\b(procurement|purchasing|buyer)\b/.test(jt)) return 'procurement_contact';
-    if (/\b(ceo|cfo|cto|coo|cmo|chief|president|vp|vice president)\b/.test(jt)) return 'executive';
-    return 'contact';
-  }
-  if (/founder/.test(combined)) return 'founder';
-  if (/owner|proprietor|shareholder/.test(combined)) return 'owner';
-  if (/director|board/.test(combined)) return 'director';
-  if (/officer/.test(combined)) return 'officer';
-  if (/exec|ceo|cfo|cto|coo|vp|chief/.test(combined)) return 'executive';
-  if (/procure|purchas|buyer|vendor/.test(combined)) return 'procurement_contact';
-  if (/sales|account|bizdev|bd/.test(combined)) return 'sales_contact';
-  if (/advis|counsel/.test(combined)) return 'advisor';
-  if (/employ|staff|engineer|manager/.test(combined)) return 'employee';
-  return combined.replace(/[^a-z0-9_]+/g, '_').slice(0, 40) || 'contact';
+  const classified = classifyDecisionMakerRole({
+    rawRelationshipType: rawRel,
+    rawJobTitle: rawJobTitle || rawRole,
+  });
+  return classified.relationshipType;
 }
 
 export function normalizePersonNameTokens(fullName: string): string {
@@ -825,11 +808,11 @@ export function normalizeAndValidateMappedRow(input: {
         });
       }
 
-      const relType = normalizeRelationshipType(
-        fields.relationshipType,
-        fields.personJobTitle,
-        fields.personRole
-      );
+      const roleClassification = classifyDecisionMakerRole({
+        rawRelationshipType: fields.relationshipType,
+        rawJobTitle: fields.personJobTitle || fields.personRole,
+        rawDepartment: fields.personDepartment,
+      });
 
       person = {
         fullName: composedFullName,
@@ -851,10 +834,10 @@ export function normalizeAndValidateMappedRow(input: {
         city: fields.personCity?.trim() || fields.city?.trim() || undefined,
         jobTitle: fields.personJobTitle?.trim() || fields.personRole?.trim() || undefined,
         designation: fields.personDesignation?.trim() || undefined,
-        department: fields.personDepartment?.trim() || undefined,
-        relationshipType: relType,
+        department: fields.personDepartment?.trim() || roleClassification.department,
+        relationshipType: roleClassification.relationshipType,
         relationshipPosition: fields.relationshipPosition?.trim() || fields.personJobTitle?.trim() || undefined,
-        decisionMakerCategory: fields.decisionMakerCategory?.trim() || undefined,
+        decisionMakerCategory: fields.decisionMakerCategory?.trim() || roleClassification.category,
         isPrimaryContact: parseBooleanFlag(fields.isPrimaryContact),
         associatedCompanyName:
           fields.associatedCompanyName?.trim() || company?.companyName || undefined,

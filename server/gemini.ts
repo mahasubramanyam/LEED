@@ -567,3 +567,268 @@ Return JSON:
     engine: 'deterministic-pipeline',
   };
 }
+
+import {
+  classifyDecisionMakerRole,
+  getRecommendedTargetTitlesForIndustry,
+} from '../shared/decisionMakerRoles.js';
+
+export async function generateDecisionMakerQueriesWithAi(params: {
+  companyName: string;
+  domain?: string;
+  countryCode?: string;
+  industry?: string;
+  targetJobTitle?: string;
+  targetDepartment?: string;
+  targetRelationshipType?: string;
+}): Promise<{
+  targetTitles: string[];
+  suggestedQueries: string[];
+  recommendedSources: string[];
+  rationale: string;
+  provenanceType: 'inferred';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
+}> {
+  const baselineTitles = getRecommendedTargetTitlesForIndustry(params.industry);
+  const ai = getAiClient();
+  const cleanDom = params.domain?.replace(/^www\./i, '').trim();
+
+  if (ai) {
+    try {
+      const prompt = `You are a B2B Decision-Maker Research Strategist.
+Generate targeted search queries and executive/department titles to discover genuine decision-makers for this company using permitted official websites, corporate registries, and public announcements.
+NEVER invent person names, LinkedIn profile URLs, or personal emails.
+
+COMPANY: ${params.companyName}
+DOMAIN: ${cleanDom || 'Unknown'}
+COUNTRY: ${params.countryCode || 'Global'}
+INDUSTRY: ${params.industry || 'General Commerce'}
+TARGET ROLE FILTER: ${params.targetJobTitle || params.targetRelationshipType || 'Executive, Ownership & Procurement'}
+TARGET DEPARTMENT: ${params.targetDepartment || 'Any'}
+
+Return JSON:
+{
+  "targetTitles": ["4 to 8 most relevant decision-maker titles for this industry"],
+  "suggestedQueries": ["3 to 5 targeted public search queries for official leadership pages, corporate filings, or announcements"],
+  "recommendedSources": ["ordered list of permitted source types e.g. Official Leadership Page, National Registry Officers, Public Announcements"],
+  "rationale": "1-2 sentences explaining why these roles matter for this company"
+}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      if (Array.isArray(parsed.suggestedQueries) && parsed.suggestedQueries.length > 0) {
+        return {
+          targetTitles: Array.isArray(parsed.targetTitles)
+            ? parsed.targetTitles.slice(0, 8).map(String)
+            : baselineTitles,
+          suggestedQueries: parsed.suggestedQueries.slice(0, 6).map(String),
+          recommendedSources: Array.isArray(parsed.recommendedSources)
+            ? parsed.recommendedSources.slice(0, 5).map(String)
+            : ['Official Company Website', 'Corporate Registry Officers', 'Public Announcements'],
+          rationale: String(parsed.rationale || 'AI-prioritized decision-maker targeting strategy.'),
+          provenanceType: 'inferred',
+          engine: 'gemini-4-hydrogen',
+        };
+      }
+    } catch (err) {
+      console.warn('Gemini decision-maker query planner fallback:', err);
+    }
+  }
+
+  const focusRole = params.targetJobTitle?.trim() || baselineTitles.slice(0, 3).join('" OR "');
+  const loc = params.countryCode && params.countryCode !== 'GLOBAL' ? ` ${params.countryCode}` : '';
+  const queries = [
+    cleanDom
+      ? `site:${cleanDom} (leadership OR management OR team OR "about us" OR board)`
+      : `"${params.companyName}" (CEO OR Founder OR "Managing Director" OR "Procurement")${loc}`,
+    `"${params.companyName}" ("${focusRole}" OR "Board of Directors" OR "Executive Team")`,
+    `"${params.companyName}" (appointed OR named OR announces) (CEO OR Director OR Procurement OR Sales)`,
+  ];
+
+  return {
+    targetTitles: params.targetJobTitle?.trim()
+      ? [params.targetJobTitle.trim(), ...baselineTitles.filter((t) => t !== params.targetJobTitle?.trim())].slice(0, 7)
+      : baselineTitles.slice(0, 7),
+    suggestedQueries: queries,
+    recommendedSources: [
+      'Official Company Leadership & About Pages',
+      'National Corporate Registry Officers (Brreg / UK Companies House / OpenCorporates)',
+      'Wikidata Corporate Leadership Graph & Public Press Releases',
+    ],
+    rationale: `Prioritizes governance, ownership, and operational buyer roles tailored to ${
+      params.industry || 'B2B'
+    } vendor evaluation.`,
+    provenanceType: 'inferred',
+    engine: 'deterministic-pipeline',
+  };
+}
+
+export async function extractDecisionMakersFromLeadershipEvidence(params: {
+  companyName: string;
+  pageExcerpts: Array<{ url: string; pageType: string; textExcerpt: string }>;
+}): Promise<{
+  extracted: Array<{
+    fullName: string;
+    jobTitle: string;
+    bioSummary?: string;
+    officialBioUrl: string;
+    provenanceClassification: 'ai_extracted';
+  }>;
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
+}> {
+  const leadershipPages = params.pageExcerpts.filter((p) =>
+    ['leadership', 'about', 'announcements', 'imprint'].includes(p.pageType)
+  );
+  const relevant = leadershipPages.length > 0 ? leadershipPages : params.pageExcerpts.slice(0, 2);
+  const evidenceText = relevant
+    .map((p) => `[URL: ${p.url} | TYPE: ${p.pageType}]\n${p.textExcerpt.slice(0, 1400)}`)
+    .join('\n\n')
+    .slice(0, 4800);
+
+  const ai = getAiClient();
+  if (ai && evidenceText.trim().length > 40) {
+    try {
+      const prompt = `Extract ONLY individuals explicitly named with an explicit leadership, board, management, procurement, or business role in the retrieved official website text below.
+CRITICAL RULES:
+- NEVER invent, guess, or extrapolate person names, job titles, LinkedIn URLs, or emails.
+- Only return people whose full name AND title appear verbatim in the evidence.
+- Include the exact source URL from the [URL: ...] tag where the person appears.
+
+COMPANY: ${params.companyName}
+EVIDENCE:
+${evidenceText}
+
+Return JSON:
+{
+  "people": [
+    {
+      "fullName": "Exact full name from text",
+      "jobTitle": "Exact title/role from text",
+      "bioSummary": "1 concise sentence strictly from provided text, or omit if none",
+      "officialBioUrl": "Exact URL tag where observed"
+    }
+  ]
+}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      const validUrls = new Set(relevant.map((p) => p.url));
+      const people = Array.isArray(parsed.people)
+        ? parsed.people
+            .filter((p: any) => typeof p?.fullName === 'string' && p.fullName.trim().includes(' '))
+            .map((p: any) => ({
+              fullName: String(p.fullName).trim(),
+              jobTitle: String(p.jobTitle || 'Leadership Contact').trim(),
+              bioSummary: p.bioSummary ? String(p.bioSummary).trim().slice(0, 260) : undefined,
+              officialBioUrl: validUrls.has(String(p.officialBioUrl))
+                ? String(p.officialBioUrl)
+                : relevant[0]?.url || '',
+              provenanceClassification: 'ai_extracted' as const,
+            }))
+        : [];
+      return { extracted: people.slice(0, 12), engine: 'gemini-4-hydrogen' };
+    } catch (err) {
+      console.warn('Gemini leadership extraction fallback:', err);
+    }
+  }
+
+  return { extracted: [], engine: 'deterministic-pipeline' };
+}
+
+export async function analyzeDecisionMakerProfileWithAi(params: {
+  companyName: string;
+  companyIndustry?: string;
+  fullName: string;
+  jobTitle?: string;
+  department?: string;
+  employmentStatus: 'current' | 'historical' | 'unknown';
+  endedAt?: string;
+  sourceName: string;
+  bioSnippet?: string;
+}): Promise<{
+  bioSummary: string;
+  relevanceExplanation: string;
+  outdatedSignalNote?: string;
+  inferredSeniority: string;
+  inferredFunction: string;
+  provenanceType: 'inferred';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
+}> {
+  const roleClass = classifyDecisionMakerRole({
+    rawJobTitle: params.jobTitle,
+    rawDepartment: params.department,
+  });
+
+  const ai = getAiClient();
+  if (ai) {
+    try {
+      const prompt = `Summarize this decision-maker's business relevance strictly from verified attributes below.
+Do NOT invent employment history, contact details, or LinkedIn activity. Clearly note if historical/resigned dates exist.
+
+Company: ${params.companyName} (${params.companyIndustry || 'B2B'})
+Person: ${params.fullName}
+Title: ${params.jobTitle || 'Unknown'}
+Department: ${params.department || roleClass.department}
+Employment Status: ${params.employmentStatus}${params.endedAt ? ` (Ended ${params.endedAt})` : ''}
+Source: ${params.sourceName}
+Published Bio Snippet: ${params.bioSnippet || 'None'}
+
+Return JSON:
+{
+  "bioSummary": "1-2 factual sentences grounding their role at the company",
+  "relevanceExplanation": "1 sentence explaining why this title matters for B2B outreach/qualification",
+  "outdatedSignalNote": "Optional warning if employmentStatus is historical or ambiguous"
+}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      return {
+        bioSummary: String(parsed.bioSummary || `${params.fullName} serves as ${params.jobTitle || roleClass.label} at ${params.companyName}.`),
+        relevanceExplanation: String(
+          parsed.relevanceExplanation ||
+            `Classified as ${roleClass.category} (${roleClass.seniority}) for B2B stakeholder engagement.`
+        ),
+        outdatedSignalNote: parsed.outdatedSignalNote
+          ? String(parsed.outdatedSignalNote)
+          : params.employmentStatus === 'historical'
+          ? `Marked historical${params.endedAt ? ` (ended ${params.endedAt})` : ''} based on source records.`
+          : undefined,
+        inferredSeniority: roleClass.seniority,
+        inferredFunction: roleClass.functionArea,
+        provenanceType: 'inferred',
+        engine: 'gemini-4-hydrogen',
+      };
+    } catch {
+      // deterministic fallback below
+    }
+  }
+
+  const isHist = params.employmentStatus === 'historical';
+  return {
+    bioSummary: params.bioSnippet
+      ? params.bioSnippet
+      : `${params.fullName} is listed as ${params.jobTitle || roleClass.label} at ${params.companyName} per ${params.sourceName}.`,
+    relevanceExplanation: isHist
+      ? `Historical role (${params.jobTitle || roleClass.label}); retain for corporate lineage/warm referral context rather than direct primary outreach.`
+      : `Relevant ${roleClass.category} stakeholder (${roleClass.functionArea}, ${roleClass.seniority} seniority) for ${params.companyIndustry || 'commercial'} partnership decisions.`,
+    outdatedSignalNote: isHist
+      ? `Source indicates historical association${params.endedAt ? ` ending ${params.endedAt}` : ''}; verify active leadership before outreach.`
+      : undefined,
+    inferredSeniority: roleClass.seniority,
+    inferredFunction: roleClass.functionArea,
+    provenanceType: 'inferred',
+    engine: 'deterministic-pipeline',
+  };
+}

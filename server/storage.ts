@@ -1215,16 +1215,254 @@ export class StorageManager implements ImportStorageAdapter {
         leadId: input.leadId,
         personId,
         person: input.person,
-        filename: 'Manual CRM Entry',
+        filename: input.person.relationshipProvenance?.sourceName || 'Manual CRM Entry',
         rowNumber: 1,
         now,
       });
-      rel.sourceName = 'Owner Manual Entry';
+      rel.sourceName = input.person.relationshipProvenance?.sourceName || 'Owner Manual Entry';
       this.db.companyPersonRelationships.unshift(rel);
     }
 
     this.saveDatabase(this.db);
     return this.getLeadPersons(input.leadId);
+  }
+
+  public linkExistingPersonToLead(input: {
+    personId: string;
+    leadId: string;
+    relationshipType: string;
+    jobTitle?: string;
+    designation?: string;
+    department?: string;
+    decisionMakerCategory?: string;
+    isPrimaryContact?: boolean;
+    sourceName?: string;
+    actorEmail: string;
+  }): LinkedPersonWithRelationship[] {
+    if (!this.db.persons) this.db.persons = [];
+    if (!this.db.companyPersonRelationships) this.db.companyPersonRelationships = [];
+    const person = this.db.persons.find((p) => p.id === input.personId);
+    if (!person) {
+      throw new Error(`Person "${input.personId}" not found.`);
+    }
+    const lead = this.db.leads.find((l) => l.id === input.leadId);
+    if (!lead) {
+      throw new Error(`Company "${input.leadId}" not found.`);
+    }
+    const now = new Date().toISOString();
+    const relType = input.relationshipType || 'contact';
+
+    if (input.isPrimaryContact) {
+      for (let i = 0; i < this.db.companyPersonRelationships.length; i++) {
+        const cur = this.db.companyPersonRelationships[i];
+        if (cur.leadId === input.leadId && cur.isPrimaryContact) {
+          this.db.companyPersonRelationships[i] = { ...cur, isPrimaryContact: false, updatedAt: now };
+        }
+      }
+    }
+
+    const existingIdx = this.db.companyPersonRelationships.findIndex(
+      (r) => r.leadId === input.leadId && r.personId === input.personId && r.relationshipType === relType
+    );
+
+    if (existingIdx >= 0) {
+      const cur = this.db.companyPersonRelationships[existingIdx];
+      this.db.companyPersonRelationships[existingIdx] = {
+        ...cur,
+        jobTitle: input.jobTitle ?? cur.jobTitle,
+        designation: input.designation ?? cur.designation,
+        department: input.department ?? cur.department,
+        decisionMakerCategory: input.decisionMakerCategory ?? cur.decisionMakerCategory,
+        isPrimaryContact: Boolean(input.isPrimaryContact ?? cur.isPrimaryContact),
+        provenance: {
+          ...(cur.provenance || {}),
+          lastObservedAt: now,
+          reviewedByOwner: true,
+        },
+        updatedAt: now,
+      };
+    } else {
+      this.db.companyPersonRelationships.unshift({
+        id: `cpr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        leadId: input.leadId,
+        personId: input.personId,
+        relationshipType: relType,
+        jobTitle: input.jobTitle,
+        designation: input.designation,
+        department: input.department,
+        decisionMakerCategory: input.decisionMakerCategory,
+        isPrimaryContact: Boolean(input.isPrimaryContact),
+        sourceName: input.sourceName || 'Owner Manual Link',
+        provenance: {
+          sourceName: input.sourceName || 'Owner Manual Link',
+          sourceType: 'owner_manual',
+          employmentStatus: 'current',
+          firstObservedAt: now,
+          lastObservedAt: now,
+          reviewedByOwner: true,
+          linkedBy: input.actorEmail,
+        },
+        confidenceScore: person.confidenceScore || 75,
+        verificationStatus: 'user_provided',
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    this.saveDatabase(this.db);
+    return this.getLeadPersons(input.leadId);
+  }
+
+  public updatePersonRecord(
+    personId: string,
+    updates: Partial<{
+      fullName: string;
+      email: string | null;
+      phone: string | null;
+      linkedinUrl: string | null;
+      city: string | null;
+      country: string | null;
+      countryCode: string | null;
+      bioSummary: string | null;
+      officialBioUrl: string | null;
+      seniority: string | null;
+      decisionMakingFunction: string | null;
+      verificationStatus: PersonRecord['verificationStatus'];
+    }>
+  ): PersonRecord | null {
+    if (!this.db.persons) this.db.persons = [];
+    const idx = this.db.persons.findIndex((p) => p.id === personId);
+    if (idx < 0) return null;
+
+    const cur = this.db.persons[idx];
+    const now = new Date().toISOString();
+    const cf = { ...(cur.customFields || {}) };
+    if (updates.bioSummary !== undefined) {
+      if (updates.bioSummary) cf.bioSummary = updates.bioSummary;
+      else delete cf.bioSummary;
+    }
+    if (updates.officialBioUrl !== undefined) {
+      if (updates.officialBioUrl) cf.officialBioUrl = updates.officialBioUrl;
+      else delete cf.officialBioUrl;
+    }
+    if (updates.seniority !== undefined) {
+      if (updates.seniority) cf.seniority = updates.seniority;
+      else delete cf.seniority;
+    }
+    if (updates.decisionMakingFunction !== undefined) {
+      if (updates.decisionMakingFunction) cf.decisionMakingFunction = updates.decisionMakingFunction;
+      else delete cf.decisionMakingFunction;
+    }
+
+    const nextFullName = updates.fullName?.trim() || cur.fullName;
+    const nextLinkedin =
+      updates.linkedinUrl === null ? undefined : updates.linkedinUrl ?? cur.linkedinUrl;
+    const nextSlug = nextLinkedin
+      ? nextLinkedin.match(/linkedin\.com\/in\/([^/?#]+)/i)?.[1]?.toLowerCase()
+      : undefined;
+
+    const updated: PersonRecord = {
+      ...cur,
+      fullName: nextFullName,
+      normalizedName: nextFullName
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim(),
+      email: updates.email === null ? undefined : updates.email ?? cur.email,
+      emailStatus:
+        updates.email === null
+          ? 'unavailable'
+          : updates.email
+          ? 'syntax_valid'
+          : cur.emailStatus,
+      phone: updates.phone === null ? undefined : updates.phone ?? cur.phone,
+      linkedinUrl: nextLinkedin,
+      linkedinSlug: nextSlug ?? cur.linkedinSlug,
+      city: updates.city === null ? undefined : updates.city ?? cur.city,
+      country: updates.country === null ? undefined : updates.country ?? cur.country,
+      countryCode: updates.countryCode === null ? undefined : updates.countryCode ?? cur.countryCode,
+      bioSummary: updates.bioSummary === null ? undefined : updates.bioSummary ?? cur.bioSummary,
+      officialBioUrl:
+        updates.officialBioUrl === null ? undefined : updates.officialBioUrl ?? cur.officialBioUrl,
+      seniority: updates.seniority === null ? undefined : updates.seniority ?? cur.seniority,
+      decisionMakingFunction:
+        updates.decisionMakingFunction === null
+          ? undefined
+          : updates.decisionMakingFunction ?? cur.decisionMakingFunction,
+      verificationStatus: updates.verificationStatus ?? cur.verificationStatus,
+      customFields: Object.keys(cf).length > 0 ? cf : undefined,
+      updatedAt: now,
+    };
+
+    this.db.persons[idx] = updated;
+    this.saveDatabase(this.db);
+    return updated;
+  }
+
+  public updateRelationshipRecord(
+    leadId: string,
+    relationshipId: string,
+    updates: Partial<{
+      relationshipType: string;
+      jobTitle: string | null;
+      designation: string | null;
+      department: string | null;
+      decisionMakerCategory: string | null;
+      isPrimaryContact: boolean;
+      employmentStatus: 'current' | 'historical' | 'unknown';
+      endedAt: string | null;
+      uncertainMatch: boolean;
+      reviewedByOwner: boolean;
+    }>
+  ): CompanyPersonRelationship | null {
+    if (!this.db.companyPersonRelationships) return null;
+    const idx = this.db.companyPersonRelationships.findIndex(
+      (r) => r.id === relationshipId && r.leadId === leadId
+    );
+    if (idx < 0) return null;
+
+    const now = new Date().toISOString();
+    const cur = this.db.companyPersonRelationships[idx];
+    if (updates.isPrimaryContact) {
+      for (let i = 0; i < this.db.companyPersonRelationships.length; i++) {
+        const r = this.db.companyPersonRelationships[i];
+        if (r.leadId === leadId && r.id !== relationshipId && r.isPrimaryContact) {
+          this.db.companyPersonRelationships[i] = { ...r, isPrimaryContact: false, updatedAt: now };
+        }
+      }
+    }
+
+    const nextProv = {
+      ...(cur.provenance || {}),
+      ...(updates.employmentStatus ? { employmentStatus: updates.employmentStatus } : {}),
+      ...(updates.endedAt !== undefined ? { endedAt: updates.endedAt || undefined } : {}),
+      ...(updates.employmentStatus === 'historical' && !cur.provenance?.endedAt && updates.endedAt === undefined
+        ? { endedAt: now.slice(0, 10) }
+        : {}),
+      ...(updates.uncertainMatch !== undefined ? { uncertainMatch: updates.uncertainMatch } : {}),
+      ...(updates.reviewedByOwner !== undefined ? { reviewedByOwner: updates.reviewedByOwner } : {}),
+    };
+
+    const nextRel: CompanyPersonRelationship = {
+      ...cur,
+      relationshipType: updates.relationshipType ?? cur.relationshipType,
+      jobTitle: updates.jobTitle === null ? undefined : updates.jobTitle ?? cur.jobTitle,
+      designation: updates.designation === null ? undefined : updates.designation ?? cur.designation,
+      department: updates.department === null ? undefined : updates.department ?? cur.department,
+      decisionMakerCategory:
+        updates.decisionMakerCategory === null
+          ? undefined
+          : updates.decisionMakerCategory ?? cur.decisionMakerCategory,
+      isPrimaryContact: updates.isPrimaryContact ?? cur.isPrimaryContact,
+      provenance: nextProv,
+      updatedAt: now,
+    };
+
+    this.db.companyPersonRelationships[idx] = nextRel;
+    this.saveDatabase(this.db);
+    return nextRel;
   }
 
   public setPrimaryContact(leadId: string, relationshipId: string): LinkedPersonWithRelationship[] {

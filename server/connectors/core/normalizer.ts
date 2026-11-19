@@ -32,9 +32,11 @@ const VERIFICATION_RANK: Record<VerificationStatus | 'user_provided' | 'discover
 };
 
 export const PROVENANCE_RANK: Record<AttributeProvenanceType, number> = {
-  official_registry: 6,
-  official_website: 5,
+  official_registry: 7,
+  official_website: 6,
+  authorized_provider: 5,
   business_directory: 4,
+  owner_manual: 4,
   search_provider: 3,
   ai_extracted: 2,
   inferred: 1,

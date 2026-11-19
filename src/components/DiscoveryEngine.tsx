@@ -29,6 +29,7 @@ import {
   Play,
   FileJson,
   ShieldCheck,
+  Users,
 } from 'lucide-react';
 import {
   AttributeProvenanceType,
@@ -37,6 +38,8 @@ import {
   AdministrativeDivision,
   CityReference,
   ConnectorStatus,
+  DecisionMakerCandidate,
+  DecisionMakerDiscoveryResponse,
   DiscoveryConnectorSummary,
   DiscoveryDuplicateInfo,
   DiscoveryHistoryItem,
@@ -46,6 +49,10 @@ import {
   SourceCategory,
 } from '../types.js';
 import { apiFetch } from '../utils/apiFetch.ts';
+import {
+  EXPANDED_RELATIONSHIP_TYPES,
+  ROLE_TAXONOMY_SPECS,
+} from '../../shared/decisionMakerRoles.ts';
 
 interface DiscoveryEngineProps {
   onAddLeadToCrm: (lead: CanonicalLead) => void;
@@ -193,9 +200,92 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
   const [inspectedCandidate, setInspectedCandidate] = useState<CanonicalLead | null>(null);
   const [isEnrichingId, setIsEnrichingId] = useState<string | null>(null);
 
+  // Phase 11: Candidate Drawer Decision-Maker Investigation
+  const [drawerDmRoleFilter, setDrawerDmRoleFilter] = useState('');
+  const [isDrawerDmLoading, setIsDrawerDmLoading] = useState(false);
+  const [drawerDmResult, setDrawerDmResult] = useState<DecisionMakerDiscoveryResponse | null>(null);
+  const [drawerDmError, setDrawerDmError] = useState<string | null>(null);
+  const [drawerSelectedDmIds, setDrawerSelectedDmIds] = useState<Set<string>>(new Set());
+  const [isSavingDrawerDm, setIsSavingDrawerDm] = useState(false);
+  const [drawerDmSuccess, setDrawerDmSuccess] = useState<string | null>(null);
+
   const [showHistory, setShowHistory] = useState(false);
   const [historyItems, setHistoryItems] = useState<DiscoveryHistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  useEffect(() => {
+    setDrawerDmResult(null);
+    setDrawerDmError(null);
+    setDrawerSelectedDmIds(new Set());
+    setDrawerDmSuccess(null);
+  }, [inspectedCandidate?.id]);
+
+  const handleInvestigateDrawerDecisionMakers = async (company: CanonicalLead) => {
+    setIsDrawerDmLoading(true);
+    setDrawerDmError(null);
+    setDrawerDmSuccess(null);
+    try {
+      const matchedLeadId = duplicateInfoByLeadId[company.id]?.matchedLeadId;
+      const res = await apiFetch('/api/decision-makers/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadId: matchedLeadId,
+          companyName: company.companyName,
+          domain: company.domain,
+          website: company.website,
+          countryCode: company.address?.countryCode,
+          registrationNumber: company.registrationNumber,
+          registrationType: company.registrationType,
+          industry: company.industry,
+          targetRelationshipType: drawerDmRoleFilter || undefined,
+          includeHistorical: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Decision-maker investigation failed');
+      setDrawerDmResult(data);
+      setDrawerSelectedDmIds(new Set());
+    } catch (err: unknown) {
+      setDrawerDmError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDrawerDmLoading(false);
+    }
+  };
+
+  const handleSaveCompanyWithApprovedContacts = async (company: CanonicalLead) => {
+    if (!drawerDmResult || drawerSelectedDmIds.size === 0) return;
+    const approved: DecisionMakerCandidate[] = drawerDmResult.candidates.filter((c) =>
+      drawerSelectedDmIds.has(c.candidateId)
+    );
+    if (approved.length === 0) return;
+    setIsSavingDrawerDm(true);
+    setDrawerDmError(null);
+    try {
+      const matchedLeadId = duplicateInfoByLeadId[company.id]?.matchedLeadId;
+      const res = await apiFetch('/api/decision-makers/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadId: matchedLeadId,
+          company: matchedLeadId ? undefined : company,
+          candidates: approved,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save company and contacts to CRM');
+      setAddedIds((prev) => new Set([...prev, company.id]));
+      setDrawerSelectedDmIds(new Set());
+      setDrawerDmSuccess(
+        `Saved ${company.companyName} and ${approved.length} approved decision-maker(s) to CRM.`
+      );
+      if (onRefreshLeads) onRefreshLeads();
+    } catch (err: unknown) {
+      setDrawerDmError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSavingDrawerDm(false);
+    }
+  };
 
   useEffect(() => {
     if (initialCountry) {
@@ -2506,6 +2596,156 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                       </span>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Phase 11: Company-to-Person Decision-Maker Investigation */}
+            <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h4 className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Investigate Decision-Makers</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Inspect official website leadership, officer registries, Wikidata, and configured authorized providers before saving approved contacts with this company.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={drawerDmRoleFilter}
+                  onChange={(e) => setDrawerDmRoleFilter(e.target.value)}
+                  className="flex-1 px-2.5 py-1.5 text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                >
+                  <option value="">All Decision-Maker Roles</option>
+                  {EXPANDED_RELATIONSHIP_TYPES.map((role) => (
+                    <option key={role} value={role}>
+                      {ROLE_TAXONOMY_SPECS[role].label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={isDrawerDmLoading}
+                  onClick={() => handleInvestigateDrawerDecisionMakers(inspectedCandidate)}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white whitespace-nowrap shrink-0 inline-flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isDrawerDmLoading ? 'animate-spin' : ''}`} />
+                  <span>{isDrawerDmLoading ? 'Investigating...' : 'Find Decision-Makers'}</span>
+                </button>
+              </div>
+
+              {drawerDmError && (
+                <div className="p-2 rounded bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-[11px]">
+                  {drawerDmError}
+                </div>
+              )}
+
+              {drawerDmSuccess && (
+                <div className="p-2 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-[11px]">
+                  {drawerDmSuccess}
+                </div>
+              )}
+
+              {drawerDmResult && (
+                <div className="space-y-2.5">
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                    {drawerDmResult.honestStatusNote}
+                  </div>
+                  <div className="flex flex-wrap gap-x-2.5 gap-y-1 text-[10px] font-mono text-slate-500">
+                    {drawerDmResult.sourceSummaries.map((s) => (
+                      <span key={s.sourceId}>
+                        {s.sourceName}:{' '}
+                        {s.status === 'success'
+                          ? `${s.candidatesFound} found`
+                          : s.status.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+
+                  {drawerDmResult.candidates.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                          {drawerDmResult.candidates.length} candidate(s) · {drawerSelectedDmIds.size} selected
+                        </span>
+                        <button
+                          type="button"
+                          disabled={drawerSelectedDmIds.size === 0 || isSavingDrawerDm}
+                          onClick={() => handleSaveCompanyWithApprovedContacts(inspectedCandidate)}
+                          className="px-2.5 py-1 text-[11px] font-semibold rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white whitespace-nowrap shrink-0"
+                        >
+                          {isSavingDrawerDm
+                            ? 'Saving...'
+                            : `Save Company + Approved Contacts (${drawerSelectedDmIds.size})`}
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                        {drawerDmResult.candidates.map((cand) => {
+                          const selected = drawerSelectedDmIds.has(cand.candidateId);
+                          return (
+                            <div
+                              key={cand.candidateId}
+                              className={`p-2.5 rounded-md border text-[11px] space-y-1 ${
+                                selected
+                                  ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-700'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDrawerSelectedDmIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(cand.candidateId)) next.delete(cand.candidateId);
+                                      else next.add(cand.candidateId);
+                                      return next;
+                                    })
+                                  }
+                                  className="flex items-start gap-2 text-left min-w-0"
+                                >
+                                  {selected ? (
+                                    <CheckSquare className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                                  ) : (
+                                    <Square className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="font-semibold text-slate-900 dark:text-white">
+                                      {cand.fullName}{' '}
+                                      <span className="font-normal text-slate-500">
+                                        · {cand.jobTitle || cand.relationshipType}
+                                      </span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-500">
+                                      {cand.employmentStatus === 'historical'
+                                        ? `Historical${cand.endedAt ? ` (ended ${cand.endedAt})` : ''}`
+                                        : 'Current'}{' '}
+                                      · {cand.verificationTier.replace(/_/g, ' ')} · {cand.confidenceScore}% conf
+                                    </div>
+                                  </div>
+                                </button>
+                              </div>
+                              {cand.uncertainMatch && (
+                                <div className="text-[10px] text-amber-700 dark:text-amber-300">
+                                  Uncertain match with existing CRM contact (review before linking).
+                                </div>
+                              )}
+                              {cand.relevanceExplanation && (
+                                <div className="text-[10px] text-slate-500">
+                                  {cand.relevanceExplanation}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

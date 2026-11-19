@@ -333,9 +333,20 @@ export function buildPersonRecordFromImport(input: {
   if (person.phoneNormalized) confidence += 15;
   if (person.linkedinSlug) confidence += 15;
 
-  const cf = { ...(person.customFields || {}) };
+  const cf: Record<string, any> = { ...(person.customFields || {}) };
   if (person.associatedCompanyName) cf.associatedCompanyName = person.associatedCompanyName;
   if (person.associatedCompanyRegNumber) cf.associatedCompanyRegNumber = person.associatedCompanyRegNumber;
+  if (person.bioSummary) cf.bioSummary = person.bioSummary;
+  if (person.officialBioUrl) cf.officialBioUrl = person.officialBioUrl;
+  if (person.seniority) cf.seniority = person.seniority;
+  if (person.decisionMakingFunction) cf.decisionMakingFunction = person.decisionMakingFunction;
+  if (person.attributeProvenance && Object.keys(person.attributeProvenance).length > 0) {
+    cf.attributeProvenance = person.attributeProvenance;
+  }
+
+  const verificationStatus =
+    person.verificationStatus || (hasSyntaxValidated ? 'syntax_validated' : 'user_provided');
+  const finalConfidence = person.confidenceScore ?? Math.min(90, confidence);
 
   return {
     id,
@@ -352,15 +363,23 @@ export function buildPersonRecordFromImport(input: {
     country: person.country,
     countryCode: person.countryCode,
     city: person.city,
-    sources: [
-      {
-        sourceName: `File Import (${filename})`,
-        retrievedAt: now,
-        attribution: `Imported by ${actorEmail}`,
-      },
-    ],
-    confidenceScore: Math.min(90, confidence),
-    verificationStatus: hasSyntaxValidated ? 'syntax_validated' : 'user_provided',
+    sources:
+      person.sources && person.sources.length > 0
+        ? person.sources
+        : [
+            {
+              sourceName: `File Import (${filename})`,
+              retrievedAt: now,
+              attribution: `Imported by ${actorEmail}`,
+            },
+          ],
+    confidenceScore: finalConfidence,
+    verificationStatus,
+    bioSummary: person.bioSummary,
+    officialBioUrl: person.officialBioUrl,
+    seniority: person.seniority,
+    decisionMakingFunction: person.decisionMakingFunction,
+    attributeProvenance: person.attributeProvenance,
     customFields: Object.keys(cf).length > 0 ? cf : undefined,
     createdAt: now,
     updatedAt: now,
@@ -374,7 +393,10 @@ export function mergeImportedPersonSafely(
   now: string
 ): { person: PersonRecord; updated: boolean } {
   let updated = false;
-  const next: PersonRecord = { ...existing };
+  const next: PersonRecord = {
+    ...existing,
+    customFields: { ...(existing.customFields || {}) },
+  };
 
   if (!next.email && imported.email) {
     next.email = imported.email;
@@ -403,15 +425,71 @@ export function mergeImportedPersonSafely(
     next.country = imported.country;
     updated = true;
   }
+  if (!next.bioSummary && imported.bioSummary) {
+    next.bioSummary = imported.bioSummary;
+    next.customFields!.bioSummary = imported.bioSummary;
+    updated = true;
+  }
+  if (!next.officialBioUrl && imported.officialBioUrl) {
+    next.officialBioUrl = imported.officialBioUrl;
+    next.customFields!.officialBioUrl = imported.officialBioUrl;
+    updated = true;
+  }
+  if (!next.seniority && imported.seniority) {
+    next.seniority = imported.seniority;
+    next.customFields!.seniority = imported.seniority;
+    updated = true;
+  }
+  if (!next.decisionMakingFunction && imported.decisionMakingFunction) {
+    next.decisionMakingFunction = imported.decisionMakingFunction;
+    next.customFields!.decisionMakingFunction = imported.decisionMakingFunction;
+    updated = true;
+  }
 
-  if (updated) {
-    const hasSrc = (next.sources || []).some((s) => s.sourceName === `File Import (${filename})`);
-    if (!hasSrc) {
-      next.sources = [
-        ...(next.sources || []),
-        { sourceName: `File Import (${filename})`, retrievedAt: now },
-      ];
+  if (imported.attributeProvenance) {
+    const mergedProv = {
+      ...(existing.attributeProvenance ||
+        (existing.customFields?.attributeProvenance as Record<string, any> | undefined) ||
+        {}),
+    };
+    for (const [k, v] of Object.entries(imported.attributeProvenance)) {
+      if (!mergedProv[k]) {
+        mergedProv[k] = v;
+        updated = true;
+      }
     }
+    next.attributeProvenance = mergedProv;
+  }
+
+  if (imported.confidenceScore && imported.confidenceScore > (next.confidenceScore || 0)) {
+    next.confidenceScore = imported.confidenceScore;
+    updated = true;
+  }
+  if (
+    imported.verificationStatus === 'officially_verified' &&
+    next.verificationStatus !== 'officially_verified'
+  ) {
+    next.verificationStatus = 'officially_verified';
+    updated = true;
+  }
+
+  const incomingSources =
+    imported.sources && imported.sources.length > 0
+      ? imported.sources
+      : [{ sourceName: `File Import (${filename})`, retrievedAt: now }];
+  const existingSourceNames = new Set((next.sources || []).map((s) => s.sourceName));
+  for (const s of incomingSources) {
+    if (!existingSourceNames.has(s.sourceName)) {
+      next.sources = [...(next.sources || []), s];
+      existingSourceNames.add(s.sourceName);
+      updated = true;
+    }
+  }
+
+  if (Object.keys(next.customFields || {}).length === 0) {
+    next.customFields = undefined;
+  }
+  if (updated) {
     next.updatedAt = now;
   }
 
@@ -429,6 +507,16 @@ export function buildRelationshipRecord(input: {
   const { leadId, personId, person, filename, rowNumber, now } = input;
   const hasSyntaxValidated = person.emailStatus === 'syntax_valid' || Boolean(person.phoneNormalized);
 
+  const provenance = {
+    filename,
+    rowNumber,
+    importedAt: now,
+    ...(person.relationshipProvenance || {}),
+    employmentStatus: person.relationshipProvenance?.employmentStatus || 'current',
+    firstObservedAt: person.relationshipProvenance?.firstObservedAt || now,
+    lastObservedAt: person.relationshipProvenance?.lastObservedAt || now,
+  };
+
   return {
     id: `cpr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
     leadId,
@@ -439,14 +527,11 @@ export function buildRelationshipRecord(input: {
     department: person.department,
     decisionMakerCategory: person.decisionMakerCategory,
     isPrimaryContact: Boolean(person.isPrimaryContact),
-    sourceName: `File Import (${filename})`,
-    provenance: {
-      filename,
-      rowNumber,
-      importedAt: now,
-    },
-    confidenceScore: hasSyntaxValidated ? 75 : 55,
-    verificationStatus: hasSyntaxValidated ? 'syntax_validated' : 'user_provided',
+    sourceName: person.relationshipProvenance?.sourceName || `File Import (${filename})`,
+    provenance,
+    confidenceScore: person.confidenceScore ?? (hasSyntaxValidated ? 75 : 55),
+    verificationStatus:
+      person.verificationStatus || (hasSyntaxValidated ? 'syntax_validated' : 'user_provided'),
     createdAt: now,
     updatedAt: now,
   };

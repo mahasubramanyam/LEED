@@ -9,10 +9,23 @@ import type { AttributeProvenanceEntry } from '../types.js';
 export type CompanyPageType =
   | 'homepage'
   | 'about'
+  | 'leadership'
+  | 'announcements'
   | 'products'
   | 'contact'
   | 'locations'
   | 'imprint';
+
+export interface WebsiteLeadershipMention {
+  fullName: string;
+  jobTitle?: string;
+  linkedinUrl?: string;
+  officialBioUrl: string;
+  bioSnippet?: string;
+  sourceType: 'official_website';
+  method: 'json_ld_person' | 'leadership_html_block';
+  retrievedAt: string;
+}
 
 export interface CrawledPageExcerpt {
   url: string;
@@ -41,10 +54,13 @@ export interface WebInspectionResult {
   locationsServed?: string[];
   operatingInfo?: string;
   aboutPageUrl?: string;
+  leadershipPageUrl?: string;
+  announcementsPageUrl?: string;
   productsPageUrl?: string;
   contactPageUrl?: string;
   locationsPageUrl?: string;
   imprintPageUrl?: string;
+  leadershipFound?: WebsiteLeadershipMention[];
   pagesVisited?: string[];
   pageExcerpts?: CrawledPageExcerpt[];
   attributeProvenance?: Record<string, AttributeProvenanceEntry>;
@@ -149,11 +165,32 @@ function sameRegistrableAlias(hostA: string, hostB: string): boolean {
   return a === b;
 }
 
+const PERSONAL_WEBMAIL_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'yahoo.com',
+  'ymail.com',
+  'hotmail.com',
+  'outlook.com',
+  'live.com',
+  'msn.com',
+  'icloud.com',
+  'me.com',
+  'mac.com',
+  'aol.com',
+  'proton.me',
+  'protonmail.com',
+  'gmx.com',
+  'mail.com',
+]);
+
 function isGeneralBusinessEmail(email: string): boolean {
   const lower = email.toLowerCase();
-  const local = lower.split('@')[0] || '';
+  const [local = '', domain = ''] = lower.split('@');
+  if (!local || !domain) return false;
+  if (PERSONAL_WEBMAIL_DOMAINS.has(domain)) return false;
   if (GENERAL_BUSINESS_EMAIL_PREFIXES.has(local)) return true;
-  // Avoid personal firstname.lastname / firstname_lastname harvesting in Phase 10
+  // Avoid personal firstname.lastname / firstname_lastname harvesting
   if (/^[a-z]{2,}\.[a-z]{2,}$/i.test(local) || /^[a-z]{2,}_[a-z]{2,}$/i.test(local)) {
     return false;
   }
@@ -241,6 +278,175 @@ function parseJsonLdOrganizations(html: string): Array<Record<string, any>> {
   return blocks;
 }
 
+const LEADERSHIP_TITLE_REGEX =
+  /\b(chief\s+[a-z\s]+officer|ceo|cfo|coo|cto|cmo|cio|cpo|cro|founder|co-founder|cofounder|owner|proprietor|managing\s+director|managing\s+partner|executive\s+director|board\s+member|chair(?:man|woman|person)|director|president|vice\s+president|vp\b|head\s+of|procurement|purchasing|supply\s+chain|business\s+development|sales\s+director|partnerships?|general\s+manager|daglig\s+leder|styreleder|styremedlem)\b/i;
+
+function normalizeCandidatePersonName(raw: string): string | null {
+  const clean = decodeBasicEntities(raw).replace(/\s+/g, ' ').trim();
+  if (clean.length < 4 || clean.length > 70) return null;
+  if (/[@\d/{}[\]<>]|https?:|www\./i.test(clean)) return null;
+  const words = clean.split(' ').filter(Boolean);
+  if (words.length < 2 || words.length > 5) return null;
+  // Exclude common non-person navigation/section phrases
+  if (
+    /^(about us|our team|leadership team|executive team|board of|management team|contact us|read more|learn more|press release|company news|privacy policy|cookie policy|terms of|all rights)/i.test(
+      clean
+    )
+  ) {
+    return null;
+  }
+  return clean;
+}
+
+function extractPersonLinkedInUrl(snippet: string): string | undefined {
+  const m = snippet.match(/https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/in\/[a-zA-Z0-9_%-]+/i);
+  return m ? m[0].replace(/\/$/, '') : undefined;
+}
+
+function extractLeadershipMentionsFromPage(
+  html: string,
+  pageUrl: string,
+  pageType: CompanyPageType,
+  retrievedAt: string
+): WebsiteLeadershipMention[] {
+  const found: WebsiteLeadershipMention[] = [];
+  const seenKeys = new Set<string>();
+
+  const pushCandidate = (cand: WebsiteLeadershipMention) => {
+    const key = `${cand.fullName.toLowerCase()}::${(cand.jobTitle || '').toLowerCase()}`;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    found.push(cand);
+  };
+
+  // 1. JSON-LD Person / founder / employee / director items
+  const ldMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+  for (const m of ldMatches) {
+    try {
+      const parsed = JSON.parse(m[1].trim());
+      const items = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.['@graph'])
+        ? parsed['@graph']
+        : [parsed];
+
+      const collectPersonObj = (obj: any, fallbackRole?: string) => {
+        if (!obj) return;
+        if (Array.isArray(obj)) {
+          obj.forEach((sub) => collectPersonObj(sub, fallbackRole));
+          return;
+        }
+        if (typeof obj === 'string') {
+          const validName = normalizeCandidatePersonName(obj);
+          if (validName && fallbackRole) {
+            pushCandidate({
+              fullName: validName,
+              jobTitle: fallbackRole,
+              officialBioUrl: pageUrl,
+              sourceType: 'official_website',
+              method: 'json_ld_person',
+              retrievedAt,
+            });
+          }
+          return;
+        }
+        if (typeof obj !== 'object') return;
+        const typeStr = String(obj['@type'] || '').toLowerCase();
+        if (typeStr.includes('person') || fallbackRole) {
+          const validName = typeof obj.name === 'string' ? normalizeCandidatePersonName(obj.name) : null;
+          if (!validName) return;
+          const jobTitle =
+            typeof obj.jobTitle === 'string' && obj.jobTitle.trim()
+              ? obj.jobTitle.trim().slice(0, 120)
+              : fallbackRole;
+          const sameAs = Array.isArray(obj.sameAs) ? obj.sameAs : typeof obj.sameAs === 'string' ? [obj.sameAs] : [];
+          const li = sameAs.find((u: any) => typeof u === 'string' && /linkedin\.com\/in\//i.test(u));
+          pushCandidate({
+            fullName: validName,
+            jobTitle,
+            linkedinUrl: typeof li === 'string' ? li : undefined,
+            officialBioUrl: typeof obj.url === 'string' && /^https?:\/\//i.test(obj.url) ? obj.url : pageUrl,
+            bioSnippet:
+              typeof obj.description === 'string' && obj.description.trim()
+                ? obj.description.trim().slice(0, 260)
+                : undefined,
+            sourceType: 'official_website',
+            method: 'json_ld_person',
+            retrievedAt,
+          });
+        }
+      };
+
+      for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+        const typeStr = String(item['@type'] || '').toLowerCase();
+        if (typeStr.includes('person')) {
+          collectPersonObj(item);
+        } else {
+          if (item.founder) collectPersonObj(item.founder, 'Founder');
+          if (item.founders) collectPersonObj(item.founders, 'Founder');
+          if (item.employee) collectPersonObj(item.employee);
+          if (item.employees) collectPersonObj(item.employees);
+          if (item.member) collectPersonObj(item.member);
+        }
+      }
+    } catch {
+      // Ignore malformed JSON-LD
+    }
+  }
+
+  // 2. Explicit HTML leadership blocks / team cards / press announcement lines
+  const isLeadershipRelevantPage =
+    pageType === 'leadership' || pageType === 'about' || pageType === 'imprint' || pageType === 'announcements';
+
+  // Pattern A: Heading followed by concise role element inside cards (e.g. <h3>Jane Doe</h3><p>Chief Executive Officer</p>)
+  const cardRegex = /<(?:h[2-5]|strong|b)\b[^>]*>([\s\S]{3,90}?)<\/(?:h[2-5]|strong|b)>\s*(?:<[^>]+>\s*)*<(?:p|span|div|small|em)\b[^>]*>([\s\S]{2,140}?)<\/(?:p|span|div|small|em)>/gi;
+  for (const m of html.matchAll(cardRegex)) {
+    const candName = normalizeCandidatePersonName(stripHtmlToVisibleText(m[1]));
+    const rawRole = stripHtmlToVisibleText(m[2]).replace(/\s+/g, ' ').trim();
+    if (!candName || !rawRole || rawRole.length > 100) continue;
+    if (!LEADERSHIP_TITLE_REGEX.test(rawRole)) continue;
+    const windowStart = Math.max(0, (m.index ?? 0) - 250);
+    const windowEnd = Math.min(html.length, (m.index ?? 0) + m[0].length + 350);
+    const liUrl = extractPersonLinkedInUrl(html.slice(windowStart, windowEnd));
+    pushCandidate({
+      fullName: candName,
+      jobTitle: rawRole,
+      linkedinUrl: liUrl,
+      officialBioUrl: pageUrl,
+      sourceType: 'official_website',
+      method: 'leadership_html_block',
+      retrievedAt,
+    });
+  }
+
+  // Pattern B: Visible lines like "Jane Doe — Chief Executive Officer" or "Jane Doe, Managing Director"
+  const visible = stripHtmlToVisibleText(html);
+  for (const line of visible.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.length < 8 || trimmed.length > 160) continue;
+    const sepMatch = trimmed.match(/^([A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'’.-]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'’.-]+){1,3})\s*(?:—|–|-|,|\|)\s*(.+)$/);
+    if (!sepMatch) continue;
+    const candName = normalizeCandidatePersonName(sepMatch[1]);
+    const rawRole = sepMatch[2].trim();
+    if (!candName || rawRole.length < 3 || rawRole.length > 90) continue;
+    if (!LEADERSHIP_TITLE_REGEX.test(rawRole)) continue;
+    if (!isLeadershipRelevantPage && !/\b(ceo|cfo|coo|founder|co-founder|managing director)\b/i.test(rawRole)) {
+      continue;
+    }
+    pushCandidate({
+      fullName: candName,
+      jobTitle: rawRole,
+      officialBioUrl: pageUrl,
+      sourceType: 'official_website',
+      method: 'leadership_html_block',
+      retrievedAt,
+    });
+  }
+
+  return found.slice(0, 25);
+}
+
 function formatJsonLdAddress(addr: any): string | undefined {
   if (!addr) return undefined;
   if (typeof addr === 'string') return addr.trim() || undefined;
@@ -306,11 +512,17 @@ function classifyInternalLink(
     if (SKIP_PATH_PATTERNS.some((re) => re.test(pathLower))) return null;
 
     const combo = `${pathLower} ${anchorText.toLowerCase()}`;
+    if (/(?:^|\/|-)(?:leadership|management|executive|executives|team|our-team|board|board-of-directors|founders|people|ledelse)\b/.test(combo)) {
+      return { url: fullStr, pageType: 'leadership', priority: 105 };
+    }
     if (/(?:^|\/|-)(?:contact|contact-us|get-in-touch|kontakt|reach-us)\b/.test(combo)) {
       return { url: fullStr, pageType: 'contact', priority: 100 };
     }
     if (/(?:^|\/|-)(?:about|about-us|company|company-profile|who-we-are|om-oss|a-propos|uber-uns)\b/.test(combo)) {
       return { url: fullStr, pageType: 'about', priority: 90 };
+    }
+    if (/(?:^|\/|-)(?:press|news|announcements|newsroom|press-releases|aktuelt)\b/.test(combo)) {
+      return { url: fullStr, pageType: 'announcements', priority: 88 };
     }
     if (/(?:^|\/|-)(?:products|services|solutions|offerings|capabilities|what-we-do|produkte)\b/.test(combo)) {
       return { url: fullStr, pageType: 'products', priority: 85 };
@@ -479,6 +691,8 @@ export async function inspectWebsite(
     const productsSet = new Set<string>();
     const locationsSet = new Set<string>();
     const operatingSnippets: string[] = [];
+    const leadershipMentions: WebsiteLeadershipMention[] = [];
+    const seenLeadershipKeys = new Set<string>();
 
     const parsePage = (
       htmlChunk: string,
@@ -656,6 +870,14 @@ export async function inspectWebsite(
         recordProvenance('socialLinks.github', ghMatch[0], pageUrl, retrievedAt, 'html_link');
       }
 
+      for (const lm of extractLeadershipMentionsFromPage(safeHtml, pageUrl, pageType, retrievedAt)) {
+        const lKey = `${lm.fullName.toLowerCase()}::${(lm.jobTitle || '').toLowerCase()}`;
+        if (!seenLeadershipKeys.has(lKey)) {
+          seenLeadershipKeys.add(lKey);
+          leadershipMentions.push(lm);
+        }
+      }
+
       result.pageExcerpts!.push({
         url: pageUrl,
         pageType,
@@ -670,7 +892,7 @@ export async function inspectWebsite(
     const homeUrlStr = homeFetched.finalUrl.toString();
     parsePage(homeFetched.bodyText, homeUrlStr, 'homepage', homeFetched.response.status, homeRetrievedAt);
 
-    // Discover & prioritize internal company pages (About, Products/Services, Contact, Locations, Imprint)
+    // Discover & prioritize internal company pages (Leadership/Team, About, Announcements, Contact, Products, Locations, Imprint)
     if (maxPages > 1) {
       const candidateLinks = new Map<string, { url: string; pageType: Exclude<CompanyPageType, 'homepage'>; priority: number }>();
       const anchorRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -693,6 +915,8 @@ export async function inspectWebsite(
 
       for (const target of orderedTargets) {
         if (target.pageType === 'about') result.aboutPageUrl = target.url;
+        if (target.pageType === 'leadership') result.leadershipPageUrl = target.url;
+        if (target.pageType === 'announcements') result.announcementsPageUrl = target.url;
         if (target.pageType === 'products') result.productsPageUrl = target.url;
         if (target.pageType === 'contact') result.contactPageUrl = target.url;
         if (target.pageType === 'locations') result.locationsPageUrl = target.url;
@@ -735,6 +959,7 @@ export async function inspectWebsite(
     result.addressesFound = Array.from(addressesSet).slice(0, 4);
     result.productsServices = Array.from(productsSet).slice(0, 10);
     result.locationsServed = Array.from(locationsSet).slice(0, 10);
+    result.leadershipFound = leadershipMentions.slice(0, 25);
     if (operatingSnippets.length > 0) {
       result.operatingInfo = Array.from(new Set(operatingSnippets)).join(' · ').slice(0, 240);
     }
