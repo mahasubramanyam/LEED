@@ -13,9 +13,11 @@ import {
   ArrowUpDown,
   Plus,
   X,
+  ShieldCheck,
 } from 'lucide-react';
 import { CanonicalLead, PipelineStage } from '../types.ts';
 import { GeoSelector } from './GeoSelector.tsx';
+import { BulkEnrichmentModal } from './BulkEnrichmentModal.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
 import {
   getUiIdentifierOptions,
@@ -74,6 +76,35 @@ export function LeadsView({
   const [totalPages, setTotalPages] = useState<number>(1);
   const [isQuerying, setIsQuerying] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkEnrichModal, setShowBulkEnrichModal] = useState(false);
+  const [qualityMap, setQualityMap] = useState<
+    Record<
+      string,
+      {
+        overallScore: number;
+        grade: 'A' | 'B' | 'C' | 'D' | 'F';
+        staleCount: number;
+        conflictCount: number;
+        verificationCapApplied: boolean;
+      }
+    >
+  >({});
+
+  const fetchQualitySummary = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/enrichment/quality/summary');
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.leadScores) setQualityMap(data.leadScores);
+      }
+    } catch {
+      // Non-blocking quality badges
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchQualitySummary();
+  }, [fetchQualitySummary, leads.length]);
 
   const uiIdentifierOptions = getUiIdentifierOptions();
 
@@ -681,6 +712,15 @@ export function LeadsView({
             </select>
 
             <button
+              type="button"
+              onClick={() => setShowBulkEnrichModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Bulk Enrich Preview
+            </button>
+
+            <button
               onClick={() => {
                 if (confirm(`Delete ${selectedIds.size} selected leads?`)) {
                   onBatchDelete(Array.from(selectedIds));
@@ -766,17 +806,51 @@ export function LeadsView({
                         )}
                       </td>
 
-                      {/* Confidence Score */}
+                      {/* Confidence & Data Quality Score */}
                       <td className="p-3.5">
-                        <span
-                          className={`font-mono text-xs font-bold ${
-                            lead.confidenceScore >= 80
-                              ? 'text-emerald-600 dark:text-emerald-400'
-                              : 'text-amber-600 dark:text-amber-400'
-                          }`}
-                        >
-                          {lead.confidenceScore}%
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          <span
+                            className={`font-mono text-xs font-bold ${
+                              lead.confidenceScore >= 80
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-amber-600 dark:text-amber-400'
+                            }`}
+                          >
+                            {lead.confidenceScore}% conf
+                          </span>
+                          {qualityMap[lead.id] && (
+                            <div className="flex items-center gap-1 text-[10px]">
+                              <span
+                                className={`px-1.5 py-0.2 rounded font-semibold ${
+                                  qualityMap[lead.id].grade === 'A' || qualityMap[lead.id].grade === 'B'
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                    : qualityMap[lead.id].grade === 'C'
+                                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                                    : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                                }`}
+                                title={`Data Quality ${qualityMap[lead.id].overallScore}/100`}
+                              >
+                                Q:{qualityMap[lead.id].overallScore} ({qualityMap[lead.id].grade})
+                              </span>
+                              {qualityMap[lead.id].staleCount > 0 && (
+                                <span
+                                  className="px-1 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300"
+                                  title={`${qualityMap[lead.id].staleCount} stale attribute(s)`}
+                                >
+                                  Stale
+                                </span>
+                              )}
+                              {qualityMap[lead.id].conflictCount > 0 && (
+                                <span
+                                  className="px-1 rounded bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300"
+                                  title={`${qualityMap[lead.id].conflictCount} open conflict(s)`}
+                                >
+                                  Conflict
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </td>
 
                       {/* Location */}
@@ -946,6 +1020,19 @@ export function LeadsView({
           </div>
         </div>
       </div>
+
+      {showBulkEnrichModal && (
+        <BulkEnrichmentModal
+          leadIds={Array.from(selectedIds)}
+          onClose={() => setShowBulkEnrichModal(false)}
+          onCompleted={() => {
+            setShowBulkEnrichModal(false);
+            setSelectedIds(new Set());
+            fetchServerLeads();
+            fetchQualitySummary();
+          }}
+        />
+      )}
     </div>
   );
 }

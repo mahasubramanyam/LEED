@@ -34,6 +34,7 @@ import {
 } from '../types.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
 import { ImportWizard } from './ImportWizard.tsx';
+import { PersonEnrichmentInlinePanel } from './PersonEnrichmentInlinePanel.tsx';
 import {
   EXPANDED_RELATIONSHIP_TYPES,
   ROLE_TAXONOMY_SPECS,
@@ -129,8 +130,16 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
   const [socialProviders, setSocialProviders] = useState<SocialProviderDoc[]>([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
 
-  // Inline Edit Person & Link Company & Provenance expansion
+  // Inline Edit Person & Link Company & Provenance & Phase 12 Enrichment expansion
   const [expandedProvenanceId, setExpandedProvenanceId] = useState<string | null>(null);
+  const [enrichingPersonId, setEnrichingPersonId] = useState<string | null>(null);
+  const [qualitySummary, setQualitySummary] = useState<{
+    averageCompanyQuality: number;
+    averagePersonQuality: number;
+    staleOrReverifyCompaniesCount: number;
+    openConflictsCount: number;
+    personScores: Record<string, { overallScore: number; grade: string; staleCount: number }>;
+  } | null>(null);
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
   const [editPersonForm, setEditPersonForm] = useState({
     fullName: '',
@@ -225,6 +234,28 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
       setLoadingProviders(false);
     }
   }, []);
+
+  const loadQualitySummary = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/enrichment/quality/summary');
+      if (res.ok) {
+        const data = await res.json();
+        setQualitySummary({
+          averageCompanyQuality: data.averageCompanyQuality ?? 0,
+          averagePersonQuality: data.averagePersonQuality ?? 0,
+          staleOrReverifyCompaniesCount: data.staleOrReverifyCompaniesCount ?? 0,
+          openConflictsCount: data.openConflictsCount ?? 0,
+          personScores: data.personScores || {},
+        });
+      }
+    } catch {
+      // Non-blocking quality banner
+    }
+  }, []);
+
+  useEffect(() => {
+    loadQualitySummary();
+  }, [loadQualitySummary, existingLeads.length]);
 
   useEffect(() => {
     if (activeSubTab === 'templates') loadTemplates();
@@ -391,6 +422,42 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
           })}
         </div>
       </div>
+
+      {/* Phase 12: Portfolio Data Quality & Freshness Health Strip */}
+      {qualitySummary && (
+        <div className="bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-200">
+            <ShieldCheck className="w-4 h-4 text-blue-600" />
+            <span>CRM Data Quality &amp; Freshness Intelligence</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-4 text-slate-600 dark:text-slate-300">
+            <span>
+              Avg Company Quality:{' '}
+              <strong className="font-mono text-slate-900 dark:text-white">
+                {qualitySummary.averageCompanyQuality}/100
+              </strong>
+            </span>
+            <span>
+              Avg Decision-Maker Quality:{' '}
+              <strong className="font-mono text-slate-900 dark:text-white">
+                {qualitySummary.averagePersonQuality}/100
+              </strong>
+            </span>
+            <span>
+              Stale / Re-Verify Queue:{' '}
+              <strong className="font-mono text-amber-600 dark:text-amber-400">
+                {qualitySummary.staleOrReverifyCompaniesCount}
+              </strong>
+            </span>
+            <span>
+              Open Source Conflicts:{' '}
+              <strong className="font-mono text-rose-600 dark:text-rose-400">
+                {qualitySummary.openConflictsCount}
+              </strong>
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* 1. WIZARD */}
       {activeSubTab === 'wizard' && (
@@ -869,6 +936,11 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                         </div>
                         <div className="text-[10px] font-mono text-slate-500 tabular-nums">
                           {p.confidenceScore}% confidence
+                          {qualitySummary?.personScores?.[p.id] && (
+                            <span className="ml-1.5 px-1.5 py-0.2 rounded bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold">
+                              Q:{qualitySummary.personScores[p.id].overallScore} ({qualitySummary.personScores[p.id].grade})
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -998,6 +1070,16 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                           <Link2 className="w-3 h-3" />
                           <span>{isLinking ? 'Cancel Link' : 'Link Company'}</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEnrichingPersonId(enrichingPersonId === p.id ? null : p.id)
+                          }
+                          className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-semibold"
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          <span>{enrichingPersonId === p.id ? 'Close Enrichment' : 'Enrich & Verify'}</span>
+                        </button>
                       </div>
                       <button
                         type="button"
@@ -1012,6 +1094,17 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                         )}
                       </button>
                     </div>
+
+                    {enrichingPersonId === p.id && (
+                      <PersonEnrichmentInlinePanel
+                        personId={p.id}
+                        leadId={p.companies?.[0]?.leadId}
+                        onApplied={() => {
+                          loadPersons();
+                          loadQualitySummary();
+                        }}
+                      />
+                    )}
 
                     {/* Inline Edit Form */}
                     {isEditing && (

@@ -1,5 +1,6 @@
 export type AttributeProvenanceType =
   | 'official_registry'
+  | 'authorized_verification_provider'
   | 'official_website'
   | 'authorized_provider'
   | 'business_directory'
@@ -151,6 +152,14 @@ export interface CanonicalLead {
     addressesFound?: string[];
     phonesFound?: string[];
     emailsFound?: string[];
+    canonicalDomain?: string;
+    redirectChain?: string[];
+    companyIdentityConsistent?: boolean;
+    careersPageUrl?: string;
+    certificationsFound?: string[];
+    industriesServed?: string[];
+    businessSizeIndicators?: string[];
+    tradeActivitySignals?: string[];
     attributeProvenance?: Record<string, AttributeProvenanceEntry>;
   };
   status: LeadStatus;
@@ -268,6 +277,7 @@ export interface AppSettings {
   autoDedupeThreshold: number; // 0.85
   suppressionDomains: string[];
   connectorConfigs?: Record<string, ConnectorConfigRecord>;
+  reverificationPolicy?: ReverificationSchedulePolicy;
 }
 
 export interface DiscoverySearchRequest {
@@ -1086,4 +1096,331 @@ export interface ImportBatchRowRecord {
   warnings: ImportValidationIssue[];
   createdAt: string;
 }
+
+// ============================================================================
+// PHASE 12 — Lead Enrichment, Contact Verification & Data Quality Intelligence
+// ============================================================================
+
+export type EnrichmentProviderStatus =
+  | 'operational'
+  | 'operational_with_credentials'
+  | 'missing_credentials'
+  | 'restricted'
+  | 'unavailable'
+  | 'retired'
+  | 'not_implemented'
+  | 'error';
+
+export type SourceReliabilityTier =
+  | 'authoritative_registry'
+  | 'official_company_source'
+  | 'authorized_verification_api'
+  | 'authorized_commercial_api'
+  | 'open_public_directory'
+  | 'web_search_index'
+  | 'ai_assistance_only'
+  | 'restricted_or_unavailable';
+
+export interface EnrichmentProviderCatalogEntry {
+  providerId: string;
+  connectorId?: string;
+  name: string;
+  category:
+    | 'company_registry'
+    | 'website_domain'
+    | 'email_verification'
+    | 'phone_verification'
+    | 'b2b_people_enrichment'
+    | 'web_search'
+    | 'directory_reference'
+    | 'ai_assistance';
+  enrichmentCapabilities: string[];
+  supportedCountries: string[];
+  dataCategories: string[];
+  apiAvailability: string;
+  endpointDoc?: string;
+  credentialRequirements: string;
+  credentialStatus: 'none_required' | 'configured' | 'missing' | 'not_applicable';
+  operationalStatus: EnrichmentProviderStatus;
+  rateLimits: string;
+  costLimitations: string;
+  commercialUsagePermitted: boolean;
+  lastSuccessfulExecution?: string;
+  lastFailure?: string;
+  lastErrorMessage?: string;
+  verificationCapability: boolean;
+  reliabilityClassification: SourceReliabilityTier;
+  honestLimitationNote: string;
+}
+
+export interface EmailVerificationResult {
+  email: string;
+  normalizedEmail: string;
+  domain: string;
+  syntaxValid: boolean;
+  domainValid: boolean;
+  mxRecordsPresent: boolean;
+  mxHosts: string[];
+  spfPresent: boolean;
+  dmarcPresent: boolean;
+  mailConfigVerified: boolean;
+  isFreePersonalWebmail: boolean;
+  isDisposable: boolean;
+  isRoleBased: boolean;
+  isCatchAll: boolean | null;
+  status:
+    | 'provider_deliverable'
+    | 'provider_risky'
+    | 'catch_all'
+    | 'disposable'
+    | 'role_based'
+    | 'undeliverable'
+    | 'mail_config_verified'
+    | 'mx_present'
+    | 'domain_valid'
+    | 'syntax_valid'
+    | 'invalid_syntax'
+    | 'personal_webmail_rejected'
+    | 'stale'
+    | 'verification_failed'
+    | 'unknown';
+  crmEmailStatus: 'verified' | 'syntax_valid' | 'unverified' | 'unavailable';
+  providerUsed?: string;
+  providerStatus?: string;
+  providerScore?: number;
+  deliverabilityClaimed: boolean;
+  honestSummary: string;
+  warnings: string[];
+  verifiedAt: string;
+  sourceName: string;
+  sourceType: AttributeProvenanceType;
+}
+
+export type PhoneLineType =
+  | 'landline'
+  | 'mobile'
+  | 'voip'
+  | 'toll_free'
+  | 'special_services'
+  | 'unknown';
+
+export interface PhoneVerificationResult {
+  rawPhone: string;
+  e164: string;
+  internationalFormatted: string;
+  nationalFormatted: string;
+  countryCode: string;
+  callingCode: string;
+  syntaxValid: boolean;
+  status:
+    | 'provider_verified'
+    | 'e164_valid'
+    | 'format_valid_unverified'
+    | 'invalid_format'
+    | 'conflicting'
+    | 'stale'
+    | 'verification_failed'
+    | 'unknown';
+  lineType: PhoneLineType;
+  lineTypeBasis: 'provider_verified' | 'heuristic' | 'unknown';
+  businessClassification: 'likely_business' | 'likely_personal' | 'shared_or_unknown';
+  carrier?: string;
+  location?: string;
+  providerUsed?: string;
+  personAssociationVerified: boolean;
+  honestSummary: string;
+  warnings: string[];
+  verifiedAt: string;
+  sourceName: string;
+  sourceType: AttributeProvenanceType;
+}
+
+export interface DataQualityFactor {
+  dimension: 'completeness' | 'verification' | 'freshness' | 'consistency';
+  impact: 'positive' | 'negative' | 'warning';
+  points: number;
+  label: string;
+  detail: string;
+}
+
+export interface StaleAttributeIndicator {
+  attribute: string;
+  label: string;
+  lastVerifiedAt?: string;
+  ageDays: number | null;
+  maxAgeDays: number;
+  status: 'aging' | 'stale' | 'never_verified';
+}
+
+export interface DataQualityScoreBreakdown {
+  entityType: 'company' | 'person';
+  entityId: string;
+  completenessScore: number;
+  verificationScore: number;
+  freshnessScore: number;
+  overallScore: number;
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  verificationCapApplied: boolean;
+  verificationCapReason?: string;
+  missingCriticalFields: string[];
+  staleAttributes: StaleAttributeIndicator[];
+  conflictingAttributes: string[];
+  duplicateRisk: 'none' | 'possible' | 'high';
+  relationshipConfidence?: number;
+  reverificationEligible: boolean;
+  factors: DataQualityFactor[];
+  evaluatedAt: string;
+}
+
+export interface EnrichmentFieldProposal {
+  field: string;
+  label: string;
+  currentValue?: string;
+  proposedValue: string;
+  currentSourceType?: AttributeProvenanceType;
+  currentSourceName?: string;
+  currentLastVerifiedAt?: string;
+  proposedSourceType: AttributeProvenanceType;
+  proposedSourceName: string;
+  proposedSourceUrl?: string;
+  proposedConnectorId?: string;
+  verificationLabel:
+    | 'officially_verified'
+    | 'multi_source_verified'
+    | 'source_reported'
+    | 'ai_extracted'
+    | 'inferred'
+    | 'unknown'
+    | 'conflicting'
+    | 'outdated';
+  confidenceScore: number;
+  actionRecommendation: 'fill_missing' | 'upgrade_stronger_source' | 'refresh_stale' | 'conflict_review' | 'keep_existing_stronger';
+  defaultSelected: boolean;
+  isConflict: boolean;
+  precedenceNote: string;
+  corroboratingSources: string[];
+  retrievedAt: string;
+}
+
+export interface EnrichmentConflictRecord {
+  id: string;
+  field: string;
+  label: string;
+  existingValue: string;
+  existingSourceName: string;
+  existingSourceType: AttributeProvenanceType;
+  existingPrecedenceScore: number;
+  incomingValue: string;
+  incomingSourceName: string;
+  incomingSourceType: AttributeProvenanceType;
+  incomingPrecedenceScore: number;
+  recommendedWinner: 'existing' | 'incoming' | 'owner_review';
+  rationale: string;
+  detectedAt: string;
+  status: 'open' | 'kept_existing' | 'accepted_incoming';
+}
+
+export interface EnrichmentHistoryEntry {
+  id: string;
+  timestamp: string;
+  actor: string;
+  entityType: 'company' | 'person';
+  action: 'enrichment_applied' | 'verification_attempt_failed' | 'contact_verified' | 'conflict_resolved';
+  providersExecuted: string[];
+  fieldsUpdated: Array<{
+    field: string;
+    previousValue?: string;
+    previousSource?: string;
+    newValue: string;
+    newSource: string;
+    verificationLabel: string;
+  }>;
+  failedVerifications?: Array<{
+    provider: string;
+    attribute?: string;
+    reason: string;
+    existingDataPreserved: boolean;
+  }>;
+  conflictsResolved?: number;
+  qualityScoreBefore?: number;
+  qualityScoreAfter?: number;
+}
+
+export interface EnrichmentProviderRunSummary {
+  providerId: string;
+  providerName: string;
+  status: 'success' | 'no_results' | 'skipped_missing_credentials' | 'skipped_not_applicable' | 'rate_limited' | 'timeout' | 'error';
+  durationMs: number;
+  attributesContributed: string[];
+  message: string;
+}
+
+export interface CompanyEnrichmentPreviewResponse {
+  leadId?: string;
+  companyName: string;
+  proposals: EnrichmentFieldProposal[];
+  conflicts: EnrichmentConflictRecord[];
+  emailVerification?: EmailVerificationResult;
+  phoneVerification?: PhoneVerificationResult;
+  websiteSummary?: {
+    url: string;
+    isOnline: boolean;
+    canonicalDomain?: string;
+    redirectChain?: string[];
+    companyIdentityConsistent?: boolean;
+    certificationsFound?: string[];
+    industriesServed?: string[];
+    businessSizeIndicators?: string[];
+    tradeActivitySignals?: string[];
+    careersPageUrl?: string;
+    leadershipCount: number;
+  };
+  providerRuns: EnrichmentProviderRunSummary[];
+  failedVerifications: Array<{ provider: string; reason: string; existingDataPreserved: boolean }>;
+  qualityBefore: DataQualityScoreBreakdown;
+  qualityProjectedAfter: DataQualityScoreBreakdown;
+  aiAssistance?: {
+    summary: string;
+    missingDataRecommendations: string[];
+    suggestedProviders: string[];
+    conflictNotes: string[];
+    qualityExplanation: string;
+    provenanceType: 'ai_extracted' | 'inferred';
+    engine: string;
+  };
+  requiresOwnerApproval: true;
+  generatedAt: string;
+  durationMs: number;
+}
+
+export interface PersonEnrichmentPreviewResponse {
+  personId: string;
+  fullName: string;
+  leadId?: string;
+  companyName?: string;
+  proposals: EnrichmentFieldProposal[];
+  conflicts: EnrichmentConflictRecord[];
+  emailVerification?: EmailVerificationResult;
+  phoneVerification?: PhoneVerificationResult;
+  providerRuns: EnrichmentProviderRunSummary[];
+  failedVerifications: Array<{ provider: string; reason: string; existingDataPreserved: boolean }>;
+  qualityBefore: DataQualityScoreBreakdown;
+  qualityProjectedAfter: DataQualityScoreBreakdown;
+  requiresOwnerApproval: true;
+  generatedAt: string;
+  durationMs: number;
+}
+
+export interface ReverificationSchedulePolicy {
+  enabled: boolean;
+  emailMaxAgeDays: number;
+  phoneMaxAgeDays: number;
+  jobTitleMaxAgeDays: number;
+  companyStatusMaxAgeDays: number;
+  websiteMaxAgeDays: number;
+  legalRegistryMaxAgeDays: number;
+  maxBatchSize: number;
+  updatedAt: string;
+}
+
 

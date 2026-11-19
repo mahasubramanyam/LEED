@@ -29,6 +29,7 @@ import {
   AuditVerificationResult,
   ConnectorEncryptionStatus,
 } from '../types.ts';
+import { EnrichmentProvidersSection } from './EnrichmentProvidersSection.tsx';
 
 interface OwnerProfile {
   id: string;
@@ -1963,6 +1964,7 @@ export function OwnerControlCentre({
               );
             })}
           </div>
+          <EnrichmentProvidersSection />
         </div>
       )}
 

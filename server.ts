@@ -30,10 +30,31 @@ import {
 } from './server/gemini.js';
 import { buildSearchAndDirectoryProviderMatrix } from './server/connectors/searchProvidersCatalog.js';
 import { buildSocialProviderMatrix } from './server/connectors/socialProvidersCatalog.js';
-import { CanonicalLead, DiscoverySearchRequest } from './server/types.js';
+import { buildEnrichmentProviderCatalog } from './server/connectors/enrichmentCatalog.js';
+import {
+  CanonicalLead,
+  DiscoverySearchRequest,
+  EnrichmentFieldProposal,
+  ReverificationSchedulePolicy,
+} from './server/types.js';
 import { discoveryService } from './server/discovery/discoveryService.js';
 import { discoverCompanyDecisionMakers } from './server/discovery/decisionMakerService.js';
 import { EXPANDED_RELATIONSHIP_TYPES, classifyDecisionMakerRole } from './shared/decisionMakerRoles.js';
+import { ATTRIBUTE_FRESHNESS_RULES } from './shared/enrichmentSpecs.js';
+import { verifyBusinessEmail } from './server/enrichment/emailVerifier.js';
+import { verifyBusinessPhone } from './server/enrichment/phoneVerifier.js';
+import {
+  evaluateCompanyDataQuality,
+  evaluatePersonDataQuality,
+} from './server/enrichment/dataQualityEngine.js';
+import {
+  MAX_BULK_ENRICHMENT_BATCH,
+  applyApprovedCompanyEnrichmentToClone,
+  applyApprovedPersonEnrichmentToClone,
+  previewBulkCompanyEnrichment,
+  previewCompanyEnrichment,
+  previewPersonEnrichment,
+} from './server/enrichment/enrichmentOrchestrator.js';
 import {
   requireOwnerAuth,
   setSessionCookie,
@@ -4540,6 +4561,675 @@ protectedApi.delete('/leads/:id/persons/:relationshipId', async (req: Request, r
     res.json({ success: true, deletedId: req.params.relationshipId });
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to unlink person from lead.') });
+  }
+});
+
+// =============================================================================
+// Phase 12: Lead Enrichment, Contact Verification & Data Quality Intelligence
+// =============================================================================
+
+function getDefaultReverificationPolicy(): ReverificationSchedulePolicy {
+  return {
+    enabled: true,
+    emailMaxAgeDays: 90,
+    phoneMaxAgeDays: 180,
+    jobTitleMaxAgeDays: 90,
+    companyStatusMaxAgeDays: 90,
+    websiteMaxAgeDays: 180,
+    legalRegistryMaxAgeDays: 365,
+    maxBatchSize: MAX_BULK_ENRICHMENT_BATCH,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+protectedApi.get('/enrichment/providers', async (_req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  try {
+    const { isPg } = checkStorageEngine();
+    const [configs, runs, settings] = await Promise.all([
+      isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+      isPg ? postgresStorage.getConnectorRuns(undefined, 250) : Promise.resolve(storage.getConnectorRuns(undefined, 250)),
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+    ]);
+    const statsMap = aggregateRunsByConnector(runs);
+    const statuses = await Promise.all(
+      connectorRegistry.listAll().map((c) =>
+        buildUnifiedConnectorStatus(c, { stats: statsMap.get(c.id), config: configs[c.id] })
+      )
+    );
+    const providers = buildEnrichmentProviderCatalog(statuses);
+    res.json({
+      providers,
+      freshnessRules: ATTRIBUTE_FRESHNESS_RULES,
+      schedulePolicy: settings.reverificationPolicy || getDefaultReverificationPolicy(),
+      maxBulkBatch: MAX_BULK_ENRICHMENT_BATCH,
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to inspect enrichment providers.') });
+  }
+});
+
+protectedApi.post('/enrichment/contact/verify', createRateLimitMiddleware(inspectionRateLimiter), async (req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  try {
+    const body = req.body || {};
+    const type = String(body.type || '').toLowerCase();
+    const value = String(body.value || '').trim();
+    if (!value) {
+      res.status(400).json({ error: 'Contact value is required for verification.' });
+      return;
+    }
+
+    const { isPg } = checkStorageEngine();
+    const settings = isPg ? await postgresStorage.getSettings() : storage.getSettings();
+
+    if (type === 'email') {
+      const result = await verifyBusinessEmail(value, {
+        registry: connectorRegistry,
+        credentialManager,
+        companyDomain: body.companyDomain ? String(body.companyDomain) : undefined,
+        preferProvider: body.useLiveProvider === false ? 'dns_only' : 'auto',
+        userAgent: settings.userAgent,
+      });
+      res.json({ type: 'email', result });
+      return;
+    }
+
+    if (type === 'phone') {
+      const result = await verifyBusinessPhone(value, {
+        countryCode: body.countryCode ? String(body.countryCode) : 'US',
+        registry: connectorRegistry,
+        credentialManager,
+        useLiveProvider: body.useLiveProvider !== false,
+        existingPhoneNormalized: body.existingPhoneNormalized ? String(body.existingPhoneNormalized) : undefined,
+        isPersonContact: Boolean(body.isPersonContact),
+        personAssociationSourceVerified: Boolean(body.personAssociationSourceVerified),
+        userAgent: settings.userAgent,
+      });
+      res.json({ type: 'phone', result });
+      return;
+    }
+
+    res.status(400).json({ error: 'Verification type must be "email" or "phone".' });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Contact verification failed.') });
+  }
+});
+
+protectedApi.post('/enrichment/company/preview', createRateLimitMiddleware(inspectionRateLimiter), async (req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  try {
+    const body = req.body || {};
+    const { isPg } = checkStorageEngine();
+    const [configs, settings] = await Promise.all([
+      isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+    ]);
+
+    for (const [id, cfg] of Object.entries(configs)) {
+      if (typeof cfg?.enabled === 'boolean') {
+        connectorRegistry.setEnabledOverride(id, cfg.enabled);
+      }
+    }
+
+    let targetLead: CanonicalLead | undefined;
+    if (body.leadId) {
+      targetLead =
+        (isPg
+          ? await postgresStorage.getLead(String(body.leadId))
+          : storage.getLead(String(body.leadId))) ?? undefined;
+      if (!targetLead) {
+        res.status(404).json({ error: 'Lead not found for enrichment preview.' });
+        return;
+      }
+    } else if (body.candidateLead && typeof body.candidateLead === 'object') {
+      const c = body.candidateLead as Partial<CanonicalLead>;
+      if (!c.companyName || !String(c.companyName).trim()) {
+        res.status(400).json({ error: 'candidateLead.companyName is required.' });
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      targetLead = {
+        id: c.id || 'candidate-preview',
+        companyName: String(c.companyName).trim(),
+        legalName: c.legalName,
+        registrationNumber: c.registrationNumber,
+        registrationType: c.registrationType,
+        companyStatus: c.companyStatus || 'unknown',
+        website: c.website,
+        domain: c.domain,
+        email: c.email,
+        emailStatus: c.emailStatus || 'unverified',
+        phone: c.phone,
+        phoneNormalized: c.phoneNormalized,
+        address: c.address || { country: 'International', countryCode: 'US' },
+        industry: c.industry || 'General Business',
+        category: c.category || 'Company',
+        employeeRange: c.employeeRange,
+        foundedYear: c.foundedYear,
+        confidenceScore: typeof c.confidenceScore === 'number' ? c.confidenceScore : 45,
+        confidenceSignals: Array.isArray(c.confidenceSignals) ? c.confidenceSignals : [],
+        sources: Array.isArray(c.sources) ? c.sources : [],
+        identifiers: Array.isArray(c.identifiers) ? c.identifiers : [],
+        socialLinks: c.socialLinks,
+        webMetadata: c.webMetadata,
+        status: c.status || 'new',
+        currency: c.currency || settings.defaultCurrency || 'USD',
+        tags: Array.isArray(c.tags) ? c.tags : [],
+        notes: Array.isArray(c.notes) ? c.notes : [],
+        activities: Array.isArray(c.activities) ? c.activities : [],
+        customFields: c.customFields || {},
+        createdAt: c.createdAt || nowIso,
+        updatedAt: c.updatedAt || nowIso,
+      };
+    } else {
+      res.status(400).json({ error: 'Either leadId or candidateLead is required.' });
+      return;
+    }
+
+    const preview = await previewCompanyEnrichment(targetLead, {
+      registry: connectorRegistry,
+      executionEngine: connectorExecutionEngine,
+      credentialManager,
+      configs,
+      userAgent: settings.userAgent,
+      runRegistryVerification: body.runRegistryVerification !== false,
+      runWebsiteInspection: body.runWebsiteInspection !== false && settings.enableSafeWebsiteCrawl !== false,
+      runEmailVerification: body.runEmailVerification !== false,
+      runPhoneVerification: body.runPhoneVerification !== false,
+      runAiAssistance: Boolean(body.runAiAssistance),
+      onRecordRun: async (run) => {
+        if (isPg) await postgresStorage.recordConnectorRun(run);
+        else storage.recordConnectorRun(run);
+      },
+    });
+
+    res.json(preview);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Company enrichment preview failed.') });
+  }
+});
+
+protectedApi.post('/enrichment/company/:leadId/apply', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const existing = isPg
+      ? await postgresStorage.getLead(req.params.leadId)
+      : storage.getLead(req.params.leadId);
+    if (!existing) {
+      res.status(404).json({ error: 'Lead not found.' });
+      return;
+    }
+
+    const body = req.body || {};
+    const approvedProposals = Array.isArray(body.approvedProposals)
+      ? (body.approvedProposals as EnrichmentFieldProposal[])
+      : [];
+    const resolvedConflicts = Array.isArray(body.resolvedConflicts) ? body.resolvedConflicts : [];
+    const actorEmail = req.owner?.email || 'Owner';
+
+    const updatedLead = applyApprovedCompanyEnrichmentToClone(
+      existing,
+      approvedProposals,
+      resolvedConflicts,
+      {
+        emailVerification: body.emailVerification,
+        phoneVerification: body.phoneVerification,
+        websiteSummary: body.websiteSummary,
+        providerRuns: Array.isArray(body.providerRuns) ? body.providerRuns : [],
+        failedVerifications: Array.isArray(body.failedVerifications) ? body.failedVerifications : [],
+        allConflicts: Array.isArray(body.allConflicts) ? body.allConflicts : [],
+      },
+      actorEmail
+    );
+
+    const savedLead = isPg
+      ? await postgresStorage.upsertLead(updatedLead)
+      : storage.upsertLead(updatedLead);
+
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'LEAD_ENRICHMENT_APPLIED',
+        actorEmail,
+        'lead',
+        savedLead.id,
+        {
+          fieldsUpdated: approvedProposals.map((p) => p.field),
+          conflictsResolved: resolvedConflicts.length,
+          qualityScoreAfter: savedLead.customFields?.dataQualityScore,
+        },
+        normalizeClientIp(req)
+      );
+    }
+
+    const qualityAfter = evaluateCompanyDataQuality(savedLead);
+    res.json({ lead: savedLead, qualityAfter });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to apply approved company enrichment.') });
+  }
+});
+
+protectedApi.post('/enrichment/company/bulk-preview', createRateLimitMiddleware(discoveryRateLimiter), async (req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  try {
+    const body = req.body || {};
+    const leadIds = Array.isArray(body.leadIds) ? body.leadIds.map((id: unknown) => String(id)) : [];
+    if (leadIds.length === 0) {
+      res.status(400).json({ error: 'At least one leadId is required for bulk enrichment preview.' });
+      return;
+    }
+    const { isPg } = checkStorageEngine();
+    const [allLeads, configs, settings] = await Promise.all([
+      isPg ? postgresStorage.getLeads() : Promise.resolve(storage.getLeads()),
+      isPg ? postgresStorage.getConnectorConfigs() : Promise.resolve(storage.getConnectorConfigs()),
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+    ]);
+
+    const idSet = new Set(leadIds);
+    const targetLeads = allLeads.filter((l) => idSet.has(l.id));
+    if (targetLeads.length === 0) {
+      res.status(404).json({ error: 'None of the selected leads were found.' });
+      return;
+    }
+
+    const result = await previewBulkCompanyEnrichment(targetLeads, {
+      registry: connectorRegistry,
+      executionEngine: connectorExecutionEngine,
+      credentialManager,
+      configs,
+      userAgent: settings.userAgent,
+      runRegistryVerification: body.runRegistryVerification !== false,
+      runWebsiteInspection: body.runWebsiteInspection !== false && settings.enableSafeWebsiteCrawl !== false,
+      runEmailVerification: body.runEmailVerification !== false,
+      runPhoneVerification: body.runPhoneVerification !== false,
+      runAiAssistance: false,
+      onRecordRun: async (run) => {
+        if (isPg) await postgresStorage.recordConnectorRun(run);
+        else storage.recordConnectorRun(run);
+      },
+    });
+
+    res.json(result);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Bulk enrichment preview failed.') });
+  }
+});
+
+protectedApi.post('/enrichment/company/bulk-apply', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const items = Array.isArray(body.items) ? body.items.slice(0, MAX_BULK_ENRICHMENT_BATCH) : [];
+    if (items.length === 0) {
+      res.status(400).json({ error: 'At least one approved enrichment item is required.' });
+      return;
+    }
+    const { isPg } = checkStorageEngine();
+    const actorEmail = req.owner?.email || 'Owner';
+    const updatedLeads: CanonicalLead[] = [];
+
+    for (const item of items) {
+      const leadId = String(item?.leadId || '');
+      if (!leadId) continue;
+      const existing = isPg ? await postgresStorage.getLead(leadId) : storage.getLead(leadId);
+      if (!existing) continue;
+      const approvedProposals = Array.isArray(item.approvedProposals)
+        ? (item.approvedProposals as EnrichmentFieldProposal[])
+        : [];
+      const resolvedConflicts = Array.isArray(item.resolvedConflicts) ? item.resolvedConflicts : [];
+
+      const updatedLead = applyApprovedCompanyEnrichmentToClone(
+        existing,
+        approvedProposals,
+        resolvedConflicts,
+        {
+          emailVerification: item.emailVerification,
+          phoneVerification: item.phoneVerification,
+          websiteSummary: item.websiteSummary,
+          providerRuns: Array.isArray(item.providerRuns) ? item.providerRuns : [],
+          failedVerifications: Array.isArray(item.failedVerifications) ? item.failedVerifications : [],
+          allConflicts: Array.isArray(item.allConflicts) ? item.allConflicts : [],
+        },
+        actorEmail
+      );
+
+      const saved = isPg
+        ? await postgresStorage.upsertLead(updatedLead)
+        : storage.upsertLead(updatedLead);
+      updatedLeads.push(saved);
+
+      if (isPg && req.owner) {
+        await postgresStorage.recordAuditEvent(
+          'LEAD_BULK_ENRICHMENT_APPLIED',
+          actorEmail,
+          'lead',
+          saved.id,
+          { fieldsUpdated: approvedProposals.map((p) => p.field) },
+          normalizeClientIp(req)
+        );
+      }
+    }
+
+    res.json({ updatedCount: updatedLeads.length, updatedLeads });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Bulk enrichment apply failed.') });
+  }
+});
+
+protectedApi.post('/enrichment/person/:personId/preview', createRateLimitMiddleware(inspectionRateLimiter), async (req: Request, res: Response) => {
+  ensureConnectorsRegistered();
+  try {
+    const { isPg } = checkStorageEngine();
+    const [persons, allRels, settings] = await Promise.all([
+      isPg ? postgresStorage.getPersons() : Promise.resolve(storage.getPersons()),
+      isPg ? postgresStorage.getAllRelationships() : Promise.resolve(storage.getAllRelationships()),
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+    ]);
+
+    const person = persons.find((p) => p.id === req.params.personId);
+    if (!person) {
+      res.status(404).json({ error: 'Decision-maker record not found.' });
+      return;
+    }
+
+    const rels = allRels.filter((r) => r.personId === person.id);
+    const primaryRel = rels.find((r) => r.isPrimaryContact) || rels[0];
+    const targetLeadId = String(req.body?.leadId || primaryRel?.leadId || '');
+    const companyLead = targetLeadId
+      ? (isPg
+          ? await postgresStorage.getLead(targetLeadId)
+          : storage.getLead(targetLeadId)) ?? undefined
+      : undefined;
+
+    const preview = await previewPersonEnrichment(person, rels, companyLead, {
+      registry: connectorRegistry,
+      credentialManager,
+      userAgent: settings.userAgent,
+      runWebsiteInspection: req.body?.runWebsiteInspection !== false && settings.enableSafeWebsiteCrawl !== false,
+      runEmailVerification: req.body?.runEmailVerification !== false,
+      runPhoneVerification: req.body?.runPhoneVerification !== false,
+    });
+
+    res.json(preview);
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Decision-maker enrichment preview failed.') });
+  }
+});
+
+protectedApi.post('/enrichment/person/:personId/apply', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const [persons, allRels] = await Promise.all([
+      isPg ? postgresStorage.getPersons() : Promise.resolve(storage.getPersons()),
+      isPg ? postgresStorage.getAllRelationships() : Promise.resolve(storage.getAllRelationships()),
+    ]);
+
+    const person = persons.find((p) => p.id === req.params.personId);
+    if (!person) {
+      res.status(404).json({ error: 'Decision-maker record not found.' });
+      return;
+    }
+
+    const rels = allRels.filter((r) => r.personId === person.id);
+    const primaryRel = rels.find((r) => r.isPrimaryContact) || rels[0];
+    const body = req.body || {};
+    const approvedProposals = Array.isArray(body.approvedProposals)
+      ? (body.approvedProposals as EnrichmentFieldProposal[])
+      : [];
+    const actorEmail = req.owner?.email || 'Owner';
+
+    const { personUpdates, relationshipUpdates, historyEntry } = applyApprovedPersonEnrichmentToClone(
+      person,
+      primaryRel,
+      approvedProposals,
+      {
+        emailVerification: body.emailVerification,
+        phoneVerification: body.phoneVerification,
+        providerRuns: Array.isArray(body.providerRuns) ? body.providerRuns : [],
+        failedVerifications: Array.isArray(body.failedVerifications) ? body.failedVerifications : [],
+      },
+      actorEmail
+    );
+
+    const updatedPerson = isPg
+      ? await postgresStorage.updatePersonRecord(person.id, personUpdates)
+      : storage.updatePersonRecord(person.id, personUpdates);
+
+    if (primaryRel && relationshipUpdates) {
+      if (isPg) {
+        await postgresStorage.updateRelationshipRecord(primaryRel.leadId, primaryRel.id, relationshipUpdates);
+      } else {
+        storage.updateRelationshipRecord(primaryRel.leadId, primaryRel.id, relationshipUpdates);
+      }
+    }
+
+    if (isPg && req.owner) {
+      await postgresStorage.recordAuditEvent(
+        'PERSON_ENRICHMENT_APPLIED',
+        actorEmail,
+        'person',
+        person.id,
+        {
+          fieldsUpdated: approvedProposals.map((p) => p.field),
+          qualityScoreAfter: historyEntry.qualityScoreAfter,
+        },
+        normalizeClientIp(req)
+      );
+    }
+
+    res.json({ person: updatedPerson, historyEntry });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to apply approved decision-maker enrichment.') });
+  }
+});
+
+protectedApi.get('/enrichment/company/:leadId/quality', async (req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const [lead, allLeads] = await Promise.all([
+      isPg ? postgresStorage.getLead(req.params.leadId) : Promise.resolve(storage.getLead(req.params.leadId)),
+      isPg ? postgresStorage.getLeads() : Promise.resolve(storage.getLeads()),
+    ]);
+    if (!lead) {
+      res.status(404).json({ error: 'Lead not found.' });
+      return;
+    }
+    const otherLeads = allLeads.filter((l) => l.id !== lead.id);
+    const duplicateCandidatesCount = otherLeads.filter((l) => {
+      const sameDom =
+        Boolean(lead.domain && l.domain) &&
+        l.domain!.toLowerCase() === lead.domain!.toLowerCase();
+      const sameNm =
+        l.companyName.trim().toLowerCase() === lead.companyName.trim().toLowerCase();
+      return sameDom || sameNm;
+    }).length;
+    const quality = evaluateCompanyDataQuality(lead, { duplicateCandidatesCount });
+    const parseField = <T,>(raw: string | undefined, fallback: T): T => {
+      if (!raw) return fallback;
+      try {
+        return JSON.parse(raw) as T;
+      } catch {
+        return fallback;
+      }
+    };
+    res.json({
+      leadId: lead.id,
+      quality,
+      emailVerification: parseField(lead.customFields?.emailVerificationMeta, null),
+      phoneVerification: parseField(lead.customFields?.phoneVerificationMeta, null),
+      conflicts: parseField(lead.customFields?.enrichmentConflicts, []),
+      history: parseField(lead.customFields?.enrichmentHistory, []),
+      attributeSources: parseField(lead.customFields?.attributeSources, {}),
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to evaluate company data quality.') });
+  }
+});
+
+protectedApi.get('/enrichment/quality/summary', async (_req: Request, res: Response) => {
+  try {
+    const { isPg } = checkStorageEngine();
+    const [leads, persons, allRels, settings] = await Promise.all([
+      isPg ? postgresStorage.getLeads() : Promise.resolve(storage.getLeads()),
+      isPg ? postgresStorage.getPersons() : Promise.resolve(storage.getPersons()),
+      isPg ? postgresStorage.getAllRelationships() : Promise.resolve(storage.getAllRelationships()),
+      isPg ? postgresStorage.getSettings() : Promise.resolve(storage.getSettings()),
+    ]);
+
+    const relsByPerson = new Map<string, typeof allRels>();
+    for (const r of allRels) {
+      const arr = relsByPerson.get(r.personId) || [];
+      arr.push(r);
+      relsByPerson.set(r.personId, arr);
+    }
+
+    const gradeDist: Record<'A' | 'B' | 'C' | 'D' | 'F', number> = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+    const leadScores: Record<
+      string,
+      {
+        overallScore: number;
+        completenessScore: number;
+        verificationScore: number;
+        freshnessScore: number;
+        grade: 'A' | 'B' | 'C' | 'D' | 'F';
+        staleCount: number;
+        conflictCount: number;
+        verificationCapApplied: boolean;
+        reverificationEligible: boolean;
+      }
+    > = {};
+
+    let totalLeadScore = 0;
+    let totalLeadVerification = 0;
+    let staleLeadsCount = 0;
+    let openConflictsCount = 0;
+    const reverificationQueue: Array<{
+      leadId: string;
+      companyName: string;
+      overallScore: number;
+      grade: string;
+      staleCount: number;
+      conflictCount: number;
+      missingCriticalCount: number;
+    }> = [];
+
+    for (const lead of leads) {
+      const q = evaluateCompanyDataQuality(lead);
+      gradeDist[q.grade] += 1;
+      totalLeadScore += q.overallScore;
+      totalLeadVerification += q.verificationScore;
+      const staleCount = q.staleAttributes.filter((s) => s.status === 'stale').length;
+      if (staleCount > 0 || q.reverificationEligible) staleLeadsCount += 1;
+      openConflictsCount += q.conflictingAttributes.length;
+
+      leadScores[lead.id] = {
+        overallScore: q.overallScore,
+        completenessScore: q.completenessScore,
+        verificationScore: q.verificationScore,
+        freshnessScore: q.freshnessScore,
+        grade: q.grade,
+        staleCount,
+        conflictCount: q.conflictingAttributes.length,
+        verificationCapApplied: q.verificationCapApplied,
+        reverificationEligible: q.reverificationEligible,
+      };
+
+      if (q.reverificationEligible || q.conflictingAttributes.length > 0 || q.overallScore < 65) {
+        reverificationQueue.push({
+          leadId: lead.id,
+          companyName: lead.companyName,
+          overallScore: q.overallScore,
+          grade: q.grade,
+          staleCount,
+          conflictCount: q.conflictingAttributes.length,
+          missingCriticalCount: q.missingCriticalFields.length,
+        });
+      }
+    }
+
+    const personScores: Record<
+      string,
+      {
+        overallScore: number;
+        verificationScore: number;
+        grade: 'A' | 'B' | 'C' | 'D' | 'F';
+        staleCount: number;
+        verificationCapApplied: boolean;
+      }
+    > = {};
+    let totalPersonScore = 0;
+    for (const p of persons) {
+      const q = evaluatePersonDataQuality(p, relsByPerson.get(p.id) || []);
+      totalPersonScore += q.overallScore;
+      personScores[p.id] = {
+        overallScore: q.overallScore,
+        verificationScore: q.verificationScore,
+        grade: q.grade,
+        staleCount: q.staleAttributes.filter((s) => s.status === 'stale').length,
+        verificationCapApplied: q.verificationCapApplied,
+      };
+    }
+
+    reverificationQueue.sort((a, b) => a.overallScore - b.overallScore);
+
+    res.json({
+      totalCompanies: leads.length,
+      totalPersons: persons.length,
+      averageCompanyQuality: leads.length > 0 ? Math.round(totalLeadScore / leads.length) : 0,
+      averageCompanyVerification: leads.length > 0 ? Math.round(totalLeadVerification / leads.length) : 0,
+      averagePersonQuality: persons.length > 0 ? Math.round(totalPersonScore / persons.length) : 0,
+      gradeDistribution: gradeDist,
+      staleOrReverifyCompaniesCount: staleLeadsCount,
+      openConflictsCount,
+      reverificationQueue: reverificationQueue.slice(0, 25),
+      leadScores,
+      personScores,
+      schedulePolicy: settings.reverificationPolicy || getDefaultReverificationPolicy(),
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to compute portfolio data quality summary.') });
+  }
+});
+
+protectedApi.post('/enrichment/schedule', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const clampDays = (v: unknown, fallback: number, min: number, max: number) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : fallback;
+    };
+
+    const schedulePolicy: ReverificationSchedulePolicy = {
+      enabled: body.enabled !== false,
+      emailMaxAgeDays: clampDays(body.emailMaxAgeDays, 90, 14, 365),
+      phoneMaxAgeDays: clampDays(body.phoneMaxAgeDays, 180, 30, 730),
+      jobTitleMaxAgeDays: clampDays(body.jobTitleMaxAgeDays, 90, 14, 365),
+      companyStatusMaxAgeDays: clampDays(body.companyStatusMaxAgeDays, 90, 14, 365),
+      websiteMaxAgeDays: clampDays(body.websiteMaxAgeDays, 180, 30, 730),
+      legalRegistryMaxAgeDays: clampDays(body.legalRegistryMaxAgeDays, 365, 90, 1095),
+      maxBatchSize: clampDays(body.maxBatchSize, MAX_BULK_ENRICHMENT_BATCH, 1, MAX_BULK_ENRICHMENT_BATCH),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const { isPg } = checkStorageEngine();
+    if (isPg) {
+      await postgresStorage.updateSettings({ reverificationPolicy: schedulePolicy });
+      if (req.owner) {
+        await postgresStorage.recordAuditEvent(
+          'REVERIFICATION_POLICY_UPDATED',
+          req.owner.email,
+          'settings',
+          'reverification_policy',
+          schedulePolicy as unknown as Record<string, unknown>,
+          normalizeClientIp(req)
+        );
+      }
+    } else {
+      storage.updateSettings({ reverificationPolicy: schedulePolicy });
+    }
+
+    res.json({ schedulePolicy });
+  } catch (err: unknown) {
+    res.status(500).json({ error: sanitizeApiError(err, 'Failed to update re-verification policy.') });
   }
 });
 

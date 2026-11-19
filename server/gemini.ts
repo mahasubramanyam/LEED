@@ -832,3 +832,125 @@ Return JSON:
     engine: 'deterministic-pipeline',
   };
 }
+
+/**
+ * Phase 12 — AI-Assisted Enrichment Evidence, Conflict & Data Quality Explanation.
+ * Strictly assistance-only: NEVER invents emails, phone numbers, titles, or verification claims.
+ * Every output is explicitly labeled provenanceType: 'inferred' and falls back deterministically
+ * when GEMINI_API_KEY is absent or Gemini is unavailable.
+ */
+export async function analyzeEnrichmentEvidenceWithAi(params: {
+  companyName: string;
+  countryCode?: string;
+  industry?: string;
+  missingCriticalFields: string[];
+  staleAttributes: string[];
+  conflicts: Array<{ field: string; existingValue: string; incomingValue: string; rationale: string }>;
+  qualityBefore: {
+    overallScore: number;
+    completenessScore: number;
+    verificationScore: number;
+    freshnessScore: number;
+    verificationCapApplied?: boolean;
+  };
+  websiteDescription?: string;
+  certificationsFound?: string[];
+  proposalsCount: number;
+}): Promise<{
+  summary: string;
+  missingDataRecommendations: string[];
+  suggestedProviders: string[];
+  conflictNotes: string[];
+  qualityExplanation: string;
+  provenanceType: 'ai_extracted' | 'inferred';
+  engine: 'gemini-4-hydrogen' | 'deterministic-pipeline';
+}> {
+  const ai = getAiClient();
+  const country = (params.countryCode || 'GLOBAL').toUpperCase();
+
+  const defaultProviders: string[] = [];
+  if (country === 'NO') defaultProviders.push('Norway Brreg Official Registry');
+  else if (country === 'GB') defaultProviders.push('UK Companies House API');
+  else if (country === 'FI') defaultProviders.push('Finland PRH YTJ Open API');
+  else if (country === 'PL') defaultProviders.push('Poland KRS / MF White List');
+  else if (country === 'US') defaultProviders.push('US SEC EDGAR');
+  defaultProviders.push('GLEIF Global LEI', 'Safe Website Inspector', 'Hunter.io / ZeroBounce Email Verifier', 'APILayer Numverify Phone API');
+
+  if (ai) {
+    try {
+      const prompt = `You are a B2B Data Quality & Enrichment Analyst for LEED.
+STRICT COMPLIANCE RULES:
+- NEVER invent company attributes, emails, phone numbers, people, or verification results.
+- NEVER upgrade unverified or inferred facts to verified status.
+- Base your response strictly on the observed telemetry below.
+
+Company: ${params.companyName} (${country})
+Industry: ${params.industry || 'Unknown'}
+Data Quality Before Enrichment: Overall ${params.qualityBefore.overallScore}/100 (Completeness ${params.qualityBefore.completenessScore}, Verification ${params.qualityBefore.verificationScore}, Freshness ${params.qualityBefore.freshnessScore}, Cap Applied: ${Boolean(params.qualityBefore.verificationCapApplied)})
+Missing Critical Fields: ${params.missingCriticalFields.join(', ') || 'None'}
+Stale Attributes: ${params.staleAttributes.join(', ') || 'None'}
+Detected Conflicts: ${params.conflicts.map((c) => `${c.field}: "${c.existingValue}" vs "${c.incomingValue}"`).join('; ') || 'None'}
+Website Description Snippet: ${(params.websiteDescription || 'None').slice(0, 400)}
+Certifications Observed: ${(params.certificationsFound || []).join(', ') || 'None'}
+New Field Proposals Found: ${params.proposalsCount}
+
+Return JSON strictly matching:
+{
+  "summary": "2 concise factual sentences summarizing enrichment readiness",
+  "missingDataRecommendations": ["up to 4 actionable missing-field recommendations"],
+  "suggestedProviders": ["up to 4 legitimate providers relevant to country/gaps"],
+  "conflictNotes": ["1 note per conflict advising conservative owner review, or empty array"],
+  "qualityExplanation": "1-2 sentences explaining the Data Quality score breakdown"
+}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const parsed = JSON.parse((response.text ?? '{}').trim());
+      return {
+        summary: String(
+          parsed.summary ||
+            `${params.companyName} scored ${params.qualityBefore.overallScore}/100 overall with ${params.proposalsCount} enrichment proposal(s) ready for owner review.`
+        ),
+        missingDataRecommendations: Array.isArray(parsed.missingDataRecommendations)
+          ? parsed.missingDataRecommendations.slice(0, 4).map(String)
+          : params.missingCriticalFields.map((f) => `Verify and populate ${f} from an authoritative source.`),
+        suggestedProviders: Array.isArray(parsed.suggestedProviders) && parsed.suggestedProviders.length > 0
+          ? parsed.suggestedProviders.slice(0, 4).map(String)
+          : defaultProviders.slice(0, 4),
+        conflictNotes: Array.isArray(parsed.conflictNotes)
+          ? parsed.conflictNotes.slice(0, 4).map(String)
+          : params.conflicts.map((c) => `${c.field}: review "${c.existingValue}" vs "${c.incomingValue}" (${c.rationale})`),
+        qualityExplanation: String(
+          parsed.qualityExplanation ||
+            `Overall score (${params.qualityBefore.overallScore}/100) reflects verification strength (${params.qualityBefore.verificationScore}/100), completeness (${params.qualityBefore.completenessScore}/100), and freshness (${params.qualityBefore.freshnessScore}/100).`
+        ),
+        provenanceType: 'inferred',
+        engine: 'gemini-4-hydrogen',
+      };
+    } catch {
+      // Fall through cleanly to deterministic analysis
+    }
+  }
+
+  return {
+    summary: `${params.companyName} currently holds a ${params.qualityBefore.overallScore}/100 Data Quality score (Verification ${params.qualityBefore.verificationScore}/100, Completeness ${params.qualityBefore.completenessScore}/100, Freshness ${params.qualityBefore.freshnessScore}/100). ${params.proposalsCount} enrichment update proposal(s) and ${params.conflicts.length} conflict(s) are queued for explicit owner review.`,
+    missingDataRecommendations:
+      params.missingCriticalFields.length > 0
+        ? params.missingCriticalFields.slice(0, 4).map((f) => `Obtain verified ${f} via official registry or company website inspection.`)
+        : ['All critical company profile fields are populated; focus on refreshing stale verification timestamps.'],
+    suggestedProviders: defaultProviders.slice(0, 4),
+    conflictNotes:
+      params.conflicts.length > 0
+        ? params.conflicts.slice(0, 4).map((c) => `${c.field}: existing "${c.existingValue}" vs incoming "${c.incomingValue}" — ${c.rationale}`)
+        : ['No conflicting source values detected across executed providers.'],
+    qualityExplanation: params.qualityBefore.verificationCapApplied
+      ? `Overall score is capped because verification evidence (${params.qualityBefore.verificationScore}/100) is low despite populated attributes. Run official registry and contact verification to unlock higher quality grades.`
+      : `Verification (${params.qualityBefore.verificationScore}/100) drives 48% of the overall score, completeness (${params.qualityBefore.completenessScore}/100) drives 32%, and attribute freshness (${params.qualityBefore.freshnessScore}/100) drives 20%.`,
+    provenanceType: 'inferred',
+    engine: 'deterministic-pipeline',
+  };
+}
+

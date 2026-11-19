@@ -49,6 +49,7 @@ import {
   SourceCategory,
 } from '../types.js';
 import { apiFetch } from '../utils/apiFetch.ts';
+import { LeadEnrichmentPanel } from './LeadEnrichmentPanel.tsx';
 import {
   EXPANDED_RELATIONSHIP_TYPES,
   ROLE_TAXONOMY_SPECS,
@@ -2748,6 +2749,11 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                   )}
                 </div>
               )}
+            </div>
+
+            {/* Phase 12: Candidate Multi-Source Enrichment & Contact Verification Preview */}
+            <div className="pt-2">
+              <LeadEnrichmentPanel lead={inspectedCandidate} mode="candidate" />
             </div>
 
             <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">

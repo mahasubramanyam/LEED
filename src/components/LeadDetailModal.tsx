@@ -51,6 +51,7 @@ import {
   DecisionMakerDiscoveryResponse,
 } from '../types.js';
 import { GeoSelector } from './GeoSelector.tsx';
+import { LeadEnrichmentPanel } from './LeadEnrichmentPanel.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
 import {
   EXPANDED_RELATIONSHIP_TYPES,
@@ -248,7 +249,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   onAddActivity,
   onInspectUrl,
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'web' | 'ai' | 'timeline' | 'notes'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'enrichment' | 'contacts' | 'web' | 'ai' | 'timeline' | 'notes'>('overview');
   const [newNote, setNewNote] = useState('');
   const [newTag, setNewTag] = useState('');
   const [oppValue, setOppValue] = useState(lead?.opportunityValue?.toString() || '');
@@ -1045,9 +1046,10 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="px-5 border-b border-slate-800 flex space-x-4 bg-slate-950/20 text-xs">
+        <div className="px-5 border-b border-slate-800 flex space-x-4 bg-slate-950/20 text-xs overflow-x-auto">
           {[
             { id: 'overview', label: 'Lead Facts & Profile' },
+            { id: 'enrichment', label: 'Enrichment & Quality' },
             { id: 'contacts', label: `Decision-Makers (${linkedPersons.length})` },
             { id: 'web', label: 'Live Web Inspector (SSRF Safe)' },
             { id: 'ai', label: 'Gemini AI Assistant' },
@@ -1057,7 +1059,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`py-3 font-semibold border-b-2 transition ${
+              className={`py-3 font-semibold border-b-2 transition whitespace-nowrap shrink-0 ${
                 activeTab === tab.id
                   ? 'border-indigo-500 text-white'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -1070,6 +1072,18 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
         {/* Tab Content Body */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
+          {/* 1B. ENRICHMENT & DATA QUALITY TAB (Phase 12) */}
+          {activeTab === 'enrichment' && (
+            <LeadEnrichmentPanel
+              lead={lead}
+              mode="crm"
+              onLeadUpdated={(updated) => {
+                if (onLeadVerified) onLeadVerified(updated);
+                else onUpdateLead(updated);
+              }}
+            />
+          )}
+
           {/* 1. OVERVIEW TAB */}
           {activeTab === 'overview' && (
             <div className="space-y-4 text-xs">

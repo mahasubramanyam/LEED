@@ -14,6 +14,7 @@ export type CompanyPageType =
   | 'products'
   | 'contact'
   | 'locations'
+  | 'careers'
   | 'imprint';
 
 export interface WebsiteLeadershipMention {
@@ -59,7 +60,15 @@ export interface WebInspectionResult {
   productsPageUrl?: string;
   contactPageUrl?: string;
   locationsPageUrl?: string;
+  careersPageUrl?: string;
   imprintPageUrl?: string;
+  canonicalDomain?: string;
+  redirectChain?: string[];
+  companyIdentityConsistent?: boolean;
+  certificationsFound?: string[];
+  industriesServed?: string[];
+  businessSizeIndicators?: string[];
+  tradeActivitySignals?: string[];
   leadershipFound?: WebsiteLeadershipMention[];
   pagesVisited?: string[];
   pageExcerpts?: CrawledPageExcerpt[];
@@ -86,6 +95,7 @@ export interface InspectWebsiteOptions {
   maxPages?: number;
   userAgent?: string;
   checkRobots?: boolean;
+  expectedCompanyName?: string;
 }
 
 const SKIP_PATH_PATTERNS = [
@@ -530,6 +540,9 @@ function classifyInternalLink(
     if (/(?:^|\/|-)(?:locations|offices|branches|global-presence|where-we-operate)\b/.test(combo)) {
       return { url: fullStr, pageType: 'locations', priority: 80 };
     }
+    if (/(?:^|\/|-)(?:careers|jobs|join-us|hiring|work-with-us|karriere)\b/.test(combo)) {
+      return { url: fullStr, pageType: 'careers', priority: 78 };
+    }
     if (/(?:^|\/|-)(?:imprint|impressum|legal-notice|legal|corporate-info)\b/.test(combo)) {
       return { url: fullStr, pageType: 'imprint', priority: 75 };
     }
@@ -537,6 +550,113 @@ function classifyInternalLink(
   } catch {
     return null;
   }
+}
+
+const CERTIFICATION_PATTERNS: Array<{ label: string; regex: RegExp }> = [
+  { label: 'ISO 9001', regex: /\bISO[\s-]?9001(?::\d{4})?\b/i },
+  { label: 'ISO 14001', regex: /\bISO[\s-]?14001(?::\d{4})?\b/i },
+  { label: 'ISO 27001', regex: /\bISO(?:\/IEC)?[\s-]?27001(?::\d{4})?\b/i },
+  { label: 'ISO 45001', regex: /\bISO[\s-]?45001(?::\d{4})?\b/i },
+  { label: 'ISO 13485', regex: /\bISO[\s-]?13485(?::\d{4})?\b/i },
+  { label: 'IATF 16949', regex: /\bIATF[\s-]?16949\b/i },
+  { label: 'AS9100', regex: /\bAS[\s-]?9100[A-Z]?\b/i },
+  { label: 'SOC 2', regex: /\bSOC\s*2(?:\s*Type\s*(?:I|II|1|2))?\b/i },
+  { label: 'SOC 1', regex: /\bSOC\s*1\b/i },
+  { label: 'PCI DSS', regex: /\bPCI[\s-]?DSS\b/i },
+  { label: 'HIPAA Compliant', regex: /\bHIPAA\s+compliant\b/i },
+  { label: 'GDPR Compliant', regex: /\bGDPR\s+compliant\b/i },
+  { label: 'Certified B Corp', regex: /\b(?:Certified\s+)?B[\s-]?Corp(?:oration)?\b/i },
+  { label: 'GMP Certified', regex: /\b(?:c)?GMP\s+(?:certified|compliant)\b/i },
+  { label: 'HACCP Certified', regex: /\bHACCP\b/i },
+  { label: 'FSC Certified', regex: /\bFSC[\s-]?certified\b/i },
+  { label: 'EcoVadis', regex: /\bEcoVadis\b/i },
+  { label: 'CE Marked', regex: /\bCE[\s-]?(?:marked|marking|certified)\b/i },
+];
+
+const INDUSTRY_CUES: Array<{ label: string; regex: RegExp }> = [
+  { label: 'Manufacturing', regex: /\b(?:precision\s+)?manufacturing|industrial\s+production\b/i },
+  { label: 'Aerospace & Defense', regex: /\baerospace|aviation|defense\s+systems\b/i },
+  { label: 'Automotive & Mobility', regex: /\bautomotive|electric\s+vehicles?|mobility\s+solutions\b/i },
+  { label: 'Healthcare & Life Sciences', regex: /\bhealthcare|medical\s+devices?|biotech|pharmaceuticals?\b/i },
+  { label: 'Energy & Renewables', regex: /\brenewable\s+energy|offshore\s+wind|solar\s+energy|oil\s+&\s+gas|clean\s+energy\b/i },
+  { label: 'Maritime & Logistics', regex: /\bmaritime|shipping|freight|supply\s+chain|logistics\b/i },
+  { label: 'Semiconductors & Electronics', regex: /\bsemiconductors?|microelectronics|embedded\s+systems|wireless\s+iot\b/i },
+  { label: 'Enterprise Software & SaaS', regex: /\benterprise\s+software|saas\s+platform|cloud\s+infrastructure\b/i },
+  { label: 'Financial Services & FinTech', regex: /\bfinancial\s+services|fintech|banking\s+solutions|payments\b/i },
+  { label: 'Food & Agriculture', regex: /\bfood\s+processing|agritech|agriculture|seafood\b/i },
+  { label: 'Construction & Infrastructure', regex: /\bconstruction|civil\s+engineering|infrastructure\b/i },
+  { label: 'Telecommunications', regex: /\btelecommunications|5g\s+networks?|fiber\s+optics?\b/i },
+];
+
+function extractWebsiteCertifications(visibleText: string): string[] {
+  const found: string[] = [];
+  for (const spec of CERTIFICATION_PATTERNS) {
+    if (spec.regex.test(visibleText)) found.push(spec.label);
+  }
+  return found;
+}
+
+function extractIndustriesServed(visibleText: string): string[] {
+  const found: string[] = [];
+  for (const spec of INDUSTRY_CUES) {
+    if (spec.regex.test(visibleText)) found.push(spec.label);
+  }
+  return found.slice(0, 6);
+}
+
+function extractBusinessSizeIndicators(visibleText: string): string[] {
+  const indicators: string[] = [];
+  const patterns = [
+    /\b(\d{1,3}(?:,\d{3})*\+?\s+(?:employees|team\s+members|staff|specialists|engineers|colleagues))\b/gi,
+    /\b(team\s+of\s+\d{2,5}\+?\s*(?:people|specialists|professionals|engineers)?)\b/gi,
+    /\b(\d{1,3}\+?\s+(?:offices|locations|branches|manufacturing\s+sites)\s+(?:worldwide|globally|across\s+[a-z\s]+)?)\b/gi,
+  ];
+  for (const re of patterns) {
+    for (const m of visibleText.matchAll(re)) {
+      const cleaned = m[1].replace(/\s+/g, ' ').trim();
+      if (cleaned.length >= 6 && cleaned.length <= 70) {
+        indicators.push(cleaned);
+      }
+    }
+  }
+  return Array.from(new Set(indicators)).slice(0, 4);
+}
+
+function extractTradeActivitySignals(visibleText: string): string[] {
+  const signals: string[] = [];
+  const patterns = [
+    /\b(export(?:s|ing)?\s+to\s+(?:over\s+)?\d+\+?\s+countries)\b/gi,
+    /\b(global\s+(?:exporter|importer|distributor|distribution\s+network|supply\s+chain))\b/gi,
+    /\b(international\s+(?:shipping|export|import|trade|distributors))\b/gi,
+    /\b(operating\s+in\s+(?:over\s+)?\d+\+?\s+countries)\b/gi,
+  ];
+  for (const re of patterns) {
+    for (const m of visibleText.matchAll(re)) {
+      const cleaned = m[1].replace(/\s+/g, ' ').trim();
+      if (cleaned.length >= 8 && cleaned.length <= 80) {
+        signals.push(cleaned);
+      }
+    }
+  }
+  return Array.from(new Set(signals)).slice(0, 4);
+}
+
+function evaluateCompanyIdentityConsistency(
+  expectedCompanyName: string | undefined,
+  inspectedName: string | undefined,
+  inspectedTitle: string | undefined,
+  canonicalDomain: string
+): boolean | undefined {
+  if (!expectedCompanyName || !expectedCompanyName.trim()) return undefined;
+  const stopWords = new Set(['ltd', 'limited', 'inc', 'corp', 'corporation', 'llc', 'gmbh', 'as', 'asa', 'plc', 'sa', 'bv', 'ab', 'oy', 'group', 'holding', 'the', 'and']);
+  const tokens = expectedCompanyName
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !stopWords.has(t));
+  if (tokens.length === 0) return undefined;
+  const hay = `${inspectedName || ''} ${inspectedTitle || ''} ${canonicalDomain.replace(/\.[a-z]{2,}$/, '')}`.toLowerCase();
+  return tokens.some((t) => hay.includes(t));
 }
 
 function parseRobotsDisallow(robotsText: string, userAgent: string): string[] {
@@ -654,6 +774,11 @@ export async function inspectWebsite(
     result.httpStatus = homeFetched.response.status;
     result.isOnline = homeFetched.response.ok;
     result.domain = homeFetched.finalUrl.hostname.replace(/^www\./, '');
+    result.canonicalDomain = result.domain;
+    result.redirectChain =
+      preCheck.url.toString() !== homeFetched.finalUrl.toString()
+        ? [preCheck.url.toString(), homeFetched.finalUrl.toString()]
+        : [homeFetched.finalUrl.toString()];
     result.isHttps = homeFetched.finalUrl.protocol === 'https:';
     result.securityCheck = {
       passed: true,
@@ -690,6 +815,10 @@ export async function inspectWebsite(
     const addressesSet = new Set<string>();
     const productsSet = new Set<string>();
     const locationsSet = new Set<string>();
+    const certificationsSet = new Set<string>();
+    const industriesSet = new Set<string>();
+    const businessSizeSet = new Set<string>();
+    const tradeActivitySet = new Set<string>();
     const operatingSnippets: string[] = [];
     const leadershipMentions: WebsiteLeadershipMention[] = [];
     const seenLeadershipKeys = new Set<string>();
@@ -870,6 +999,42 @@ export async function inspectWebsite(
         recordProvenance('socialLinks.github', ghMatch[0], pageUrl, retrievedAt, 'html_link');
       }
 
+      // Canonical link tag (if same-site or canonical redirect domain)
+      if (pageType === 'homepage') {
+        const canonicalMatch =
+          safeHtml.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i) ||
+          safeHtml.match(/<link[^>]*href=["']([^"']+)["'][^>]*rel=["']canonical["']/i);
+        if (canonicalMatch?.[1]) {
+          try {
+            const canonUrl = new URL(canonicalMatch[1], pageUrl);
+            if (canonUrl.protocol === 'http:' || canonUrl.protocol === 'https:') {
+              result.canonicalDomain = canonUrl.hostname.toLowerCase().replace(/^www\./, '');
+              recordProvenance('canonicalDomain', result.canonicalDomain, pageUrl, retrievedAt, 'html_canonical');
+            }
+          } catch {
+            // ignore malformed canonical link
+          }
+        }
+      }
+
+      // Certifications, industries served, published size indicators & trade activity cues
+      const enrichmentText = [visibleText, pageTitle, result.description].filter(Boolean).join(' ');
+      for (const cert of extractWebsiteCertifications(enrichmentText)) {
+        certificationsSet.add(cert);
+        recordProvenance('certifications', cert, pageUrl, retrievedAt, 'visible_text_certification');
+      }
+      for (const ind of extractIndustriesServed(enrichmentText)) {
+        industriesSet.add(ind);
+      }
+      for (const sizeSig of extractBusinessSizeIndicators(enrichmentText)) {
+        businessSizeSet.add(sizeSig);
+        recordProvenance('businessSizeIndicators', sizeSig, pageUrl, retrievedAt, 'visible_text_size');
+      }
+      for (const tradeSig of extractTradeActivitySignals(enrichmentText)) {
+        tradeActivitySet.add(tradeSig);
+        recordProvenance('tradeActivity', tradeSig, pageUrl, retrievedAt, 'visible_text_trade');
+      }
+
       for (const lm of extractLeadershipMentionsFromPage(safeHtml, pageUrl, pageType, retrievedAt)) {
         const lKey = `${lm.fullName.toLowerCase()}::${(lm.jobTitle || '').toLowerCase()}`;
         if (!seenLeadershipKeys.has(lKey)) {
@@ -920,6 +1085,7 @@ export async function inspectWebsite(
         if (target.pageType === 'products') result.productsPageUrl = target.url;
         if (target.pageType === 'contact') result.contactPageUrl = target.url;
         if (target.pageType === 'locations') result.locationsPageUrl = target.url;
+        if (target.pageType === 'careers') result.careersPageUrl = target.url;
         if (target.pageType === 'imprint') result.imprintPageUrl = target.url;
 
         try {
@@ -959,6 +1125,16 @@ export async function inspectWebsite(
     result.addressesFound = Array.from(addressesSet).slice(0, 4);
     result.productsServices = Array.from(productsSet).slice(0, 10);
     result.locationsServed = Array.from(locationsSet).slice(0, 10);
+    result.certificationsFound = Array.from(certificationsSet).slice(0, 12);
+    result.industriesServed = Array.from(industriesSet).slice(0, 6);
+    result.businessSizeIndicators = Array.from(businessSizeSet).slice(0, 4);
+    result.tradeActivitySignals = Array.from(tradeActivitySet).slice(0, 4);
+    result.companyIdentityConsistent = evaluateCompanyIdentityConsistency(
+      testHooks?.expectedCompanyName,
+      result.businessName,
+      result.title,
+      result.canonicalDomain || result.domain
+    );
     result.leadershipFound = leadershipMentions.slice(0, 25);
     if (operatingSnippets.length > 0) {
       result.operatingInfo = Array.from(new Set(operatingSnippets)).join(' · ').slice(0, 240);
