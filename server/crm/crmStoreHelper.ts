@@ -29,6 +29,8 @@ import {
   CRM_TASK_STATUS_SET,
 } from '../../shared/crmSpecs.js';
 
+import { leedCache } from '../perf/cacheManager.js';
+
 export const CRM_WORKSPACE_SETTINGS_KEY = '__crm_workspace_v1';
 
 export interface ExtendedTaskMetadata {
@@ -75,6 +77,7 @@ export interface CrmStorageFacade {
 
 /**
  * Wraps either synchronous JSON StorageManager or async PostgresStorage into a uniform async facade.
+ * Phase 17: Automatically invalidates owner-scoped derived caches on every write operation.
  */
 export function createCrmStorageFacade(adapter: any): CrmStorageFacade {
   const resolveVal = async <T>(val: T | Promise<T>): Promise<T> => await Promise.resolve(val);
@@ -90,7 +93,11 @@ export function createCrmStorageFacade(adapter: any): CrmStorageFacade {
       return [];
     },
     getLead: (id) => resolveVal(adapter.getLead(id)),
-    upsertLead: (lead) => resolveVal(adapter.upsertLead(lead)),
+    upsertLead: async (lead) => {
+      const saved = await resolveVal(adapter.upsertLead(lead));
+      leedCache.invalidateOnCrmWrite();
+      return saved;
+    },
     getPersons: () => resolveVal(adapter.getPersons()),
     getPersonById: async (id) => {
       if (typeof adapter.getPersonById === 'function') {
@@ -100,15 +107,19 @@ export function createCrmStorageFacade(adapter: any): CrmStorageFacade {
       return all.find((p) => p.id === id) || null;
     },
     upsertPerson: async (person) => {
+      let saved: PersonRecord;
       if (typeof adapter.upsertPerson === 'function') {
-        return resolveVal(adapter.upsertPerson(person));
+        saved = await resolveVal(adapter.upsertPerson(person));
+      } else {
+        const updated = await resolveVal(
+          adapter.updatePersonRecord(person.id, {
+            customFields: person.customFields || {},
+          })
+        );
+        saved = updated || person;
       }
-      const updated = await resolveVal(
-        adapter.updatePersonRecord(person.id, {
-          customFields: person.customFields || {},
-        })
-      );
-      return updated || person;
+      leedCache.invalidateOnCrmWrite();
+      return saved;
     },
     getCompanyPersonRelationships: () => {
       if (typeof adapter.getAllRelationships === 'function') {
@@ -118,16 +129,40 @@ export function createCrmStorageFacade(adapter: any): CrmStorageFacade {
     },
     getStages: () => resolveVal(adapter.getStages()),
     getTasks: () => resolveVal(adapter.getTasks()),
-    createTask: (task) => resolveVal(adapter.createTask(task)),
-    updateTask: (id, updates) => resolveVal(adapter.updateTask(id, updates)),
-    deleteTask: (id) => resolveVal(adapter.deleteTask(id)),
+    createTask: async (task) => {
+      const created = await resolveVal(adapter.createTask(task));
+      leedCache.invalidateOnCrmWrite();
+      return created;
+    },
+    updateTask: async (id, updates) => {
+      const updated = await resolveVal(adapter.updateTask(id, updates));
+      leedCache.invalidateOnCrmWrite();
+      return updated;
+    },
+    deleteTask: async (id) => {
+      const deleted = await resolveVal(adapter.deleteTask(id));
+      leedCache.invalidateOnCrmWrite();
+      return deleted;
+    },
     getSettings: () => resolveVal(adapter.getSettings()),
-    updateSettings: (updates) => resolveVal(adapter.updateSettings(updates)),
+    updateSettings: async (updates) => {
+      const updated = await resolveVal(adapter.updateSettings(updates));
+      leedCache.invalidateOnCrmWrite();
+      return updated;
+    },
     addLeadNote: adapter.addNote
-      ? (leadId, content, author) => resolveVal(adapter.addNote(leadId, content, author))
+      ? async (leadId, content, author) => {
+          const updated = await resolveVal(adapter.addNote(leadId, content, author));
+          leedCache.invalidateOnCrmWrite();
+          return updated;
+        }
       : undefined,
     addLeadActivity: adapter.addActivity
-      ? (leadId, activity) => resolveVal(adapter.addActivity(leadId, activity))
+      ? async (leadId, activity) => {
+          const updated = await resolveVal(adapter.addActivity(leadId, activity));
+          leedCache.invalidateOnCrmWrite();
+          return updated;
+        }
       : undefined,
   };
 }

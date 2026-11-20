@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { sanitizeExternalUrl } from '../utils/safeUrl.ts';
 import {
   Search,
@@ -247,7 +247,8 @@ export function LeadsView({
     fetchQualitySummary();
   }, [fetchQualitySummary, leads.length]);
 
-  const uiIdentifierOptions = getUiIdentifierOptions();
+  const uiIdentifierOptions = useMemo(() => getUiIdentifierOptions(), []);
+  const leadsAbortRef = useRef<AbortController | null>(null);
 
   const hasCrmSegmentationActive =
     relationshipStatusFilter !== 'ALL' ||
@@ -256,6 +257,12 @@ export function LeadsView({
     tagFilter.trim().length > 0;
 
   const fetchServerLeads = useCallback(async () => {
+    if (leadsAbortRef.current) {
+      leadsAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    leadsAbortRef.current = controller;
+
     setIsQuerying(true);
     try {
       if (hasCrmSegmentationActive) {
@@ -273,8 +280,9 @@ export function LeadsView({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+          signal: controller.signal,
         });
-        if (res.ok) {
+        if (res.ok && !controller.signal.aborted) {
           const data = await res.json();
           let rows: CanonicalLead[] = Array.isArray(data.items)
             ? data.items.map((r: any) => r.lead).filter(Boolean)
@@ -310,17 +318,20 @@ export function LeadsView({
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
 
-      const res = await apiFetch(`/api/leads?${params.toString()}`);
-      if (res.ok) {
+      const res = await apiFetch(`/api/leads?${params.toString()}`, { signal: controller.signal });
+      if (res.ok && !controller.signal.aborted) {
         const data = await res.json();
         setServerLeads(Array.isArray(data.leads) ? data.leads : []);
         setTotalMatching(typeof data.total === 'number' ? data.total : (data.leads?.length || 0));
         setTotalPages(typeof data.totalPages === 'number' ? Math.max(1, data.totalPages) : 1);
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      if ((err as { name?: string })?.name === 'AbortError') return;
       console.error('Failed to query leads from server:', err);
     } finally {
-      setIsQuerying(false);
+      if (leadsAbortRef.current === controller) {
+        setIsQuerying(false);
+      }
     }
   }, [
     hasCrmSegmentationActive,
@@ -370,7 +381,10 @@ export function LeadsView({
     const timer = setTimeout(() => {
       fetchServerLeads();
     }, 180);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      leadsAbortRef.current?.abort();
+    };
   }, [fetchServerLeads, leads]);
 
   // New Lead Modal State

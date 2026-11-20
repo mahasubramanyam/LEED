@@ -26,8 +26,41 @@ import { evaluateCompanyDataQuality } from '../enrichment/dataQualityEngine.js';
 import { getOutreachWorkspaceState } from '../outreach/outreachStoreHelper.js';
 import { buildOutreachAnalytics } from '../outreach/outreachService.js';
 import { getBiWorkflowWorkspaceState } from './biWorkflowStoreHelper.js';
+import { leedCache } from '../perf/cacheManager.js';
 
 const DAY_MS = 86_400_000;
+const BI_DASHBOARD_CACHE_TTL_MS = 30_000;
+
+export async function buildBiAnalyticsDashboardCached(
+  facade: CrmStorageFacade,
+  rawFilter: BiAnalyticsFilter = {},
+  options: { ownerScope?: string; bypassCache?: boolean; ttlMs?: number; now?: Date } = {}
+): Promise<{ dashboard: BiDashboardResponse; cacheHit: boolean }> {
+  const ownerScope = options.ownerScope || 'owner';
+  const normalizedKey = JSON.stringify({
+    dateFrom: rawFilter.dateFrom || '',
+    dateTo: rawFilter.dateTo || '',
+    country: (rawFilter.country || '').toUpperCase(),
+    industry: (rawFilter.industry || '').toLowerCase(),
+    source: (rawFilter.source || '').toLowerCase(),
+    stageId: rawFilter.stageId || '',
+  });
+
+  if (options.bypassCache) {
+    const fresh = await buildBiAnalyticsDashboard(facade, rawFilter, options.now);
+    leedCache.set('bi_analytics', ownerScope, normalizedKey, fresh, options.ttlMs ?? BI_DASHBOARD_CACHE_TTL_MS);
+    return { dashboard: fresh, cacheHit: false };
+  }
+
+  const { value, cacheHit } = await leedCache.getOrCompute({
+    namespace: 'bi_analytics',
+    ownerScope,
+    key: normalizedKey,
+    ttlMs: options.ttlMs ?? BI_DASHBOARD_CACHE_TTL_MS,
+    compute: () => buildBiAnalyticsDashboard(facade, rawFilter, options.now),
+  });
+  return { dashboard: value, cacheHit };
+}
 
 function parseDateMs(raw?: string): number | null {
   if (!raw || !String(raw).trim()) return null;

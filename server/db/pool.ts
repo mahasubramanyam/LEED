@@ -1,9 +1,50 @@
+import crypto from 'node:crypto';
 import pg from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const { Pool } = pg;
+
+export const DEFAULT_DB_POOL_MAX = Math.max(2, Math.min(30, parseInt(process.env.DB_POOL_MAX || '10', 10) || 10));
+export const DEFAULT_DB_IDLE_TIMEOUT_MS = Math.max(5000, parseInt(process.env.DB_IDLE_TIMEOUT_MS || '30000', 10) || 30000);
+export const DEFAULT_DB_CONN_TIMEOUT_MS = Math.max(2000, parseInt(process.env.DB_CONN_TIMEOUT_MS || '6000', 10) || 6000);
+export const DEFAULT_DB_STATEMENT_TIMEOUT_MS = Math.max(
+  2000,
+  parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || '15000', 10) || 15000
+);
+
+const TRANSIENT_PG_CODES = new Set([
+  '57P01',
+  '57P02',
+  '57P03',
+  '08000',
+  '08003',
+  '08006',
+  '08001',
+  '08004',
+  '53300',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'ECONNREFUSED',
+  'EPIPE',
+]);
+const TRANSIENT_MSG_PATTERN =
+  /(ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|Connection terminated unexpectedly|Client has encountered a connection error|terminating connection due to administrator command)/i;
+
+export function isTransientPgError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const code = String((err as { code?: unknown }).code || '');
+  if (code && TRANSIENT_PG_CODES.has(code)) return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return TRANSIENT_MSG_PATTERN.test(msg);
+}
+
+function hashLockKeyPair(lockName: string): [number, number] {
+  const digest = crypto.createHash('sha256').update(lockName).digest();
+  // Read two signed 32-bit integers for pg_advisory_lock(int4, int4)
+  return [digest.readInt32BE(0), digest.readInt32BE(4)];
+}
 
 export interface DbHealthStatus {
   isConfigured: boolean;
@@ -14,6 +55,10 @@ export interface DbHealthStatus {
   totalClients?: number;
   idleClients?: number;
   waitingClients?: number;
+  maxClients?: number;
+  statementTimeoutMs?: number;
+  idleTimeoutMs?: number;
+  reconnectAttempts?: number;
   lastCheckedAt?: string;
   consecutiveFailures: number;
 }
@@ -24,6 +69,7 @@ class DatabaseManager {
   private connectionError: string | null = null;
   private lastCheckedAt: Date | null = null;
   private consecutiveFailures = 0;
+  private reconnectAttempts = 0;
   private shutdownInitiated = false;
 
   constructor() {
@@ -65,9 +111,13 @@ class DatabaseManager {
         user: process.env.PGUSER || undefined,
         password: process.env.PGPASSWORD || undefined,
         database: process.env.PGDATABASE || undefined,
-        max: process.env.DB_POOL_MAX ? parseInt(process.env.DB_POOL_MAX, 10) : 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 6000,
+        max: DEFAULT_DB_POOL_MAX,
+        idleTimeoutMillis: DEFAULT_DB_IDLE_TIMEOUT_MS,
+        connectionTimeoutMillis: DEFAULT_DB_CONN_TIMEOUT_MS,
+        statement_timeout: DEFAULT_DB_STATEMENT_TIMEOUT_MS,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10000,
+        allowExitOnIdle: true,
         ssl: requiresSsl ? { rejectUnauthorized } : undefined,
       };
 
@@ -98,6 +148,80 @@ class DatabaseManager {
       this.initPool();
     }
     return this.pool;
+  }
+
+  /**
+   * Executes an async DB operation with bounded retry on transient disconnect/reset errors.
+   * Never retries constraint, validation, or SQL syntax errors.
+   */
+  public async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    options: { maxRetries?: number; baseDelayMs?: number } = {}
+  ): Promise<T> {
+    const maxRetries = Math.max(0, Math.min(3, options.maxRetries ?? 2));
+    const baseDelayMs = Math.max(25, options.baseDelayMs ?? 150);
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const result = await operation();
+        if (attempt > 0) {
+          this.isConnected = true;
+          this.connectionError = null;
+          this.consecutiveFailures = 0;
+        }
+        return result;
+      } catch (err: unknown) {
+        lastError = err;
+        if (!isTransientPgError(err) || attempt >= maxRetries || this.shutdownInitiated) {
+          throw err;
+        }
+        this.reconnectAttempts++;
+        this.consecutiveFailures++;
+        const waitMs = baseDelayMs * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * Acquires a PostgreSQL session advisory lock for cross-process / concurrent safety when PG is connected.
+   * Always unlocks and releases the client in `finally`. Falls back to direct execution if PG is inactive.
+   */
+  public async withAdvisoryLock<T>(lockName: string, fn: () => Promise<T>): Promise<T> {
+    if (!this.isConnected || this.shutdownInitiated) {
+      return fn();
+    }
+    const pool = this.getPool();
+    if (!pool) return fn();
+
+    const [k1, k2] = hashLockKeyPair(lockName);
+    let client: pg.PoolClient | null = null;
+    let locked = false;
+
+    try {
+      client = await pool.connect();
+      await client.query('SELECT pg_advisory_lock($1, $2)', [k1, k2]);
+      locked = true;
+      return await fn();
+    } finally {
+      if (client) {
+        if (locked) {
+          try {
+            await client.query('SELECT pg_advisory_unlock($1, $2)', [k1, k2]);
+          } catch {
+            // Connection dropped automatically releases session advisory lock in PostgreSQL
+          }
+        }
+        try {
+          client.release();
+        } catch {
+          // ignore
+        }
+      }
+    }
   }
 
   /**
@@ -135,6 +259,7 @@ class DatabaseManager {
         this.lastCheckedAt = new Date();
 
         if (attempt <= retries) {
+          this.reconnectAttempts++;
           const waitTime = delayMs * Math.pow(2, attempt - 1);
           await new Promise((resolve) => setTimeout(resolve, waitTime));
         } else {
@@ -174,6 +299,10 @@ class DatabaseManager {
       totalClients: this.pool?.totalCount,
       idleClients: this.pool?.idleCount,
       waitingClients: this.pool?.waitingCount,
+      maxClients: DEFAULT_DB_POOL_MAX,
+      statementTimeoutMs: DEFAULT_DB_STATEMENT_TIMEOUT_MS,
+      idleTimeoutMs: DEFAULT_DB_IDLE_TIMEOUT_MS,
+      reconnectAttempts: this.reconnectAttempts,
       lastCheckedAt: this.lastCheckedAt ? this.lastCheckedAt.toISOString() : undefined,
       consecutiveFailures: this.consecutiveFailures,
     };

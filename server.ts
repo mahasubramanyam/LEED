@@ -129,6 +129,15 @@ import {
 import { registerOutreachRoutes } from './server/outreach/outreachRoutes.js';
 import { registerBiWorkflowRoutes } from './server/bi/biWorkflowRoutes.js';
 import { dispatchWorkflowEvent } from './server/bi/workflowEngine.js';
+import { registerDiagnosticsRoutes } from './server/perf/diagnosticsRoutes.js';
+import { observabilityService } from './server/perf/observabilityService.js';
+import { leedCache } from './server/perf/cacheManager.js';
+import {
+  paginateArray,
+  parsePaginationParams,
+  projectAllowedFields,
+  toCompactLead,
+} from './shared/paginationUtils.js';
 import {
   requireOwnerAuth,
   setSessionCookie,
@@ -279,6 +288,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   }
   next();
 });
+
+// Phase 17: Bounded, sanitized API latency & error observability middleware
+app.use('/api', observabilityService.createPerformanceMiddleware());
 
 // Helper: Resolve active storage engine with production-safe failure behavior
 function checkStorageEngine() {
@@ -510,6 +522,37 @@ app.post('/api/auth/logout', async (req: Request, res: Response) => {
 const protectedApi = express.Router();
 protectedApi.use(requireOwnerAuth);
 protectedApi.use(validateCsrf);
+
+// Phase 17: Automatic cache invalidation after any successful mutating API request
+protectedApi.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    next();
+    return;
+  }
+  res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    const p = req.path || '';
+    if (p.startsWith('/connectors')) {
+      leedCache.invalidateOnConnectorWrite();
+    } else if (p.startsWith('/outreach') || p.startsWith('/bi/workflows')) {
+      leedCache.invalidateOnOutreachOrWorkflowWrite();
+    } else if (
+      p.startsWith('/leads') ||
+      p.startsWith('/pipeline') ||
+      p.startsWith('/persons') ||
+      p.startsWith('/tasks') ||
+      p.startsWith('/crm') ||
+      p.startsWith('/enrichment') ||
+      p.startsWith('/dedupe') ||
+      p.startsWith('/discovery/save') ||
+      p.startsWith('/imports') ||
+      p.startsWith('/settings')
+    ) {
+      leedCache.invalidateOnCrmWrite();
+    }
+  });
+  next();
+});
 
 // Current Authenticated Owner Profile
 
@@ -1253,7 +1296,7 @@ protectedApi.get('/registries/coverage', async (req: Request, res: Response) => 
   }
 });
 
-// Leads Management (Supports filtering, canonical identifier aliases, sorting, and pagination)
+// Leads Management (Supports filtering, canonical identifier aliases, SQL/JSON pagination, compact projection)
 protectedApi.get('/leads', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
@@ -1273,29 +1316,124 @@ protectedApi.get('/leads', async (req: Request, res: Response) => {
       sortDir,
       page,
       pageSize,
+      limit,
+      offset,
+      compact,
+      fields,
     } = req.query;
 
     const cleanSortBy = typeof sortBy === 'string' ? sortBy : 'createdAt';
     const cleanSortDir: 'asc' | 'desc' = sortDir === 'asc' ? 'asc' : 'desc';
+    const isCompact = compact === 'true' || compact === '1';
+    const requestedFields =
+      typeof fields === 'string' && fields.trim()
+        ? fields
+            .split(',')
+            .map((f) => f.trim())
+            .filter(Boolean)
+        : null;
+
+    const rawPageSize = pageSize ?? limit;
+    const hasPagination = rawPageSize !== undefined || page !== undefined || offset !== undefined;
+    const parsedPagination = hasPagination
+      ? parsePaginationParams(
+          { page, pageSize: rawPageSize, offset },
+          { defaultPageSize: 50, maxPageSize: 200 }
+        )
+      : null;
+
+    const leadFilterPayload = {
+      search: typeof search === 'string' ? search : undefined,
+      country: typeof country === 'string' ? country : undefined,
+      region: typeof region === 'string' ? region : undefined,
+      city: typeof city === 'string' ? city : undefined,
+      identifierType: typeof identifierType === 'string' ? identifierType : undefined,
+      status: typeof status === 'string' ? status : undefined,
+      stage: typeof stage === 'string' ? stage : undefined,
+      category: typeof category === 'string' ? category : undefined,
+      hasWebsite: hasWebsite === 'true',
+      hasEmail: hasEmail === 'true',
+      hasPhone: hasPhone === 'true',
+      sortBy: cleanSortBy,
+      sortDir: cleanSortDir,
+      compact: isCompact,
+    };
+
+    const LEAD_ALLOWED_FIELDS = [
+      'id',
+      'companyName',
+      'legalName',
+      'registrationNumber',
+      'registrationType',
+      'companyStatus',
+      'website',
+      'domain',
+      'email',
+      'emailStatus',
+      'phone',
+      'phoneNormalized',
+      'address',
+      'industry',
+      'category',
+      'employeeRange',
+      'confidenceScore',
+      'status',
+      'pipelineStageId',
+      'opportunityValue',
+      'currency',
+      'winProbability',
+      'tags',
+      'sourcesCount',
+      'identifiersCount',
+      'notesCount',
+      'activitiesCount',
+      'createdAt',
+      'updatedAt',
+    ] as const;
+
+    const formatLeadRow = (lead: CanonicalLead): unknown => {
+      const base = isCompact ? toCompactLead(lead) : lead;
+      if (requestedFields && requestedFields.length > 0) {
+        return projectAllowedFields(
+          base as unknown as Record<string, unknown>,
+          requestedFields,
+          LEAD_ALLOWED_FIELDS
+        );
+      }
+      return base;
+    };
+
+    if (isPg && parsedPagination) {
+      const pgPaged = await postgresStorage.getLeadsPaginated({
+        ...leadFilterPayload,
+        limit: parsedPagination.pageSize,
+        offset: parsedPagination.offset,
+      });
+      const totalPages = Math.max(1, Math.ceil(pgPaged.total / parsedPagination.pageSize));
+      const formatted = pgPaged.leads.map(formatLeadRow);
+      res.json({
+        leads: formatted,
+        total: pgPaged.total,
+        page: parsedPagination.page,
+        pageSize: parsedPagination.pageSize,
+        totalPages,
+        pagination: {
+          total: pgPaged.total,
+          page: parsedPagination.page,
+          pageSize: parsedPagination.pageSize,
+          totalPages,
+          hasNextPage: parsedPagination.offset + formatted.length < pgPaged.total,
+          hasPrevPage: parsedPagination.offset > 0,
+          boundedMaxPageSize: 200,
+        },
+      });
+      return;
+    }
 
     let allMatching: CanonicalLead[];
 
     if (isPg) {
-      allMatching = await postgresStorage.getLeads({
-        search: typeof search === 'string' ? search : undefined,
-        country: typeof country === 'string' ? country : undefined,
-        region: typeof region === 'string' ? region : undefined,
-        city: typeof city === 'string' ? city : undefined,
-        identifierType: typeof identifierType === 'string' ? identifierType : undefined,
-        status: typeof status === 'string' ? status : undefined,
-        stage: typeof stage === 'string' ? stage : undefined,
-        category: typeof category === 'string' ? category : undefined,
-        hasWebsite: hasWebsite === 'true',
-        hasEmail: hasEmail === 'true',
-        hasPhone: hasPhone === 'true',
-        sortBy: cleanSortBy,
-        sortDir: cleanSortDir,
-      });
+      allMatching = await postgresStorage.getLeads(leadFilterPayload);
     } else {
       let leads = [...storage.getLeads()];
       if (search && typeof search === 'string') {
@@ -1367,43 +1505,49 @@ protectedApi.get('/leads', async (req: Request, res: Response) => {
 
       leads.sort((a, b) => {
         const dir = cleanSortDir === 'asc' ? 1 : -1;
+        let cmp = 0;
         switch (cleanSortBy) {
           case 'companyName':
-            return dir * a.companyName.localeCompare(b.companyName);
+            cmp = dir * a.companyName.localeCompare(b.companyName);
+            break;
           case 'confidenceScore':
-            return dir * ((a.confidenceScore || 0) - (b.confidenceScore || 0));
+            cmp = dir * ((a.confidenceScore || 0) - (b.confidenceScore || 0));
+            break;
           case 'opportunityValue':
-            return dir * ((a.opportunityValue || 0) - (b.opportunityValue || 0));
+            cmp = dir * ((a.opportunityValue || 0) - (b.opportunityValue || 0));
+            break;
           case 'country':
-            return dir * (a.address?.country || '').localeCompare(b.address?.country || '');
+            cmp = dir * (a.address?.country || '').localeCompare(b.address?.country || '');
+            break;
           case 'updatedAt':
-            return dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
+            cmp = dir * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
+            break;
           default:
-            return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+            cmp = dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+            break;
         }
+        return cmp !== 0 ? cmp : a.id.localeCompare(b.id);
       });
 
       allMatching = leads;
     }
 
     const total = allMatching.length;
-    const requestedPage = page ? Math.max(1, parseInt(String(page), 10) || 1) : 1;
-    const requestedPageSize = pageSize ? Math.max(1, Math.min(200, parseInt(String(pageSize), 10) || 25)) : null;
 
-    if (requestedPageSize !== null) {
-      const start = (requestedPage - 1) * requestedPageSize;
-      const sliced = allMatching.slice(start, start + requestedPageSize);
-      const totalPages = Math.max(1, Math.ceil(total / requestedPageSize));
+    if (parsedPagination) {
+      const paged = paginateArray(allMatching, parsedPagination);
+      const formatted = paged.items.map(formatLeadRow);
       res.json({
-        leads: sliced,
+        leads: formatted,
         total,
-        page: requestedPage,
-        pageSize: requestedPageSize,
-        totalPages,
+        page: paged.pagination.page,
+        pageSize: paged.pagination.pageSize,
+        totalPages: paged.pagination.totalPages,
+        pagination: paged.pagination,
       });
     } else {
       res.json({
-        leads: allMatching,
+        leads: allMatching.map(formatLeadRow),
         total,
         page: 1,
         pageSize: total || 25,
@@ -2719,7 +2863,7 @@ protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
   }
 });
 
-// Tasks (Phase 13 extended metadata + full backward compatibility)
+// Tasks (Phase 13 extended metadata + full backward compatibility + optional pagination)
 protectedApi.get('/tasks', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
@@ -2732,6 +2876,15 @@ protectedApi.get('/tasks', async (req: Request, res: Response) => {
       priority: typeof req.query.priority === 'string' ? req.query.priority : undefined,
       category: typeof req.query.category === 'string' ? req.query.category : undefined,
     });
+    if (req.query.paginate === 'true') {
+      const params = parsePaginationParams(req.query as Record<string, unknown>, {
+        defaultPageSize: 50,
+        maxPageSize: 200,
+      });
+      const paged = paginateArray(tasks, params);
+      res.json({ tasks: paged.items, total: paged.pagination.total, pagination: paged.pagination });
+      return;
+    }
     res.json(tasks);
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch tasks.') });
@@ -3129,10 +3282,21 @@ protectedApi.get('/connectors/runs', async (req: Request, res: Response) => {
     const connectorId = typeof req.query.connectorId === 'string' && req.query.connectorId.trim()
       ? req.query.connectorId.trim()
       : undefined;
+    const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined;
     const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+    const fetchCap = hasPagination ? 200 : limit;
     const runs = isPg
-      ? await postgresStorage.getConnectorRuns(connectorId, limit)
-      : storage.getConnectorRuns(connectorId, limit);
+      ? await postgresStorage.getConnectorRuns(connectorId, fetchCap)
+      : storage.getConnectorRuns(connectorId, fetchCap);
+    if (hasPagination) {
+      const params = parsePaginationParams(req.query as Record<string, unknown>, {
+        defaultPageSize: 50,
+        maxPageSize: 200,
+      });
+      const paged = paginateArray(runs, params);
+      res.json({ runs: paged.items, total: paged.pagination.total, pagination: paged.pagination });
+      return;
+    }
     res.json({ runs, total: runs.length });
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch connector runs.') });
@@ -4557,6 +4721,22 @@ protectedApi.get('/persons', async (req: Request, res: Response) => {
         };
       });
 
+    const hasPagination =
+      req.query.page !== undefined || req.query.pageSize !== undefined || req.query.limit !== undefined;
+    if (hasPagination) {
+      const params = parsePaginationParams(req.query as Record<string, unknown>, {
+        defaultPageSize: 50,
+        maxPageSize: 200,
+      });
+      const paged = paginateArray(enriched, params);
+      res.json({
+        persons: paged.items,
+        total: paged.pagination.total,
+        pagination: paged.pagination,
+      });
+      return;
+    }
+
     res.json({ persons: enriched, total: enriched.length });
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to fetch persons directory.') });
@@ -5281,8 +5461,19 @@ protectedApi.get('/enrichment/company/:leadId/quality', async (req: Request, res
   }
 });
 
-protectedApi.get('/enrichment/quality/summary', async (_req: Request, res: Response) => {
+protectedApi.get('/enrichment/quality/summary', async (req: Request, res: Response) => {
   try {
+    const ownerScope = req.owner?.id || req.owner?.email || 'owner';
+    const bypassCache = req.query.refresh === 'true' || req.query.nocache === 'true';
+    if (!bypassCache) {
+      const cached = leedCache.get<Record<string, unknown>>('quality_summary', ownerScope, 'portfolio');
+      if (cached) {
+        res.setHeader('X-LEED-Cache', 'HIT');
+        res.json(cached);
+        return;
+      }
+    }
+
     const { isPg } = checkStorageEngine();
     const [leads, persons, allRels, settings] = await Promise.all([
       isPg ? postgresStorage.getLeads() : Promise.resolve(storage.getLeads()),
@@ -5387,7 +5578,7 @@ protectedApi.get('/enrichment/quality/summary', async (_req: Request, res: Respo
 
     reverificationQueue.sort((a, b) => a.overallScore - b.overallScore);
 
-    res.json({
+    const payload = {
       totalCompanies: leads.length,
       totalPersons: persons.length,
       averageCompanyQuality: leads.length > 0 ? Math.round(totalLeadScore / leads.length) : 0,
@@ -5400,7 +5591,10 @@ protectedApi.get('/enrichment/quality/summary', async (_req: Request, res: Respo
       leadScores,
       personScores,
       schedulePolicy: settings.reverificationPolicy || getDefaultReverificationPolicy(),
-    });
+    };
+    leedCache.set('quality_summary', ownerScope, 'portfolio', payload, 30_000);
+    res.setHeader('X-LEED-Cache', 'MISS');
+    res.json(payload);
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to compute portfolio data quality summary.') });
   }
@@ -5453,11 +5647,23 @@ protectedApi.post('/enrichment/schedule', async (req: Request, res: Response) =>
 // PHASE 13: PERSONAL CRM & RELATIONSHIP MANAGEMENT (OWNER-ONLY ROUTES)
 // ============================================================================
 
-protectedApi.get('/crm/dashboard', async (_req: Request, res: Response) => {
+protectedApi.get('/crm/dashboard', async (req: Request, res: Response) => {
   try {
+    const ownerScope = req.owner?.id || req.owner?.email || 'owner';
+    const bypassCache = req.query.refresh === 'true' || req.query.nocache === 'true';
+    if (!bypassCache) {
+      const cached = leedCache.get<Record<string, unknown>>('crm_summary', ownerScope, 'dashboard');
+      if (cached) {
+        res.setHeader('X-LEED-Cache', 'HIT');
+        res.json(cached);
+        return;
+      }
+    }
     const { isPg } = checkStorageEngine();
     const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
     const summary = await buildCrmDashboardSummary(facade);
+    leedCache.set('crm_summary', ownerScope, 'dashboard', summary, 15_000);
+    res.setHeader('X-LEED-Cache', 'MISS');
     res.json(summary);
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to build Personal CRM dashboard summary.') });
@@ -5592,14 +5798,24 @@ protectedApi.get('/crm/interactions', async (req: Request, res: Response) => {
   try {
     const { isPg } = checkStorageEngine();
     const facade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+    const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined;
     const interactions = await listAllCrmInteractions(facade, {
       leadId: typeof req.query.leadId === 'string' ? req.query.leadId : undefined,
       personId: typeof req.query.personId === 'string' ? req.query.personId : undefined,
       opportunityId: typeof req.query.opportunityId === 'string' ? req.query.opportunityId : undefined,
       type: typeof req.query.type === 'string' ? req.query.type : undefined,
       search: typeof req.query.search === 'string' ? req.query.search : undefined,
-      limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+      limit: !hasPagination && req.query.limit ? Math.min(200, Math.max(1, parseInt(String(req.query.limit), 10) || 50)) : undefined,
     });
+    if (hasPagination) {
+      const params = parsePaginationParams(req.query as Record<string, unknown>, {
+        defaultPageSize: 50,
+        maxPageSize: 200,
+      });
+      const paged = paginateArray(interactions, params);
+      res.json({ total: paged.pagination.total, interactions: paged.items, pagination: paged.pagination });
+      return;
+    }
     res.json({ total: interactions.length, interactions });
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to load interactions.') });
@@ -5833,6 +6049,21 @@ protectedApi.get('/crm/opportunities', async (req: Request, res: Response) => {
       stageId: typeof req.query.stageId === 'string' ? req.query.stageId : undefined,
       status: typeof req.query.status === 'string' ? req.query.status : undefined,
     });
+    const hasPagination =
+      req.query.page !== undefined || req.query.pageSize !== undefined || req.query.limit !== undefined;
+    if (hasPagination) {
+      const params = parsePaginationParams(req.query as Record<string, unknown>, {
+        defaultPageSize: 50,
+        maxPageSize: 200,
+      });
+      const paged = paginateArray(opportunities, params);
+      res.json({
+        total: paged.pagination.total,
+        opportunities: paged.items,
+        pagination: paged.pagination,
+      });
+      return;
+    }
     res.json({ total: opportunities.length, opportunities });
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to load opportunities.') });
@@ -6630,6 +6861,20 @@ registerBiWorkflowRoutes(protectedApi, {
       params.metadata || {},
       params.ipAddress
     ),
+});
+
+// ============================================================================
+// PHASE 17: PERFORMANCE, SCALABILITY & RELIABILITY DIAGNOSTICS (OWNER-ONLY)
+// ============================================================================
+registerDiagnosticsRoutes(protectedApi, {
+  getStorageInfo: () => {
+    const { isPg } = checkStorageEngine();
+    return { isPg, jsonFilePath: storage.getDbFilePath() };
+  },
+  sanitizeApiError,
+  normalizeClientIp,
+  recordPgAuditEvent: (eventType, actorEmail, resourceType, resourceId, metadata, ipAddress) =>
+    postgresStorage.recordAuditEvent(eventType, actorEmail, resourceType, resourceId, metadata, ipAddress),
 });
 
 // Mount protected API router

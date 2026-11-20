@@ -13,6 +13,7 @@ import type {
   OutreachWorkspaceState,
 } from '../types.js';
 import type { CrmStorageFacade } from '../crm/crmStoreHelper.js';
+import { leedCache } from '../perf/cacheManager.js';
 
 export const OUTREACH_WORKSPACE_SETTINGS_KEY = '__outreach_automation_v1';
 
@@ -125,6 +126,7 @@ export async function saveOutreachWorkspaceState(
       [OUTREACH_WORKSPACE_SETTINGS_KEY]: stamped as any,
     },
   });
+  leedCache.invalidateOnOutreachOrWorkflowWrite();
   return stamped;
 }
 

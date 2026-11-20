@@ -565,9 +565,17 @@ export class StorageManager implements ImportStorageAdapter {
     return initialDb;
   }
 
+  public getDbFilePath(): string {
+    return this.dbFilePath;
+  }
+
   private saveDatabase(data: DatabaseSchema) {
     try {
-      fs.writeFileSync(this.dbFilePath, JSON.stringify(data, null, 2), 'utf-8');
+      this.ensureDataDir();
+      // Atomic write-to-temp + rename prevents partial/corrupted JSON state on crash
+      const tmpPath = `${this.dbFilePath}.${process.pid}.${Date.now()}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, this.dbFilePath);
     } catch (e) {
       console.error('Failed to write pipeline store JSON', e);
     }
@@ -639,6 +647,75 @@ export class StorageManager implements ImportStorageAdapter {
     const savedLeadIds: string[] = [];
     const now = new Date().toISOString();
 
+    const normByType = (val?: string, t?: string, cCode?: string): string => {
+      if (!val) return '';
+      const ct = t ? canonicalizeIdentifierType(t, cCode) : '';
+      if (ct === 'UK_CRN') return normalizeUkCrn(val);
+      if (ct === 'US_CIK') return normalizeUsCik(val);
+      return normalizeIdentifierValue(val);
+    };
+
+    // Phase 17: Build O(1) lookup maps instead of O(N*M) linear findIndex per incoming row
+    const byId = new Map<string, number>();
+    const byDomain = new Map<string, number>();
+    const byReg = new Map<string, number>();
+    const byIdent = new Map<string, number>();
+    const byPhone = new Map<string, number>();
+
+    const indexLeadAt = (l: CanonicalLead, arrayIdx: number) => {
+      byId.set(l.id, arrayIdx);
+      if (l.domain) byDomain.set(l.domain.toLowerCase().trim(), arrayIdx);
+      if (l.registrationNumber) {
+        const cleanReg = normByType(l.registrationNumber, l.registrationType, l.address?.countryCode);
+        if (cleanReg.length >= 4) byReg.set(cleanReg, arrayIdx);
+      }
+      for (const ident of l.identifiers || []) {
+        if (ident.type === 'DOMAIN' || ident.type === 'PHONE' || ident.type === 'EMAIL') continue;
+        const canonType = canonicalizeIdentifierType(ident.type, ident.countryCode || l.address?.countryCode);
+        const cleanVal = normByType(ident.normalizedValue || ident.value, canonType, ident.countryCode || l.address?.countryCode);
+        if (cleanVal.length >= 4) {
+          byIdent.set(`${canonType}:${cleanVal}`, arrayIdx);
+        }
+      }
+      const pDigits = (l.phoneNormalized || l.phone || '').replace(/[^0-9]/g, '');
+      if (pDigits.length >= 7) byPhone.set(pDigits, arrayIdx);
+    };
+
+    // Work on a copy where newly inserted items append, then reverse-prepend at end to preserve exact ordering
+    for (let i = 0; i < this.db.leads.length; i++) {
+      indexLeadAt(this.db.leads[i], i);
+    }
+
+    const newlyAdded: CanonicalLead[] = [];
+    // Negative indices (-1, -2, ...) reference newlyAdded[-idx - 1]
+    const resolveMatchIndex = (lead: CanonicalLead): number | undefined => {
+      let matchIdx = byId.get(lead.id);
+      if (matchIdx !== undefined) return matchIdx;
+      if (lead.domain) {
+        matchIdx = byDomain.get(lead.domain.toLowerCase().trim());
+        if (matchIdx !== undefined) return matchIdx;
+      }
+      const cleanReg = normByType(lead.registrationNumber, lead.registrationType, lead.address?.countryCode);
+      if (cleanReg.length >= 4) {
+        matchIdx = byReg.get(cleanReg);
+        if (matchIdx !== undefined) return matchIdx;
+      }
+      for (const idA of lead.identifiers || []) {
+        if (idA.type === 'DOMAIN' || idA.type === 'PHONE' || idA.type === 'EMAIL') continue;
+        const normA = normByType(idA.normalizedValue || idA.value, idA.type, idA.countryCode || lead.address?.countryCode);
+        if (normA.length >= 4) {
+          matchIdx = byIdent.get(`${idA.type}:${normA}`);
+          if (matchIdx !== undefined) return matchIdx;
+        }
+      }
+      const pDigits = (lead.phoneNormalized || lead.phone || '').replace(/[^0-9]/g, '');
+      if (pDigits.length >= 7) {
+        matchIdx = byPhone.get(pDigits);
+        if (matchIdx !== undefined) return matchIdx;
+      }
+      return undefined;
+    };
+
     for (let rowIdx = 0; rowIdx < newLeads.length; rowIdx++) {
       const rawLead = newLeads[rowIdx];
       if (!rawLead || typeof rawLead.companyName !== 'string' || !rawLead.companyName.trim()) {
@@ -661,71 +738,51 @@ export class StorageManager implements ImportStorageAdapter {
         updatedAt: now,
       };
 
-      const normByType = (val?: string, t?: string, cCode?: string): string => {
-        if (!val) return '';
-        const ct = t ? canonicalizeIdentifierType(t, cCode) : '';
-        if (ct === 'UK_CRN') return normalizeUkCrn(val);
-        if (ct === 'US_CIK') return normalizeUsCik(val);
-        return normalizeIdentifierValue(val);
-      };
+      const matchIdx = resolveMatchIndex(lead);
 
-      const cleanReg = normByType(lead.registrationNumber, lead.registrationType, lead.address?.countryCode);
-      const pDigits = (lead.phoneNormalized || lead.phone || '').replace(/[^0-9]/g, '');
-
-      const idx = this.db.leads.findIndex((existing) => {
-        if (existing.id === lead.id) return true;
-        if (lead.domain && existing.domain && existing.domain.toLowerCase() === lead.domain.toLowerCase()) return true;
-        if (cleanReg.length >= 4 && existing.registrationNumber) {
-          const exReg = normByType(existing.registrationNumber, existing.registrationType, existing.address?.countryCode);
-          if (exReg === cleanReg) return true;
+      if (matchIdx !== undefined) {
+        if (options.skipDuplicates) {
+          skipped++;
+          continue;
         }
-        if (lead.identifiers && existing.identifiers) {
-          for (const idA of lead.identifiers) {
-            if (idA.type === 'DOMAIN' || idA.type === 'PHONE' || idA.type === 'EMAIL') continue;
-            const normA = normByType(idA.normalizedValue || idA.value, idA.type, idA.countryCode || lead.address?.countryCode);
-            if (normA.length < 4) continue;
-            for (const idB of existing.identifiers) {
-              const tB = canonicalizeIdentifierType(idB.type, idB.countryCode || existing.address?.countryCode);
-              const normB = normByType(idB.normalizedValue || idB.value, tB, idB.countryCode || existing.address?.countryCode);
-              if (normA === normB && idA.type === tB) return true;
-            }
-          }
-        }
-        const exPhone = (existing.phoneNormalized || existing.phone || '').replace(/[^0-9]/g, '');
-        if (pDigits.length >= 7 && exPhone === pDigits) return true;
-        return false;
-      });
-
-        if (idx >= 0) {
-          if (options.skipDuplicates) {
-            skipped++;
-            continue;
-          }
-          const existing = this.db.leads[idx];
-          const resolvedStageId = this.resolveStageId(existing.pipelineStageId);
-          const mergedLead = mergeLeadWithTrustHierarchy(existing, lead);
-          mergedLead.pipelineStageId = resolvedStageId;
-          mergedLead.updatedAt = now;
-          this.db.leads[idx] = mergedLead;
-          savedLeadIds.push(mergedLead.id);
-          updated++;
+        const existing = matchIdx >= 0 ? this.db.leads[matchIdx] : newlyAdded[-matchIdx - 1];
+        const resolvedStageId = this.resolveStageId(existing.pipelineStageId);
+        const mergedLead = mergeLeadWithTrustHierarchy(existing, lead);
+        mergedLead.pipelineStageId = resolvedStageId;
+        mergedLead.updatedAt = now;
+        if (matchIdx >= 0) {
+          this.db.leads[matchIdx] = mergedLead;
         } else {
-          try {
-            const resolvedStageId = this.resolveStageId(lead.pipelineStageId);
-            const persistedLead: CanonicalLead = { ...lead, pipelineStageId: resolvedStageId };
-            this.db.leads.unshift(persistedLead);
-            savedLeadIds.push(persistedLead.id);
-            added++;
-          } catch (rowErr: unknown) {
-            failed++;
-            errors.push({
-              row: rowIdx + 1,
-              companyName: lead.companyName,
-              error: rowErr instanceof Error ? rowErr.message : String(rowErr),
-            });
-          }
+          newlyAdded[-matchIdx - 1] = mergedLead;
         }
+        indexLeadAt(mergedLead, matchIdx);
+        savedLeadIds.push(mergedLead.id);
+        updated++;
+      } else {
+        try {
+          const resolvedStageId = this.resolveStageId(lead.pipelineStageId);
+          const persistedLead: CanonicalLead = { ...lead, pipelineStageId: resolvedStageId };
+          const negIdx = -(newlyAdded.length + 1);
+          newlyAdded.push(persistedLead);
+          indexLeadAt(persistedLead, negIdx);
+          savedLeadIds.push(persistedLead.id);
+          added++;
+        } catch (rowErr: unknown) {
+          failed++;
+          errors.push({
+            row: rowIdx + 1,
+            companyName: lead.companyName,
+            error: rowErr instanceof Error ? rowErr.message : String(rowErr),
+          });
+        }
+      }
     }
+
+    if (newlyAdded.length > 0) {
+      // Preserve unshift order (most recently added first)
+      this.db.leads = [...newlyAdded.reverse(), ...this.db.leads];
+    }
+
     this.saveDatabase(this.db);
     return { added, updated, skipped, failed, errors, savedLeadIds };
   }
@@ -1122,16 +1179,25 @@ export class StorageManager implements ImportStorageAdapter {
   public getLeadPersons(leadId: string): LinkedPersonWithRelationship[] {
     const persons = this.getPersons();
     const rels = this.getAllRelationships();
+    const personMap = new Map(persons.map((p) => [p.id, p]));
     const leadMap = new Map(this.db.leads.map((l) => [l.id, l]));
 
-    const attached = rels.filter((r) => r.leadId === leadId);
+    const attached: CompanyPersonRelationship[] = [];
+    const relsByPerson = new Map<string, CompanyPersonRelationship[]>();
+    for (const r of rels) {
+      if (r.leadId === leadId) attached.push(r);
+      const list = relsByPerson.get(r.personId) || [];
+      list.push(r);
+      relsByPerson.set(r.personId, list);
+    }
+
     const out: LinkedPersonWithRelationship[] = [];
 
     for (const rel of attached) {
-      const person = persons.find((p) => p.id === rel.personId);
+      const person = personMap.get(rel.personId);
       if (!person) continue;
-      const otherCompanies = rels
-        .filter((other) => other.personId === person.id && other.leadId !== leadId)
+      const otherCompanies = (relsByPerson.get(person.id) || [])
+        .filter((other) => other.leadId !== leadId)
         .map((other) => ({
           leadId: other.leadId,
           companyName: leadMap.get(other.leadId)?.companyName || other.leadId,

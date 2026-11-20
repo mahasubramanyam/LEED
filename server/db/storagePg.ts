@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { dbManager } from './pool.js';
+import { observabilityService } from '../perf/observabilityService.js';
 import { canonicalizeIdentifierType, getIdentifierAliases } from '../../shared/identifierRegistry.js';
 import { DEFAULT_PIPELINE_STAGES } from '../../shared/defaultStages.js';
 import { normalizeIdentifierValue, normalizeUkCrn, normalizeUsCik } from '../identifiers/identifierEngine.js';
@@ -78,15 +79,319 @@ export interface AuditVerificationResult {
 }
 
 export class PostgresStorage {
+  private tableExistsCache = new Map<string, { exists: boolean; checkedAt: number }>();
+
   private getClient(): pg.Pool {
     const pool = dbManager.getPool();
     if (!pool) throw new Error('PostgreSQL connection pool not initialized');
     return pool;
   }
 
+  private async timedQuery<R extends pg.QueryResultRow = any>(
+    client: pg.PoolClient,
+    label: string,
+    sql: string,
+    values?: any[]
+  ): Promise<pg.QueryResult<R>> {
+    const startNs = process.hrtime.bigint();
+    const res = await client.query<R>(sql, values);
+    const elapsedMs = Number(process.hrtime.bigint() - startNs) / 1_000_000;
+    observabilityService.recordDbQuery(label, elapsedMs, res.rowCount ?? res.rows?.length ?? 0);
+    return res;
+  }
+
+  private async hasPublicTable(client: pg.PoolClient, tableName: string): Promise<boolean> {
+    const cached = this.tableExistsCache.get(tableName);
+    const now = Date.now();
+    // Once a table exists it remains present; negative checks re-probe every 15s
+    if (cached && (cached.exists || now - cached.checkedAt < 15_000)) {
+      return cached.exists;
+    }
+    const res = await this.timedQuery(
+      client,
+      `regclass:${tableName}`,
+      `SELECT to_regclass($1) as tbl`,
+      [`public.${tableName}`]
+    );
+    const exists = Boolean(res.rows[0]?.tbl);
+    this.tableExistsCache.set(tableName, { exists, checkedAt: now });
+    return exists;
+  }
+
+  /**
+   * Batched hydration of lead child relations using WHERE lead_id = ANY($1::text[]).
+   * Eliminates the 4-way Cartesian LEFT JOIN row multiplication (sources x identifiers x notes x activities).
+   */
+  private async hydrateLeadRows(
+    client: pg.PoolClient,
+    leadRows: any[],
+    options: { compact?: boolean } = {}
+  ): Promise<CanonicalLead[]> {
+    if (leadRows.length === 0) return [];
+    const leadIds = leadRows.map((r) => r.id);
+
+    const sourcesByLead = new Map<string, LeadSource[]>();
+    const identsByLead = new Map<string, LeadIdentifier[]>();
+    const notesByLead = new Map<string, LeadNote[]>();
+    const actsByLead = new Map<string, LeadActivity[]>();
+
+    const sourcesRes = await this.timedQuery(
+      client,
+      'hydrate:lead_sources',
+      `SELECT lead_id, source_name, provider_id, url, retrieved_at, license, attribution
+       FROM lead_sources WHERE lead_id = ANY($1::text[])`,
+      [leadIds]
+    );
+    for (const s of sourcesRes.rows) {
+      const arr = sourcesByLead.get(s.lead_id) || [];
+      arr.push({
+        sourceName: s.source_name,
+        providerId: s.provider_id || undefined,
+        url: s.url || undefined,
+        retrievedAt: s.retrieved_at,
+        license: s.license || undefined,
+        attribution: s.attribution || undefined,
+      });
+      sourcesByLead.set(s.lead_id, arr);
+    }
+
+    const identsRes = await this.timedQuery(
+      client,
+      'hydrate:lead_identifiers',
+      `SELECT id, lead_id, type, value, normalized_value, country_code, issuing_authority, source, status, verified
+       FROM lead_identifiers WHERE lead_id = ANY($1::text[])`,
+      [leadIds]
+    );
+    for (const i of identsRes.rows) {
+      const arr = identsByLead.get(i.lead_id) || [];
+      arr.push({
+        id: i.id,
+        type: i.type,
+        value: i.value,
+        normalizedValue: i.normalized_value || undefined,
+        countryCode: i.country_code || undefined,
+        issuingAuthority: i.issuing_authority || undefined,
+        source: i.source || undefined,
+        status: i.status || undefined,
+        verified: Boolean(i.verified),
+      });
+      identsByLead.set(i.lead_id, arr);
+    }
+
+    if (!options.compact) {
+      const notesRes = await this.timedQuery(
+        client,
+        'hydrate:lead_notes',
+        `SELECT id, lead_id, content, author, created_at
+         FROM lead_notes WHERE lead_id = ANY($1::text[]) ORDER BY created_at DESC`,
+        [leadIds]
+      );
+      for (const n of notesRes.rows) {
+        const arr = notesByLead.get(n.lead_id) || [];
+        arr.push({
+          id: n.id,
+          content: n.content,
+          author: n.author,
+          createdAt: n.created_at,
+        });
+        notesByLead.set(n.lead_id, arr);
+      }
+
+      const actsRes = await this.timedQuery(
+        client,
+        'hydrate:activities',
+        `SELECT id, lead_id, type, title, notes, outcome, actor, date
+         FROM activities WHERE lead_id = ANY($1::text[]) ORDER BY date DESC`,
+        [leadIds]
+      );
+      for (const a of actsRes.rows) {
+        const arr = actsByLead.get(a.lead_id) || [];
+        arr.push({
+          id: a.id,
+          type: a.type,
+          title: a.title,
+          notes: a.notes || undefined,
+          outcome: a.outcome || undefined,
+          actor: a.actor,
+          date: a.date,
+        });
+        actsByLead.set(a.lead_id, arr);
+      }
+    }
+
+    return leadRows.map((row) =>
+      this.mapRowToLead({
+        ...row,
+        sources_json: sourcesByLead.get(row.id) || [],
+        identifiers_json: identsByLead.get(row.id) || [],
+        notes_json: notesByLead.get(row.id) || [],
+        activities_json: actsByLead.get(row.id) || [],
+      })
+    );
+  }
+
+  private buildLeadsWhereClause(filters: {
+    search?: string;
+    country?: string;
+    region?: string;
+    city?: string;
+    identifierType?: string;
+    status?: string;
+    stage?: string;
+    category?: string;
+    hasWebsite?: boolean;
+    hasEmail?: boolean;
+    hasPhone?: boolean;
+  }): { whereSql: string; values: any[] } {
+    let whereSql = 'WHERE 1=1';
+    const values: any[] = [];
+    let paramIdx = 1;
+
+    if (filters.search) {
+      const cleanSearchNorm = filters.search.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      whereSql += ` AND (
+        l.company_name ILIKE $${paramIdx} OR
+        l.registration_number ILIKE $${paramIdx} OR
+        l.city ILIKE $${paramIdx} OR
+        l.region ILIKE $${paramIdx} OR
+        l.country ILIKE $${paramIdx} OR
+        l.domain ILIKE $${paramIdx} OR
+        l.email ILIKE $${paramIdx} OR
+        l.tags::text ILIKE $${paramIdx} OR
+        EXISTS (
+          SELECT 1 FROM lead_identifiers li
+          WHERE li.lead_id = l.id
+            AND (li.value ILIKE $${paramIdx} OR ($${paramIdx + 1} != '' AND li.normalized_value ILIKE $${paramIdx + 1}))
+        )
+      )`;
+      values.push(`%${filters.search}%`, cleanSearchNorm ? `%${cleanSearchNorm}%` : '');
+      paramIdx += 2;
+    }
+
+    if (filters.country && filters.country !== 'ALL') {
+      whereSql += ` AND (UPPER(l.country_code) = UPPER($${paramIdx}) OR UPPER(l.country) = UPPER($${paramIdx}))`;
+      values.push(filters.country);
+      paramIdx++;
+    }
+
+    if (filters.region && filters.region !== 'ALL') {
+      whereSql += ` AND l.region ILIKE $${paramIdx}`;
+      values.push(`%${filters.region}%`);
+      paramIdx++;
+    }
+
+    if (filters.city && filters.city !== 'ALL') {
+      whereSql += ` AND l.city ILIKE $${paramIdx}`;
+      values.push(`%${filters.city}%`);
+      paramIdx++;
+    }
+
+    if (filters.identifierType && filters.identifierType !== 'ALL') {
+      const aliases = getIdentifierAliases(filters.identifierType);
+      whereSql += ` AND EXISTS (SELECT 1 FROM lead_identifiers li WHERE li.lead_id = l.id AND UPPER(li.type) = ANY($${paramIdx}::text[]))`;
+      values.push(aliases);
+      paramIdx++;
+    }
+
+    if (filters.status && filters.status !== 'ALL') {
+      whereSql += ` AND l.status = $${paramIdx}`;
+      values.push(filters.status);
+      paramIdx++;
+    }
+
+    if (filters.stage && filters.stage !== 'ALL') {
+      whereSql += ` AND l.pipeline_stage_id = $${paramIdx}`;
+      values.push(filters.stage);
+      paramIdx++;
+    }
+
+    if (filters.category && filters.category !== 'ALL') {
+      whereSql += ` AND l.category ILIKE $${paramIdx}`;
+      values.push(`%${filters.category}%`);
+      paramIdx++;
+    }
+
+    if (filters.hasWebsite) {
+      whereSql += ` AND l.website IS NOT NULL AND l.website != ''`;
+    }
+
+    if (filters.hasEmail) {
+      whereSql += ` AND l.email IS NOT NULL AND l.email != ''`;
+    }
+
+    if (filters.hasPhone) {
+      whereSql += ` AND ((l.phone IS NOT NULL AND l.phone != '') OR (l.phone_normalized IS NOT NULL AND l.phone_normalized != ''))`;
+    }
+
+    return { whereSql, values };
+  }
+
   // ==========================================
   // 1. LEADS MANAGEMENT
   // ==========================================
+
+  public async getLeadsPaginated(filters: {
+    search?: string;
+    country?: string;
+    region?: string;
+    city?: string;
+    identifierType?: string;
+    status?: string;
+    stage?: string;
+    category?: string;
+    hasWebsite?: boolean;
+    hasEmail?: boolean;
+    hasPhone?: boolean;
+    sortBy?: string;
+    sortDir?: 'asc' | 'desc';
+    limit?: number;
+    offset?: number;
+    compact?: boolean;
+  } = {}): Promise<{ leads: CanonicalLead[]; total: number }> {
+    const pool = this.getClient();
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const { whereSql, values } = this.buildLeadsWhereClause(filters);
+
+      const sortColumns: Record<string, string> = {
+        createdAt: 'l.created_at',
+        updatedAt: 'l.updated_at',
+        companyName: 'l.company_name',
+        confidenceScore: 'l.confidence_score',
+        opportunityValue: 'l.opportunity_value',
+        country: 'l.country',
+      };
+      const sortCol = sortColumns[filters.sortBy || 'createdAt'] || 'l.created_at';
+      const sortDir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
+
+      const countRes = await this.timedQuery(
+        client,
+        'leads:count',
+        `SELECT COUNT(*)::int AS total FROM leads l ${whereSql}`,
+        values
+      );
+      const total = parseInt(String(countRes.rows[0]?.total ?? 0), 10) || 0;
+      if (total === 0) return { leads: [], total: 0 };
+
+      let dataSql = `SELECT l.* FROM leads l ${whereSql} ORDER BY ${sortCol} ${sortDir}, l.id ASC`;
+      const dataValues = [...values];
+      if (typeof filters.limit === 'number' && filters.limit > 0) {
+        dataSql += ` LIMIT $${dataValues.length + 1}`;
+        dataValues.push(Math.min(500, filters.limit));
+      }
+      if (typeof filters.offset === 'number' && filters.offset > 0) {
+        dataSql += ` OFFSET $${dataValues.length + 1}`;
+        dataValues.push(filters.offset);
+      }
+
+      const { rows } = await this.timedQuery(client, 'leads:select_page', dataSql, dataValues);
+      const hydrated = await this.hydrateLeadRows(client, rows, { compact: filters.compact });
+      return { leads: hydrated, total };
+    } finally {
+      if (client) client.release();
+    }
+  }
 
   public async getLeads(filters: {
     search?: string;
@@ -102,142 +407,15 @@ export class PostgresStorage {
     hasPhone?: boolean;
     sortBy?: string;
     sortDir?: 'asc' | 'desc';
+    limit?: number;
+    offset?: number;
+    compact?: boolean;
   } = {}): Promise<CanonicalLead[]> {
     const pool = this.getClient();
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      let query = `
-        SELECT 
-          l.*,
-          COALESCE(
-            json_agg(DISTINCT jsonb_build_object(
-              'sourceName', s.source_name,
-              'providerId', s.provider_id,
-              'url', s.url,
-              'retrievedAt', s.retrieved_at,
-              'license', s.license,
-              'attribution', s.attribution
-            )) FILTER (WHERE s.id IS NOT NULL), '[]'::json
-          ) as sources_json,
-          COALESCE(
-            json_agg(DISTINCT jsonb_build_object(
-              'id', i.id,
-              'type', i.type,
-              'value', i.value,
-              'normalizedValue', i.normalized_value,
-              'countryCode', i.country_code,
-              'issuingAuthority', i.issuing_authority,
-              'source', i.source,
-              'status', i.status,
-              'verified', i.verified
-            )) FILTER (WHERE i.id IS NOT NULL), '[]'::json
-          ) as identifiers_json,
-          COALESCE(
-            json_agg(DISTINCT jsonb_build_object(
-              'id', n.id,
-              'content', n.content,
-              'author', n.author,
-              'createdAt', n.created_at
-            )) FILTER (WHERE n.id IS NOT NULL), '[]'::json
-          ) as notes_json,
-          COALESCE(
-            json_agg(DISTINCT jsonb_build_object(
-              'id', a.id,
-              'type', a.type,
-              'title', a.title,
-              'notes', a.notes,
-              'outcome', a.outcome,
-              'actor', a.actor,
-              'date', a.date
-            )) FILTER (WHERE a.id IS NOT NULL), '[]'::json
-          ) as activities_json
-        FROM leads l
-        LEFT JOIN lead_sources s ON s.lead_id = l.id
-        LEFT JOIN lead_identifiers i ON i.lead_id = l.id
-        LEFT JOIN lead_notes n ON n.lead_id = l.id
-        LEFT JOIN activities a ON a.lead_id = l.id
-        WHERE 1=1
-      `;
-
-      const values: any[] = [];
-      let paramIdx = 1;
-
-      if (filters.search) {
-        const cleanSearchNorm = filters.search.toUpperCase().replace(/[^A-Z0-9]/g, '');
-        query += ` AND (
-          l.company_name ILIKE $${paramIdx} OR
-          l.registration_number ILIKE $${paramIdx} OR
-          l.city ILIKE $${paramIdx} OR
-          l.region ILIKE $${paramIdx} OR
-          l.country ILIKE $${paramIdx} OR
-          l.domain ILIKE $${paramIdx} OR
-          l.email ILIKE $${paramIdx} OR
-          l.tags::text ILIKE $${paramIdx} OR
-          EXISTS (
-            SELECT 1 FROM lead_identifiers li
-            WHERE li.lead_id = l.id
-              AND (li.value ILIKE $${paramIdx} OR ($${paramIdx + 1} != '' AND li.normalized_value ILIKE $${paramIdx + 1}))
-          )
-        )`;
-        values.push(`%${filters.search}%`, cleanSearchNorm ? `%${cleanSearchNorm}%` : '');
-        paramIdx += 2;
-      }
-
-      if (filters.country && filters.country !== 'ALL') {
-        query += ` AND (UPPER(l.country_code) = UPPER($${paramIdx}) OR UPPER(l.country) = UPPER($${paramIdx}))`;
-        values.push(filters.country);
-        paramIdx++;
-      }
-
-      if (filters.region && filters.region !== 'ALL') {
-        query += ` AND l.region ILIKE $${paramIdx}`;
-        values.push(`%${filters.region}%`);
-        paramIdx++;
-      }
-
-      if (filters.city && filters.city !== 'ALL') {
-        query += ` AND l.city ILIKE $${paramIdx}`;
-        values.push(`%${filters.city}%`);
-        paramIdx++;
-      }
-
-      if (filters.identifierType && filters.identifierType !== 'ALL') {
-        const aliases = getIdentifierAliases(filters.identifierType);
-        query += ` AND EXISTS (SELECT 1 FROM lead_identifiers li WHERE li.lead_id = l.id AND UPPER(li.type) = ANY($${paramIdx}::text[]))`;
-        values.push(aliases);
-        paramIdx++;
-      }
-
-      if (filters.status && filters.status !== 'ALL') {
-        query += ` AND l.status = $${paramIdx}`;
-        values.push(filters.status);
-        paramIdx++;
-      }
-
-      if (filters.stage && filters.stage !== 'ALL') {
-        query += ` AND l.pipeline_stage_id = $${paramIdx}`;
-        values.push(filters.stage);
-        paramIdx++;
-      }
-
-      if (filters.category && filters.category !== 'ALL') {
-        query += ` AND l.category ILIKE $${paramIdx}`;
-        values.push(`%${filters.category}%`);
-        paramIdx++;
-      }
-
-      if (filters.hasWebsite) {
-        query += ` AND l.website IS NOT NULL AND l.website != ''`;
-      }
-
-      if (filters.hasEmail) {
-        query += ` AND l.email IS NOT NULL AND l.email != ''`;
-      }
-
-      if (filters.hasPhone) {
-        query += ` AND ((l.phone IS NOT NULL AND l.phone != '') OR (l.phone_normalized IS NOT NULL AND l.phone_normalized != ''))`;
-      }
+      const { whereSql, values } = this.buildLeadsWhereClause(filters);
 
       const sortColumns: Record<string, string> = {
         createdAt: 'l.created_at',
@@ -250,10 +428,19 @@ export class PostgresStorage {
       const sortCol = sortColumns[filters.sortBy || 'createdAt'] || 'l.created_at';
       const sortDir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
 
-      query += ` GROUP BY l.id ORDER BY ${sortCol} ${sortDir}`;
+      let query = `SELECT l.* FROM leads l ${whereSql} ORDER BY ${sortCol} ${sortDir}, l.id ASC`;
+      const queryValues = [...values];
+      if (typeof filters.limit === 'number' && filters.limit > 0) {
+        query += ` LIMIT $${queryValues.length + 1}`;
+        queryValues.push(Math.min(1000, filters.limit));
+      }
+      if (typeof filters.offset === 'number' && filters.offset > 0) {
+        query += ` OFFSET $${queryValues.length + 1}`;
+        queryValues.push(filters.offset);
+      }
 
-      const { rows } = await client.query(query, values);
-      return rows.map((r: any) => this.mapRowToLead(r));
+      const { rows } = await this.timedQuery(client, 'leads:select', query, queryValues);
+      return await this.hydrateLeadRows(client, rows, { compact: filters.compact });
     } finally {
       if (client) client.release();
     }
@@ -264,63 +451,15 @@ export class PostgresStorage {
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      const query = `
-        SELECT 
-          l.*,
-          COALESCE(
-            json_agg(DISTINCT jsonb_build_object(
-              'sourceName', s.source_name,
-              'providerId', s.provider_id,
-              'url', s.url,
-              'retrievedAt', s.retrieved_at,
-              'license', s.license,
-              'attribution', s.attribution
-            )) FILTER (WHERE s.id IS NOT NULL), '[]'::json
-          ) as sources_json,
-          COALESCE(
-            json_agg(DISTINCT jsonb_build_object(
-              'id', i.id,
-              'type', i.type,
-              'value', i.value,
-              'normalizedValue', i.normalized_value,
-              'countryCode', i.country_code,
-              'issuingAuthority', i.issuing_authority,
-              'source', i.source,
-              'status', i.status,
-              'verified', i.verified
-            )) FILTER (WHERE i.id IS NOT NULL), '[]'::json
-          ) as identifiers_json,
-          COALESCE(
-            json_agg(DISTINCT jsonb_build_object(
-              'id', n.id,
-              'content', n.content,
-              'author', n.author,
-              'createdAt', n.created_at
-            )) FILTER (WHERE n.id IS NOT NULL), '[]'::json
-          ) as notes_json,
-          COALESCE(
-            json_agg(DISTINCT jsonb_build_object(
-              'id', a.id,
-              'type', a.type,
-              'title', a.title,
-              'notes', a.notes,
-              'outcome', a.outcome,
-              'actor', a.actor,
-              'date', a.date
-            )) FILTER (WHERE a.id IS NOT NULL), '[]'::json
-          ) as activities_json
-        FROM leads l
-        LEFT JOIN lead_sources s ON s.lead_id = l.id
-        LEFT JOIN lead_identifiers i ON i.lead_id = l.id
-        LEFT JOIN lead_notes n ON n.lead_id = l.id
-        LEFT JOIN activities a ON a.lead_id = l.id
-        WHERE l.id = $1
-        GROUP BY l.id
-      `;
-
-      const { rows } = await client.query(query, [id]);
+      const { rows } = await this.timedQuery(
+        client,
+        'leads:get_by_id',
+        'SELECT l.* FROM leads l WHERE l.id = $1',
+        [id]
+      );
       if (rows.length === 0) return null;
-      return this.mapRowToLead(rows[0]);
+      const hydrated = await this.hydrateLeadRows(client, rows);
+      return hydrated[0] || null;
     } finally {
       if (client) client.release();
     }
@@ -2254,9 +2393,12 @@ export class PostgresStorage {
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      const tbl = await client.query(`SELECT to_regclass('public.persons') as tbl`);
-      if (!tbl.rows[0]?.tbl) return [];
-      const { rows } = await client.query('SELECT * FROM persons ORDER BY created_at DESC');
+      if (!(await this.hasPublicTable(client, 'persons'))) return [];
+      const { rows } = await this.timedQuery(
+        client,
+        'persons:select_all',
+        'SELECT * FROM persons ORDER BY created_at DESC, id ASC'
+      );
       return rows.map((r: any) => this.mapRowToPerson(r));
     } catch {
       return [];
@@ -2270,9 +2412,12 @@ export class PostgresStorage {
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      const tbl = await client.query(`SELECT to_regclass('public.company_person_relationships') as tbl`);
-      if (!tbl.rows[0]?.tbl) return [];
-      const { rows } = await client.query('SELECT * FROM company_person_relationships ORDER BY created_at DESC');
+      if (!(await this.hasPublicTable(client, 'company_person_relationships'))) return [];
+      const { rows } = await this.timedQuery(
+        client,
+        'relationships:select_all',
+        'SELECT * FROM company_person_relationships ORDER BY created_at DESC, id ASC'
+      );
       return rows.map((r: any) => this.mapRowToRelationship(r));
     } catch {
       return [];
@@ -2286,8 +2431,7 @@ export class PostgresStorage {
     let client: pg.PoolClient | null = null;
     try {
       client = await pool.connect();
-      const tbl = await client.query(`SELECT to_regclass('public.company_person_relationships') as tbl`);
-      if (!tbl.rows[0]?.tbl) return [];
+      if (!(await this.hasPublicTable(client, 'company_person_relationships'))) return [];
 
       const { rows } = await client.query(
         `SELECT r.*, p.id as p_id, p.full_name as p_full_name, p.first_name as p_first_name,

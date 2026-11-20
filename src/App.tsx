@@ -1,25 +1,61 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TopBar } from './components/TopBar.tsx';
 import { DashboardView } from './components/DashboardView.tsx';
-import { DiscoveryEngine } from './components/DiscoveryEngine.tsx';
-import { LeadsView } from './components/LeadsView.tsx';
-import { PipelineBoard } from './components/PipelineBoard.tsx';
-import { AiSalesAgent } from './components/AiSalesAgent.tsx';
-import { OutreachCampaigns } from './components/OutreachCampaigns.tsx';
-import { DedupeHub } from './components/DedupeHub.tsx';
-import { ConnectorsView } from './components/ConnectorsView.tsx';
-import { TasksView } from './components/TasksView.tsx';
-import { OwnerControlCentre } from './components/OwnerControlCentre.tsx';
-import { LeadDetailModal } from './components/LeadDetailModal.tsx';
-import { ImportModal } from './components/ImportModal.tsx';
-import { ImportWorkspace } from './components/ImportWorkspace.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
-import { CountryMatrixView } from './components/CountryMatrixView.tsx';
-import { PersonRelationshipDrawer } from './components/PersonRelationshipDrawer.tsx';
-import { ReminderCenterDrawer } from './components/ReminderCenterDrawer.tsx';
-import { BiAnalyticsWorkspace } from './components/BiAnalyticsWorkspace.tsx';
-import { WorkflowAutomationWorkspace } from './components/WorkflowAutomationWorkspace.tsx';
+
+// Phase 17: Route-level & modal-level code splitting to slash initial entry bundle size
+const DiscoveryEngine = lazy(() =>
+  import('./components/DiscoveryEngine.tsx').then((m) => ({ default: m.DiscoveryEngine }))
+);
+const LeadsView = lazy(() =>
+  import('./components/LeadsView.tsx').then((m) => ({ default: m.LeadsView }))
+);
+const PipelineBoard = lazy(() =>
+  import('./components/PipelineBoard.tsx').then((m) => ({ default: m.PipelineBoard }))
+);
+const AiSalesAgent = lazy(() =>
+  import('./components/AiSalesAgent.tsx').then((m) => ({ default: m.AiSalesAgent }))
+);
+const OutreachCampaigns = lazy(() =>
+  import('./components/OutreachCampaigns.tsx').then((m) => ({ default: m.OutreachCampaigns }))
+);
+const DedupeHub = lazy(() =>
+  import('./components/DedupeHub.tsx').then((m) => ({ default: m.DedupeHub }))
+);
+const ConnectorsView = lazy(() =>
+  import('./components/ConnectorsView.tsx').then((m) => ({ default: m.ConnectorsView }))
+);
+const TasksView = lazy(() =>
+  import('./components/TasksView.tsx').then((m) => ({ default: m.TasksView }))
+);
+const OwnerControlCentre = lazy(() =>
+  import('./components/OwnerControlCentre.tsx').then((m) => ({ default: m.OwnerControlCentre }))
+);
+const LeadDetailModal = lazy(() =>
+  import('./components/LeadDetailModal.tsx').then((m) => ({ default: m.LeadDetailModal }))
+);
+const ImportModal = lazy(() =>
+  import('./components/ImportModal.tsx').then((m) => ({ default: m.ImportModal }))
+);
+const ImportWorkspace = lazy(() =>
+  import('./components/ImportWorkspace.tsx').then((m) => ({ default: m.ImportWorkspace }))
+);
+const CountryMatrixView = lazy(() =>
+  import('./components/CountryMatrixView.tsx').then((m) => ({ default: m.CountryMatrixView }))
+);
+const PersonRelationshipDrawer = lazy(() =>
+  import('./components/PersonRelationshipDrawer.tsx').then((m) => ({ default: m.PersonRelationshipDrawer }))
+);
+const ReminderCenterDrawer = lazy(() =>
+  import('./components/ReminderCenterDrawer.tsx').then((m) => ({ default: m.ReminderCenterDrawer }))
+);
+const BiAnalyticsWorkspace = lazy(() =>
+  import('./components/BiAnalyticsWorkspace.tsx').then((m) => ({ default: m.BiAnalyticsWorkspace }))
+);
+const WorkflowAutomationWorkspace = lazy(() =>
+  import('./components/WorkflowAutomationWorkspace.tsx').then((m) => ({ default: m.WorkflowAutomationWorkspace }))
+);
 import {
   CanonicalLead,
   PipelineStage,
@@ -584,11 +620,18 @@ export default function App() {
     }
   };
 
-  // Badges calculation
-  const pendingTasksCount = tasks.filter((t) => !t.completed).length;
-  const pendingApprovalsCount = campaigns.reduce(
-    (acc, c) => acc + (c.messages?.filter((m) => m.status === 'pending_approval').length || 0),
-    0
+  // Badges calculation (memoized to avoid O(N) scans on unrelated renders)
+  const pendingTasksCount = useMemo(
+    () => tasks.filter((t) => !t.completed).length,
+    [tasks]
+  );
+  const pendingApprovalsCount = useMemo(
+    () =>
+      campaigns.reduce(
+        (acc, c) => acc + (c.messages?.filter((m) => m.status === 'pending_approval').length || 0),
+        0
+      ),
+    [campaigns]
   );
 
   return (
@@ -669,7 +712,14 @@ export default function App() {
               </span>
             </div>
           ) : (
-            <>
+            <Suspense
+              fallback={
+                <div className="flex flex-col items-center justify-center min-h-[320px] space-y-2.5">
+                  <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Loading workspace module...</span>
+                </div>
+              }
+            >
               {currentTab === 'dashboard' && (
                 <DashboardView
                   leads={leads}
@@ -829,76 +879,80 @@ export default function App() {
                   apiFetch={apiFetch}
                 />
               )}
-            </>
+            </Suspense>
           )}
         </main>
       </div>
 
-      {/* Deep Inspection Drawer / Modal */}
-      <LeadDetailModal
-        lead={selectedLeadForDetail}
-        stages={stages}
-        onClose={() => setSelectedLeadForDetail(null)}
-        onUpdateLead={handleUpdateLead}
-        onLeadVerified={handleLeadSynced}
-        onAddNote={handleAddNote}
-        onAddActivity={handleAddActivity}
-        onInspectUrl={handleInspectUrl}
-        onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
-        onOpenAiAgent={openAiAgent}
-        onOpenOutreach={openOutreach}
-        onRefreshData={fetchAllData}
-      />
+      {/* Lazy-Loaded Deep Inspection & Relationship Drawers / Modals */}
+      <Suspense fallback={null}>
+        {selectedLeadForDetail && (
+          <LeadDetailModal
+            lead={selectedLeadForDetail}
+            stages={stages}
+            onClose={() => setSelectedLeadForDetail(null)}
+            onUpdateLead={handleUpdateLead}
+            onLeadVerified={handleLeadSynced}
+            onAddNote={handleAddNote}
+            onAddActivity={handleAddActivity}
+            onInspectUrl={handleInspectUrl}
+            onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
+            onOpenAiAgent={openAiAgent}
+            onOpenOutreach={openOutreach}
+            onRefreshData={fetchAllData}
+          />
+        )}
 
-      {/* Unified Person Relationship Profile Drawer (Phase 13) */}
-      {selectedPersonIdForDrawer && (
-        <PersonRelationshipDrawer
-          personId={selectedPersonIdForDrawer}
-          onClose={() => setSelectedPersonIdForDrawer(null)}
-          onOpenCompany={(leadId) => {
-            const found = leads.find((l) => l.id === leadId);
-            if (found) {
-              setSelectedPersonIdForDrawer(null);
-              setSelectedLeadForDetail(found);
-            }
-          }}
-          onOpenAiAgent={openAiAgent}
-          onOpenOutreach={openOutreach}
-          onDataMutated={fetchAllData}
-        />
-      )}
+        {/* Unified Person Relationship Profile Drawer (Phase 13) */}
+        {selectedPersonIdForDrawer && (
+          <PersonRelationshipDrawer
+            personId={selectedPersonIdForDrawer}
+            onClose={() => setSelectedPersonIdForDrawer(null)}
+            onOpenCompany={(leadId) => {
+              const found = leads.find((l) => l.id === leadId);
+              if (found) {
+                setSelectedPersonIdForDrawer(null);
+                setSelectedLeadForDetail(found);
+              }
+            }}
+            onOpenAiAgent={openAiAgent}
+            onOpenOutreach={openOutreach}
+            onDataMutated={fetchAllData}
+          />
+        )}
 
-      {/* In-App Reminder Centre Drawer (Phase 13) */}
-      {isReminderDrawerOpen && (
-        <ReminderCenterDrawer
-          onClose={() => setIsReminderDrawerOpen(false)}
-          onOpenCompany={(leadId) => {
-            const found = leads.find((l) => l.id === leadId);
-            if (found) {
+        {/* In-App Reminder Centre Drawer (Phase 13) */}
+        {isReminderDrawerOpen && (
+          <ReminderCenterDrawer
+            onClose={() => setIsReminderDrawerOpen(false)}
+            onOpenCompany={(leadId) => {
+              const found = leads.find((l) => l.id === leadId);
+              if (found) {
+                setIsReminderDrawerOpen(false);
+                setSelectedLeadForDetail(found);
+              }
+            }}
+            onOpenPerson={(personId) => {
               setIsReminderDrawerOpen(false);
-              setSelectedLeadForDetail(found);
-            }
-          }}
-          onOpenPerson={(personId) => {
-            setIsReminderDrawerOpen(false);
-            setSelectedPersonIdForDrawer(personId);
-          }}
-          onNavigateTasks={() => {
-            setIsReminderDrawerOpen(false);
-            setCurrentTab('tasks');
-          }}
-          onOpenAiAgent={openAiAgent}
-        />
-      )}
+              setSelectedPersonIdForDrawer(personId);
+            }}
+            onNavigateTasks={() => {
+              setIsReminderDrawerOpen(false);
+              setCurrentTab('tasks');
+            }}
+            onOpenAiAgent={openAiAgent}
+          />
+        )}
 
-      {/* CSV Import Modal */}
-      {isImportModalOpen && (
-        <ImportModal
-          onClose={() => setIsImportModalOpen(false)}
-          onImportComplete={() => fetchAllData()}
-          existingLeads={leads}
-        />
-      )}
+        {/* CSV Import Modal */}
+        {isImportModalOpen && (
+          <ImportModal
+            onClose={() => setIsImportModalOpen(false)}
+            onImportComplete={() => fetchAllData()}
+            existingLeads={leads}
+          />
+        )}
+      </Suspense>
 
       {/* Owner Setup / Login / Change Password Modal */}
       <AuthModal

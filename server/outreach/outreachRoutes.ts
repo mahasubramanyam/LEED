@@ -43,6 +43,7 @@ import {
   saveOutreachWorkspaceState,
 } from './outreachStoreHelper.js';
 import { dispatchWorkflowEvent } from '../bi/workflowEngine.js';
+import { paginateArray, parsePaginationParams } from '../../shared/paginationUtils.js';
 
 export interface OutreachRouteDependencies {
   getFacade: () => { facade: CrmStorageFacade; isPg: boolean };
@@ -93,10 +94,40 @@ export function registerOutreachRoutes(
     }
   };
 
-  router.get('/outreach/overview', async (_req: Request, res: Response) => {
+  router.get('/outreach/overview', async (req: Request, res: Response) => {
     try {
       const { facade } = getFacade();
       const overview = await getOutreachWorkspaceOverview(facade, credentialManager);
+      const hasPagination =
+        req.query.page !== undefined || req.query.pageSize !== undefined || req.query.limit !== undefined;
+      if (hasPagination) {
+        const params = parsePaginationParams(req.query as Record<string, unknown>, {
+          defaultPageSize: 50,
+          maxPageSize: 200,
+        });
+        const statusFilter =
+          typeof req.query.status === 'string' && req.query.status.trim() && req.query.status !== 'all'
+            ? req.query.status.trim()
+            : undefined;
+        const filteredMessages = statusFilter
+          ? overview.workspace.messages.filter((m) => m.status === statusFilter)
+          : overview.workspace.messages;
+        const pagedMessages = paginateArray(filteredMessages, params);
+        const pagedCampaigns = paginateArray(overview.workspace.campaigns, params);
+        res.json({
+          ...overview,
+          workspace: {
+            ...overview.workspace,
+            campaigns: pagedCampaigns.items,
+            messages: pagedMessages.items,
+          },
+          pagination: {
+            campaigns: pagedCampaigns.pagination,
+            messages: pagedMessages.pagination,
+          },
+        });
+        return;
+      }
       res.json(overview);
     } catch (err: unknown) {
       res.status(500).json({ error: sanitizeApiError(err, 'Failed to load outreach workspace.') });

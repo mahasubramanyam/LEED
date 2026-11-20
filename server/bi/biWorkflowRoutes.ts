@@ -18,7 +18,8 @@ import {
 } from '../../shared/biWorkflowSpecs.js';
 import type { BiAnalyticsFilter } from '../../shared/biWorkflowTypes.js';
 import type { CrmStorageFacade } from '../crm/crmStoreHelper.js';
-import { buildBiAnalyticsDashboard } from './biAnalyticsService.js';
+import { buildBiAnalyticsDashboardCached } from './biAnalyticsService.js';
+import { paginateArray, parsePaginationParams } from '../../shared/paginationUtils.js';
 import {
   createWorkflowDefinition,
   decideQueuedWorkflowStep,
@@ -109,7 +110,13 @@ export function registerBiWorkflowRoutes(router: Router, deps: BiWorkflowRouteDe
     try {
       const { facade } = getFacade();
       const filters = parseBiFilterQuery(req.query as Record<string, unknown>);
-      const dashboard = await buildBiAnalyticsDashboard(facade, filters);
+      const ownerScope = req.owner?.id || req.owner?.email || 'owner';
+      const bypassCache = req.query.refresh === 'true' || req.query.nocache === 'true';
+      const { dashboard, cacheHit } = await buildBiAnalyticsDashboardCached(facade, filters, {
+        ownerScope,
+        bypassCache,
+      });
+      res.setHeader('X-LEED-Cache', cacheHit ? 'HIT' : 'MISS');
       res.json(dashboard);
     } catch (err: unknown) {
       res.status(500).json({ error: sanitizeApiError(err, 'Failed to compute Business Intelligence analytics.') });
@@ -169,6 +176,25 @@ export function registerBiWorkflowRoutes(router: Router, deps: BiWorkflowRouteDe
       const { facade } = getFacade();
       const filters = parseBiFilterQuery(req.query as Record<string, unknown>);
       const report = await generateBiReport(facade, reportType, filters);
+      const hasPagination =
+        req.query.page !== undefined || req.query.pageSize !== undefined || req.query.limit !== undefined;
+      if (hasPagination && Array.isArray(report.rows)) {
+        const params = parsePaginationParams(req.query as Record<string, unknown>, {
+          defaultPageSize: 50,
+          maxPageSize: 200,
+        });
+        const paged = paginateArray(report.rows, params);
+        res.json({
+          report: {
+            ...report,
+            rows: paged.items,
+            totalRows: paged.pagination.total,
+          },
+          pagination: paged.pagination,
+          reportCatalog: BI_REPORT_TYPES,
+        });
+        return;
+      }
       res.json({ report, reportCatalog: BI_REPORT_TYPES });
     } catch (err: unknown) {
       res.status(500).json({ error: sanitizeApiError(err, 'Failed to generate operational report.') });
@@ -275,12 +301,40 @@ export function registerBiWorkflowRoutes(router: Router, deps: BiWorkflowRouteDe
   // WORKFLOW AUTOMATION ENGINE (CRUD, DRY-RUN, TIMERS, RETRY, APPROVALS)
   // ============================================================================
 
-  router.get('/bi/workflows', async (_req: Request, res: Response) => {
+  router.get('/bi/workflows', async (req: Request, res: Response) => {
     try {
       const { facade } = getFacade();
       const workspace = await listWorkflowsWorkspace(facade);
+      const execStatus =
+        typeof req.query.execStatus === 'string' && req.query.execStatus.trim() && req.query.execStatus !== 'all'
+          ? req.query.execStatus.trim()
+          : undefined;
+      const filteredExecs = execStatus
+        ? workspace.executions.filter((e) => e.status === execStatus)
+        : workspace.executions;
+      const hasExecPagination =
+        req.query.execPage !== undefined ||
+        req.query.execLimit !== undefined ||
+        req.query.page !== undefined ||
+        req.query.limit !== undefined;
+      let executions = filteredExecs;
+      let executionsPagination: ReturnType<typeof paginateArray>['pagination'] | undefined;
+      if (hasExecPagination) {
+        const params = parsePaginationParams(
+          {
+            page: req.query.execPage ?? req.query.page,
+            limit: req.query.execLimit ?? req.query.limit,
+          },
+          { defaultPageSize: 25, maxPageSize: 200 }
+        );
+        const paged = paginateArray(filteredExecs, params);
+        executions = paged.items;
+        executionsPagination = paged.pagination;
+      }
       res.json({
         ...workspace,
+        executions,
+        ...(executionsPagination ? { executionsPagination } : {}),
         catalog: {
           triggers: WORKFLOW_TRIGGERS,
           conditionFields: WORKFLOW_CONDITION_FIELDS,

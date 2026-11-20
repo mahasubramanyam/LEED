@@ -22,6 +22,7 @@ import {
   Power,
   Play,
   Trash2,
+  Activity,
 } from 'lucide-react';
 import {
   AppSettings,
@@ -30,6 +31,7 @@ import {
   ConnectorEncryptionStatus,
 } from '../types.ts';
 import { EnrichmentProvidersSection } from './EnrichmentProvidersSection.tsx';
+import { PerformanceDiagnosticsPanel } from './PerformanceDiagnosticsPanel.tsx';
 
 interface OwnerProfile {
   id: string;
@@ -234,7 +236,7 @@ export function OwnerControlCentre({
   onLogout,
   apiFetch,
 }: OwnerControlCentreProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'sessions' | 'security' | 'settings' | 'audit' | 'connectors'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'performance' | 'sessions' | 'security' | 'settings' | 'audit' | 'connectors'>('overview');
 
   // Diagnostics State
   const [diagData, setDiagData] = useState<DiagnosticsData | null>(null);
@@ -802,6 +804,7 @@ export function OwnerControlCentre({
         <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 mt-6 pt-2 overflow-x-auto scrollbar-none">
           {[
             { id: 'overview', label: 'Database & Health', icon: Server },
+            { id: 'performance', label: 'Performance & Reliability', icon: Activity },
             { id: 'sessions', label: 'Active Sessions', icon: Laptop, badge: sessions.filter((s) => s.isActive).length },
             { id: 'security', label: 'Profile & Security', icon: Lock },
             { id: 'connectors', label: 'Connectors & Credentials', icon: Radio },
@@ -1337,6 +1340,11 @@ export function OwnerControlCentre({
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB 1B: PERFORMANCE & RELIABILITY DIAGNOSTICS (PHASE 17) */}
+      {activeTab === 'performance' && (
+        <PerformanceDiagnosticsPanel apiFetch={apiFetch} />
       )}
 
       {/* TAB 2: ACTIVE SESSIONS */}

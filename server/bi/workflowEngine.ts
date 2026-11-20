@@ -54,6 +54,7 @@ import {
   saveBiWorkflowWorkspaceState,
   withBiWorkflowLock,
 } from './biWorkflowStoreHelper.js';
+import { observabilityService } from '../perf/observabilityService.js';
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -1350,6 +1351,13 @@ export async function dispatchWorkflowEvent(
           };
         }
         ws.executions = [executionRecord, ...ws.executions];
+        observabilityService.recordWorkflowExecution({
+          workflowId: wf.id,
+          workflowName: wf.name,
+          status,
+          durationMs: executionRecord.durationMs,
+          stepCount: steps.length,
+        });
       }
 
       results.push(executionRecord);

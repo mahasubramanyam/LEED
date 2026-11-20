@@ -36,16 +36,227 @@ interface RateBucketState {
   resetAt?: number;
 }
 
+export type CircuitBreakerState = 'closed' | 'open' | 'half_open';
+
+interface CircuitRecord {
+  state: CircuitBreakerState;
+  consecutiveFailures: number;
+  openedAtMs?: number;
+  nextProbeAtMs?: number;
+  lastErrorCategory?: ConnectorErrorCategory;
+  openCount: number;
+}
+
+interface ConnectorRuntimeMetrics {
+  connectorId: string;
+  connectorName: string;
+  totalCalls: number;
+  successes: number;
+  failures: number;
+  timeouts: number;
+  rateLimited: number;
+  latencySamples: number[];
+  lastRunAt?: string;
+  lastErrorCategory?: ConnectorErrorCategory;
+}
+
+export interface ConnectorRuntimeHealthItem {
+  connectorId: string;
+  connectorName: string;
+  circuitState: CircuitBreakerState;
+  consecutiveFailures: number;
+  circuitOpens: number;
+  nextProbeAt?: string;
+  totalCalls: number;
+  successes: number;
+  failures: number;
+  failureRatePercent: number | null;
+  timeouts: number;
+  rateLimited: number;
+  avgLatencyMs: number | null;
+  p95LatencyMs: number | null;
+  lastErrorCategory?: ConnectorErrorCategory;
+  lastRunAt?: string;
+}
+
+const CIRCUIT_TRIP_CATEGORIES = new Set<ConnectorErrorCategory>([
+  'timeout',
+  'network_failure',
+  'provider_unavailable',
+]);
+
+const MAX_TRACKED_CONNECTORS = 100;
+const MAX_LATENCY_SAMPLES = 100;
+
 export class ConnectorExecutionEngine {
   private inflightConcurrency = new Map<string, number>();
   private rateBuckets = new Map<string, RateBucketState>();
   private inflightDedupes = new Map<string, Promise<unknown>>();
   private activeControllers = new Map<string, AbortController>();
+  private circuits = new Map<string, CircuitRecord>();
+  private runtimeMetrics = new Map<string, ConnectorRuntimeMetrics>();
+  private circuitFailureThreshold = 3;
+  private circuitCooldownMs = 30_000;
   private defaultRunRecorder?: RunRecorderFn;
   private credManager: CredentialManager;
 
   constructor(credManager: CredentialManager = defaultCredentialManager) {
     this.credManager = credManager;
+  }
+
+  public configureCircuitBreaker(options: { failureThreshold?: number; cooldownMs?: number }): void {
+    if (typeof options.failureThreshold === 'number' && options.failureThreshold >= 1) {
+      this.circuitFailureThreshold = Math.min(20, Math.round(options.failureThreshold));
+    }
+    if (typeof options.cooldownMs === 'number' && options.cooldownMs >= 50) {
+      this.circuitCooldownMs = Math.min(10 * 60_000, Math.round(options.cooldownMs));
+    }
+  }
+
+  public resetCircuitBreaker(connectorId?: string): void {
+    if (connectorId) {
+      this.circuits.delete(connectorId);
+    } else {
+      this.circuits.clear();
+    }
+  }
+
+  public getCircuitState(connectorId: string): CircuitBreakerState {
+    const rec = this.circuits.get(connectorId);
+    if (!rec) return 'closed';
+    if (rec.state === 'open' && rec.nextProbeAtMs && Date.now() >= rec.nextProbeAtMs) {
+      return 'half_open';
+    }
+    return rec.state;
+  }
+
+  private assertCircuitAllowsExecution(connector: IConnector): void {
+    const rec = this.circuits.get(connector.id);
+    if (!rec || rec.state === 'closed') return;
+    const now = Date.now();
+    if (rec.state === 'open') {
+      if (rec.nextProbeAtMs && now >= rec.nextProbeAtMs) {
+        rec.state = 'half_open';
+        return;
+      }
+      const remainingSec = Math.max(1, Math.ceil(((rec.nextProbeAtMs || now) - now) / 1000));
+      throw new ConnectorError({
+        category: 'provider_unavailable',
+        providerId: connector.id,
+        retryable: false,
+        message: `${connector.getMetadata().name} circuit breaker is open after ${rec.consecutiveFailures} consecutive failures. Retrying probe in ~${remainingSec}s.`,
+        remediationHint: 'Provider experienced repeated transient failures. Wait for cooldown probe or reset circuit in diagnostics.',
+      });
+    }
+  }
+
+  private recordCircuitOutcome(
+    connector: IConnector,
+    outcome: 'success' | 'failure',
+    durationMs: number,
+    errorCategory?: ConnectorErrorCategory
+  ): void {
+    // Prune bounded maps if size exceeds cap
+    if (this.runtimeMetrics.size > MAX_TRACKED_CONNECTORS) {
+      const oldest = this.runtimeMetrics.keys().next().value;
+      if (oldest) this.runtimeMetrics.delete(oldest);
+    }
+    if (this.rateBuckets.size > MAX_TRACKED_CONNECTORS) {
+      const oldest = this.rateBuckets.keys().next().value;
+      if (oldest) this.rateBuckets.delete(oldest);
+    }
+
+    let metrics = this.runtimeMetrics.get(connector.id);
+    if (!metrics) {
+      metrics = {
+        connectorId: connector.id,
+        connectorName: connector.getMetadata().name,
+        totalCalls: 0,
+        successes: 0,
+        failures: 0,
+        timeouts: 0,
+        rateLimited: 0,
+        latencySamples: [],
+      };
+      this.runtimeMetrics.set(connector.id, metrics);
+    }
+
+    metrics.totalCalls++;
+    metrics.lastRunAt = new Date().toISOString();
+    metrics.latencySamples.push(Math.max(0, durationMs));
+    if (metrics.latencySamples.length > MAX_LATENCY_SAMPLES) {
+      metrics.latencySamples.shift();
+    }
+
+    let circuit = this.circuits.get(connector.id);
+    if (!circuit) {
+      circuit = { state: 'closed', consecutiveFailures: 0, openCount: 0 };
+      this.circuits.set(connector.id, circuit);
+    }
+
+    if (outcome === 'success') {
+      metrics.successes++;
+      circuit.state = 'closed';
+      circuit.consecutiveFailures = 0;
+      circuit.openedAtMs = undefined;
+      circuit.nextProbeAtMs = undefined;
+      circuit.lastErrorCategory = undefined;
+      return;
+    }
+
+    metrics.failures++;
+    metrics.lastErrorCategory = errorCategory;
+    if (errorCategory === 'timeout') metrics.timeouts++;
+    if (errorCategory === 'rate_limited') metrics.rateLimited++;
+
+    // Only trip the circuit breaker on transient upstream/network/timeout failures (never config/auth/validation)
+    if (errorCategory && CIRCUIT_TRIP_CATEGORIES.has(errorCategory)) {
+      circuit.consecutiveFailures++;
+      circuit.lastErrorCategory = errorCategory;
+      if (circuit.state === 'half_open' || circuit.consecutiveFailures >= this.circuitFailureThreshold) {
+        circuit.state = 'open';
+        circuit.openedAtMs = Date.now();
+        circuit.nextProbeAtMs = circuit.openedAtMs + this.circuitCooldownMs;
+        circuit.openCount++;
+      }
+    }
+  }
+
+  public getRuntimeHealthSnapshot(): ConnectorRuntimeHealthItem[] {
+    const ids = new Set<string>([...this.runtimeMetrics.keys(), ...this.circuits.keys()]);
+    const items: ConnectorRuntimeHealthItem[] = [];
+    for (const id of ids) {
+      const m = this.runtimeMetrics.get(id);
+      const c = this.circuits.get(id);
+      const state = this.getCircuitState(id);
+      const samples = m ? [...m.latencySamples].sort((a, b) => a - b) : [];
+      const avg = samples.length > 0 ? Number((samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(1)) : null;
+      const p95 =
+        samples.length > 0
+          ? Number(samples[Math.min(samples.length - 1, Math.ceil(0.95 * samples.length) - 1)].toFixed(1))
+          : null;
+      const totalCalls = m?.totalCalls ?? 0;
+      const failures = m?.failures ?? 0;
+      items.push({
+        connectorId: id,
+        connectorName: m?.connectorName || id,
+        circuitState: state,
+        consecutiveFailures: c?.consecutiveFailures ?? 0,
+        circuitOpens: c?.openCount ?? 0,
+        nextProbeAt: state === 'open' && c?.nextProbeAtMs ? new Date(c.nextProbeAtMs).toISOString() : undefined,
+        totalCalls,
+        successes: m?.successes ?? 0,
+        failures,
+        failureRatePercent: totalCalls > 0 ? Number(((failures / totalCalls) * 100).toFixed(1)) : null,
+        timeouts: m?.timeouts ?? 0,
+        rateLimited: m?.rateLimited ?? 0,
+        avgLatencyMs: avg,
+        p95LatencyMs: p95,
+        lastErrorCategory: m?.lastErrorCategory ?? c?.lastErrorCategory,
+        lastRunAt: m?.lastRunAt,
+      });
+    }
+    return items.sort((a, b) => b.failures - a.failures || b.totalCalls - a.totalCalls);
   }
 
   public setDefaultRunRecorder(recorder: RunRecorderFn): void {
@@ -250,12 +461,15 @@ export class ConnectorExecutionEngine {
       });
     }
 
+    this.assertCircuitAllowsExecution(connector);
+
     const credResolved = await this.credManager.resolveCredentialForExecution(
       connector.id,
       meta.credentialRequirements
     );
     knownSecretsOut.push(...credResolved.knownSecrets);
 
+    const execStartMs = Date.now();
     let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (outerSignal?.aborted) {
@@ -285,6 +499,7 @@ export class ConnectorExecutionEngine {
         };
 
         const result = await fn(context);
+        this.recordCircuitOutcome(connector, 'success', Date.now() - execStartMs);
         return result;
       } catch (err: unknown) {
         lastError = err;
@@ -313,6 +528,7 @@ export class ConnectorExecutionEngine {
 
         const shouldRetry = classified.retryable && attempt < maxRetries && !outerSignal?.aborted;
         if (!shouldRetry) {
+          this.recordCircuitOutcome(connector, 'failure', Date.now() - execStartMs, classified.category);
           if (err instanceof ConnectorError) throw err;
           throw new ConnectorError({
             category: classified.category,

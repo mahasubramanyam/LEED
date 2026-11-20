@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3,
   Download,
@@ -113,23 +113,43 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
     return { countries, industries, sources };
   }, [leads]);
 
+  const analyticsAbortRef = useRef<AbortController | null>(null);
+
   const fetchAnalytics = useCallback(async (activeFilters: BiAnalyticsFilter) => {
+    if (analyticsAbortRef.current) {
+      analyticsAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    analyticsAbortRef.current = controller;
+
     setLoading(true);
     setError(null);
     try {
       const qs = buildFilterQuery(activeFilters);
-      const res = await apiFetch(`/api/bi/analytics${qs}`);
+      const res = await apiFetch(`/api/bi/analytics${qs}`, { signal: controller.signal });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
       const data: BiDashboardResponse = await res.json();
-      setDashboard(data);
+      if (!controller.signal.aborted) {
+        setDashboard(data);
+      }
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if ((err as { name?: string })?.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : 'Failed to load Business Intelligence analytics.');
     } finally {
-      setLoading(false);
+      if (analyticsAbortRef.current === controller) {
+        setLoading(false);
+      }
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      analyticsAbortRef.current?.abort();
+    };
   }, []);
 
   const fetchSavedReports = useCallback(async () => {

@@ -1249,13 +1249,28 @@ describe('LEED Phase 5 Global Business Discovery Engine Verification Suite', () 
                 stages.set(id, { id, name, color, display_order });
                 return { rows: [], rowCount: 1 };
               }
-              if (q.startsWith('SELECT l.*,')) {
+              if (q.startsWith('SELECT l.*,') || q.startsWith('SELECT l.* FROM leads l')) {
                 if (q.includes('WHERE l.id = $1')) {
                   const found = leads.get(params[0]);
                   return { rows: found ? [buildLeadRow(found)] : [], rowCount: found ? 1 : 0 };
                 }
                 const all = Array.from(leads.values()).map(buildLeadRow);
                 return { rows: all, rowCount: all.length };
+              }
+              if (q.includes('FROM lead_sources WHERE lead_id = ANY($1::text[])')) {
+                const ids = new Set<string>(params[0] || []);
+                const rows = Array.from(sources.values()).filter((s) => ids.has(s.lead_id));
+                return { rows, rowCount: rows.length };
+              }
+              if (q.includes('FROM lead_identifiers WHERE lead_id = ANY($1::text[])')) {
+                const ids = new Set<string>(params[0] || []);
+                const rows = Array.from(identifiers.values()).filter((i) => ids.has(i.lead_id));
+                return { rows, rowCount: rows.length };
+              }
+              if (q.includes('FROM activities WHERE lead_id = ANY($1::text[])')) {
+                const ids = new Set<string>(params[0] || []);
+                const rows = Array.from(activities.values()).filter((a) => ids.has(a.lead_id));
+                return { rows, rowCount: rows.length };
               }
               if (q.startsWith('INSERT INTO leads')) {
                 const stageId = params[28];

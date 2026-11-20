@@ -10,14 +10,17 @@ import type {
   BiWorkflowWorkspaceState,
 } from '../../shared/biWorkflowTypes.js';
 import type { CrmStorageFacade } from '../crm/crmStoreHelper.js';
+import { dbManager } from '../db/pool.js';
+import { leedCache } from '../perf/cacheManager.js';
 
 export const BI_WORKFLOW_SETTINGS_KEY = '__bi_workflows_v1';
 
-// In-process serialized write queue to prevent concurrent read-modify-write races
+// In-process serialized write queue + optional PostgreSQL advisory lock to prevent concurrent read-modify-write races
 let writeQueue: Promise<unknown> = Promise.resolve();
 
 export function withBiWorkflowLock<T>(fn: () => Promise<T>): Promise<T> {
-  const next = writeQueue.then(fn, fn);
+  const wrapped = () => dbManager.withAdvisoryLock('leed:bi_workflows_v1', fn);
+  const next = writeQueue.then(wrapped, wrapped);
   writeQueue = next.then(
     () => undefined,
     () => undefined
@@ -79,6 +82,7 @@ export async function saveBiWorkflowWorkspaceState(
       [BI_WORKFLOW_SETTINGS_KEY]: stamped as any,
     },
   });
+  leedCache.invalidateOnOutreachOrWorkflowWrite();
   return stamped;
 }
 
