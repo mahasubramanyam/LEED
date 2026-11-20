@@ -42,6 +42,7 @@ import {
   getOutreachWorkspaceState,
   saveOutreachWorkspaceState,
 } from './outreachStoreHelper.js';
+import { dispatchWorkflowEvent } from '../bi/workflowEngine.js';
 
 export interface OutreachRouteDependencies {
   getFacade: () => { facade: CrmStorageFacade; isPg: boolean };
@@ -411,6 +412,21 @@ export function registerOutreachRoutes(
         recommendedAction: typeof body.recommendedAction === 'string' ? body.recommendedAction : undefined,
         actor,
       });
+      if (result.scheduled && result.item?.triggerType === 'meeting_scheduled') {
+        try {
+          await dispatchWorkflowEvent(facade, {
+            triggerType: 'meeting_scheduled',
+            entityType: 'lead',
+            entityId: body.leadId,
+            leadId: body.leadId,
+            personId: typeof body.personId === 'string' ? body.personId : undefined,
+            eventKey: `meeting-scheduled-${result.item.id}`,
+            actor,
+          });
+        } catch {
+          // Non-blocking workflow hook
+        }
+      }
       res.status(result.scheduled ? 201 : 200).json(result);
     } catch (err: unknown) {
       res.status(400).json({ error: sanitizeApiError(err, 'Failed to schedule follow-up.') });
@@ -490,6 +506,36 @@ export function registerOutreachRoutes(
         classification: result.reply.classification,
         suppressionCreated: result.suppressionCreated,
       });
+      try {
+        await dispatchWorkflowEvent(facade, {
+          triggerType: 'outreach_reply_recorded',
+          entityType: 'reply',
+          entityId: result.reply.id,
+          leadId: result.reply.leadId,
+          personId: result.reply.personId,
+          reply: result.reply,
+          eventKey: `reply-recorded-${result.reply.id}`,
+          actor,
+        });
+        if (
+          ['positive', 'meeting_interest', 'information_request', 'referral'].includes(
+            result.reply.classification
+          )
+        ) {
+          await dispatchWorkflowEvent(facade, {
+            triggerType: 'positive_reply_received',
+            entityType: 'reply',
+            entityId: result.reply.id,
+            leadId: result.reply.leadId,
+            personId: result.reply.personId,
+            reply: result.reply,
+            eventKey: `positive-reply-${result.reply.id}`,
+            actor,
+          });
+        }
+      } catch {
+        // Non-blocking workflow hook
+      }
       res.status(201).json(result);
     } catch (err: unknown) {
       res.status(400).json({ error: sanitizeApiError(err, 'Failed to record reply.') });

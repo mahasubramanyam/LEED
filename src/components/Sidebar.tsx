@@ -17,6 +17,8 @@ import {
   ExternalLink,
   Globe2,
   FileSpreadsheet,
+  BarChart3,
+  Workflow,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -57,6 +59,8 @@ export function Sidebar({
     { id: 'outreach', label: 'Outreach & HITL', shortLabel: 'Outreach', icon: Send, count: pendingApprovalsCount },
     { id: 'dedupe', label: 'Dedupe Hub', shortLabel: 'Dedupe', icon: GitMerge },
     { id: 'ai-agent', label: 'AI Sales Agent', shortLabel: 'AI Agent', icon: Sparkles },
+    { id: 'bi-analytics', label: 'BI & Analytics', shortLabel: 'BI', icon: BarChart3 },
+    { id: 'workflows', label: 'Workflow Automation', shortLabel: 'Workflows', icon: Workflow },
     { id: 'connectors', label: 'Connectors Observability', shortLabel: 'Connectors', icon: Radio },
     { id: 'control-centre', label: 'Owner Control Centre', shortLabel: 'Admin', icon: ShieldCheck, isSpecial: true },
   ];

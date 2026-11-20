@@ -35,6 +35,7 @@ import {
 } from './aiStoreHelper.js';
 import { evaluateCompanyAgainstIcp } from './icpEngine.js';
 import { prioritizeCrmLeads } from './prioritizationEngine.js';
+import { buildBiAnalyticsDashboard } from '../bi/biAnalyticsService.js';
 
 export interface ControlledToolExecutionContext {
   facade: CrmStorageFacade;
@@ -307,6 +308,48 @@ export async function executeControlledAgentTool(
         const summaryData = await buildCrmDashboardSummary(ctx.facade);
         data = summaryData;
         summary = `Loaded live CRM dashboard (${summaryData.metrics.totalCompanies} companies, ${summaryData.metrics.activeOpportunities} open opportunities).`;
+        break;
+      }
+
+      case 'get_bi_analytics_summary': {
+        const bi = await buildBiAnalyticsDashboard(ctx.facade, {
+          country: typeof args.country === 'string' ? args.country.trim() : undefined,
+          industry: typeof args.industry === 'string' ? args.industry.trim() : undefined,
+          source: typeof args.source === 'string' ? args.source.trim() : undefined,
+          stageId: typeof args.stageId === 'string' ? args.stageId.trim() : undefined,
+          dateFrom: typeof args.dateFrom === 'string' ? args.dateFrom.trim() : undefined,
+          dateTo: typeof args.dateTo === 'string' ? args.dateTo.trim() : undefined,
+        });
+        data = {
+          generatedAt: bi.generatedAt,
+          filtersApplied: bi.filtersApplied,
+          leadIntelligence: {
+            totalCompanies: bi.leadIntelligence.totalCompanies,
+            totalDecisionMakers: bi.leadIntelligence.totalDecisionMakers,
+            verifiedLeads: bi.leadIntelligence.verifiedLeads,
+            unverifiedLeads: bi.leadIntelligence.unverifiedLeads,
+            verificationRatePercent: bi.leadIntelligence.verificationRatePercent,
+            averageQualityScore: bi.leadIntelligence.averageQualityScore,
+          },
+          salesPipeline: {
+            dataSource: bi.salesPipeline.dataSource,
+            openOpportunities: bi.salesPipeline.openOpportunities,
+            wonOpportunities: bi.salesPipeline.wonOpportunities,
+            lostOpportunities: bi.salesPipeline.lostOpportunities,
+            winRatePercent: bi.salesPipeline.winRatePercent,
+            salesVelocity: bi.salesPipeline.salesVelocity,
+          },
+          outreachTotals: bi.outreachAnalytics.totals,
+          outreachRates: bi.outreachAnalytics.rates,
+          activitySummary: {
+            tasksCompleted: bi.activityAnalytics.tasksCompleted,
+            tasksOverdue: bi.activityAnalytics.tasksOverdue,
+            interactionsTotal: bi.activityAnalytics.interactionsTotal,
+            decliningEngagementCount: bi.activityAnalytics.decliningEngagement.length,
+          },
+          workflowSummary: bi.workflowSummary,
+        };
+        summary = `Loaded BI analytics summary (${bi.leadIntelligence.totalCompanies} companies, ${bi.salesPipeline.openOpportunities} open opps, ${bi.outreachAnalytics.totals.messagesSentViaProvider} provider-confirmed sends, ${bi.workflowSummary.enabledWorkflows} enabled workflows).`;
         break;
       }
 

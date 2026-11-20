@@ -18,6 +18,8 @@ import { AuthModal } from './components/AuthModal.tsx';
 import { CountryMatrixView } from './components/CountryMatrixView.tsx';
 import { PersonRelationshipDrawer } from './components/PersonRelationshipDrawer.tsx';
 import { ReminderCenterDrawer } from './components/ReminderCenterDrawer.tsx';
+import { BiAnalyticsWorkspace } from './components/BiAnalyticsWorkspace.tsx';
+import { WorkflowAutomationWorkspace } from './components/WorkflowAutomationWorkspace.tsx';
 import {
   CanonicalLead,
   PipelineStage,
@@ -761,6 +763,24 @@ export default function App() {
                 <DedupeHub
                   onRefreshLeads={fetchAllData}
                   onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                />
+              )}
+
+              {currentTab === 'bi-analytics' && (
+                <BiAnalyticsWorkspace
+                  leads={leads}
+                  stages={stages}
+                  onSelectLead={(lead) => setSelectedLeadForDetail(lead)}
+                  onOpenPersonProfile={(personId) => setSelectedPersonIdForDrawer(personId)}
+                  onNavigateToWorkflows={() => setCurrentTab('workflows')}
+                />
+              )}
+
+              {currentTab === 'workflows' && (
+                <WorkflowAutomationWorkspace
+                  leads={leads}
+                  stages={stages}
+                  onDataMutated={fetchAllData}
                 />
               )}
 

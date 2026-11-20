@@ -127,6 +127,8 @@ import {
   runSalesAgentConversationTurn,
 } from './server/ai/salesIntelligenceService.js';
 import { registerOutreachRoutes } from './server/outreach/outreachRoutes.js';
+import { registerBiWorkflowRoutes } from './server/bi/biWorkflowRoutes.js';
+import { dispatchWorkflowEvent } from './server/bi/workflowEngine.js';
 import {
   requireOwnerAuth,
   setSessionCookie,
@@ -1465,6 +1467,20 @@ protectedApi.post('/leads', async (req: Request, res: Response) => {
     };
 
     const saved = isPg ? await postgresStorage.upsertLead(newLead) : storage.upsertLead(newLead);
+    try {
+      const wfFacade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+      await dispatchWorkflowEvent(wfFacade, {
+        triggerType: 'lead_created',
+        entityType: 'lead',
+        entityId: saved.id,
+        leadId: saved.id,
+        stageId: saved.pipelineStageId,
+        eventKey: `lead-created-${saved.id}`,
+        actor: req.owner?.fullName || req.owner?.email || 'Owner',
+      });
+    } catch {
+      // Non-blocking workflow hook
+    }
     res.status(201).json(saved);
   } catch (err: unknown) {
     const msg = sanitizeApiError(err, 'Failed to create lead.');
@@ -1501,6 +1517,20 @@ protectedApi.put('/leads/:id', async (req: Request, res: Response) => {
     };
 
     const updated = isPg ? await postgresStorage.upsertLead(merged) : storage.upsertLead(merged);
+    try {
+      const wfFacade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+      await dispatchWorkflowEvent(wfFacade, {
+        triggerType: 'lead_updated',
+        entityType: 'lead',
+        entityId: updated.id,
+        leadId: updated.id,
+        stageId: updated.pipelineStageId,
+        eventKey: `lead-updated-${updated.id}-${updated.updatedAt}`,
+        actor: req.owner?.fullName || req.owner?.email || 'Owner',
+      });
+    } catch {
+      // Non-blocking workflow hook
+    }
     res.json(updated);
   } catch (err: unknown) {
     const msg = sanitizeApiError(err, 'Failed to update lead.');
@@ -1806,6 +1836,21 @@ protectedApi.post('/leads/:id/verify-registry', async (req: Request, res: Respon
         },
         normalizeClientIp(req)
       );
+    }
+
+    try {
+      const wfFacade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+      await dispatchWorkflowEvent(wfFacade, {
+        triggerType: 'verification_status_changed',
+        entityType: 'lead',
+        entityId: savedLead.id,
+        leadId: savedLead.id,
+        verificationStatus: report.state,
+        eventKey: `verification-${savedLead.id}-${report.state}-${savedLead.updatedAt}`,
+        actor: req.owner?.fullName || req.owner?.email || 'Owner',
+      });
+    } catch {
+      // Non-blocking workflow hook
     }
 
     res.json({
@@ -2597,6 +2642,20 @@ protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
         res.status(404).json({ error: 'Lead not found' });
         return;
       }
+      try {
+        const wfFacade = createCrmStorageFacade(postgresStorage);
+        await dispatchWorkflowEvent(wfFacade, {
+          triggerType: 'lead_entered_stage',
+          entityType: 'lead',
+          entityId: updated.id,
+          leadId: updated.id,
+          stageId,
+          eventKey: `stage-entered-${updated.id}-${stageId}-${updated.updatedAt}`,
+          actor: author,
+        });
+      } catch {
+        // Non-blocking workflow hook
+      }
       res.json(updated);
     } else {
       const lead = storage.getLead(leadId);
@@ -2633,6 +2692,20 @@ protectedApi.put('/pipeline/move', async (req: Request, res: Response) => {
       });
 
       const updated = storage.upsertLead(lead);
+      try {
+        const wfFacade = createCrmStorageFacade(storage);
+        await dispatchWorkflowEvent(wfFacade, {
+          triggerType: 'lead_entered_stage',
+          entityType: 'lead',
+          entityId: updated.id,
+          leadId: updated.id,
+          stageId,
+          eventKey: `stage-entered-${updated.id}-${stageId}-${updated.updatedAt}`,
+          actor: author,
+        });
+      } catch {
+        // Non-blocking workflow hook
+      }
       res.json(updated);
     }
   } catch (err: unknown) {
@@ -4933,6 +5006,19 @@ protectedApi.post('/enrichment/company/:leadId/apply', async (req: Request, res:
     }
 
     const qualityAfter = evaluateCompanyDataQuality(savedLead);
+    try {
+      const wfFacade = createCrmStorageFacade(isPg ? postgresStorage : storage);
+      await dispatchWorkflowEvent(wfFacade, {
+        triggerType: 'enrichment_completed',
+        entityType: 'lead',
+        entityId: savedLead.id,
+        leadId: savedLead.id,
+        eventKey: `enrichment-applied-${savedLead.id}-${savedLead.updatedAt}`,
+        actor: actorEmail,
+      });
+    } catch {
+      // Non-blocking workflow hook
+    }
     res.json({ lead: savedLead, qualityAfter });
   } catch (err: unknown) {
     res.status(500).json({ error: sanitizeApiError(err, 'Failed to apply approved company enrichment.') });
@@ -5797,6 +5883,21 @@ protectedApi.post('/crm/opportunities', async (req: Request, res: Response) => {
         normalizeClientIp(req)
       );
     }
+    try {
+      await dispatchWorkflowEvent(facade, {
+        triggerType: 'opportunity_created',
+        entityType: 'opportunity',
+        entityId: created.id,
+        leadId: created.leadId,
+        personId: created.personId,
+        stageId: created.pipelineStageId,
+        opportunity: created,
+        eventKey: `opp-created-${created.id}`,
+        actor: req.owner?.fullName || req.owner?.email || 'Owner',
+      });
+    } catch {
+      // Non-blocking workflow hook
+    }
     res.status(201).json(created);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : '';
@@ -5831,6 +5932,24 @@ protectedApi.put('/crm/opportunities/:id', async (req: Request, res: Response) =
         { stage: updated.pipelineStageId, status: updated.status, estimatedValue: updated.estimatedValue },
         normalizeClientIp(req)
       );
+    }
+    if (updated.status === 'won' || updated.status === 'lost') {
+      try {
+        await dispatchWorkflowEvent(facade, {
+          triggerType: 'opportunity_closed',
+          entityType: 'opportunity',
+          entityId: updated.id,
+          leadId: updated.leadId,
+          personId: updated.personId,
+          stageId: updated.pipelineStageId,
+          opportunity: updated,
+          opportunityOutcome: updated.status,
+          eventKey: `opp-closed-${updated.id}-${updated.status}`,
+          actor: req.owner?.fullName || req.owner?.email || 'Owner',
+        });
+      } catch {
+        // Non-blocking workflow hook
+      }
     }
     res.json(updated);
   } catch (err: unknown) {
@@ -6490,6 +6609,27 @@ registerOutreachRoutes(protectedApi, {
   normalizeClientIp,
   recordPgAuditEvent: (eventType, actorEmail, resourceType, resourceId, metadata, ipAddress) =>
     postgresStorage.recordAuditEvent(eventType, actorEmail, resourceType, resourceId, metadata, ipAddress),
+});
+
+// ============================================================================
+// PHASE 16: BUSINESS INTELLIGENCE, ANALYTICS & WORKFLOW AUTOMATION (OWNER-ONLY)
+// ============================================================================
+registerBiWorkflowRoutes(protectedApi, {
+  getFacade: () => {
+    const { isPg } = checkStorageEngine();
+    return { facade: createCrmStorageFacade(isPg ? postgresStorage : storage), isPg };
+  },
+  aiRateLimitMiddleware: createRateLimitMiddleware(aiRateLimiter),
+  sanitizeApiError,
+  recordPgAuditEvent: (params) =>
+    postgresStorage.recordAuditEvent(
+      params.eventType,
+      params.actorEmail,
+      params.targetType,
+      params.targetId,
+      params.metadata || {},
+      params.ipAddress
+    ),
 });
 
 // Mount protected API router

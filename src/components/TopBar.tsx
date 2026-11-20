@@ -57,6 +57,8 @@ export function TopBar({
     outreach: { title: 'Campaigns & HITL Approval', subtitle: 'Human-in-the-Loop email outreach approval queue' },
     dedupe: { title: 'Deduplication Hub', subtitle: 'Cross-registry deduplication, deterministic matching, and rollback ledger' },
     'ai-agent': { title: 'AI Sales Agent', subtitle: 'Gemini-powered pitch generation, meeting briefings, and market analysis' },
+    'bi-analytics': { title: 'BI & Operational Analytics', subtitle: 'Lead intelligence, sales pipeline velocity, outreach provenance, reports & CSV export' },
+    workflows: { title: 'Workflow Automation', subtitle: 'Rule-based TRIGGER → CONDITIONS → ACTIONS engine with owner approval & safety controls' },
     connectors: { title: 'Connectors Observability', subtitle: 'Status, rate limits, latency, and attribution telemetry' },
     'control-centre': { title: 'Owner Control Centre', subtitle: 'Sole administrator settings, active sessions, and Neon PostgreSQL diagnostics' },
   };

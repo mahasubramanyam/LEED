@@ -250,6 +250,12 @@ export const AI_AUTHORIZED_TOOLS: AiAuthorizedToolSpec[] = [
     description: 'Inspect a public company URL via LEED SSRF-protected webInspector (blocks private/loopback IPs).',
   },
   {
+    name: 'get_bi_analytics_summary',
+    label: 'Get Business Intelligence Analytics Summary',
+    mode: 'read_only',
+    description: 'Read computed BI metrics across lead intelligence, sales pipeline, outreach provenance, activity, and workflow automation.',
+  },
+  {
     name: 'propose_crm_action',
     label: 'Propose CRM Action (Requires Owner Approval)',
     mode: 'proposal_only',
