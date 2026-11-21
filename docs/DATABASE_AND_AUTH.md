@@ -126,23 +126,22 @@ The application includes a dual-engine architecture:
 
 ---
 
-## 4. Standalone Deployment Guide (Outside AI Studio)
+## 6. Standalone Deployment Guide (Outside AI Studio)
 
-LEED is built using standard Node.js, Express, React, and PostgreSQL, and can be deployed anywhere with zero AI Studio dependencies:
+LEED is built using standard Node.js, Express, React, and PostgreSQL, and can be deployed independently with zero AI Studio runtime dependencies.
 
-### Option A: Docker / Container
-```dockerfile
-FROM node:22-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-ENV NODE_ENV=production
-ENV PORT=3000
-EXPOSE 3000
-CMD ["node", "dist-server/server.js"]
-```
+### Verified Runtime Entrypoint & Build Output
+- **Build command:** `npm run build` (`vite build`) — outputs the compiled frontend bundle to `dist/` (`dist/index.html`, `dist/theme-init.js`, and `dist/assets/*`).
+- **Production start command:** `npm run start` (`tsx server.ts`) — runs `server.ts` on `PORT` (default `3000`). When `NODE_ENV=production`, Express serves static assets from `dist/`, falls back non-API routes to `dist/index.html`, and returns JSON `404` for unmatched `/api/*` paths.
+- **Server bundle note:** `tsconfig.json` uses `"noEmit": true` and this repository does **not** compile a `dist-server/server.js` artifact. Because `npm run start` invokes `tsx server.ts` and `tsx` is currently listed in `devDependencies`, the runtime environment must retain `tsx` (do not run `--only=production` / `--omit=dev` unless `tsx` is moved to `dependencies` or a verified server compile step is added).
+
+### Option A: Container Deployment Notes (Unverified Reference — No `Dockerfile` Committed)
+No `Dockerfile` is currently committed to this repository, and container builds have not been verified in this environment. If you author a container image for staging or production, align it with the verified commands above rather than referencing `dist-server/server.js`:
+- Base image: `node:22-alpine` (or `node:22-slim`)
+- Install dependencies with `npm install` (note: no `package-lock.json` is committed, and `tsx` is required at runtime by `npm run start`)
+- Build frontend assets with `npm run build` (produces `dist/`)
+- Set `NODE_ENV=production` and `PORT=3000`, expose `3000`
+- Start command: `CMD ["npm", "run", "start"]`
 
 ### Option B: Node.js VPS / Linux Service
 ```bash
@@ -152,12 +151,12 @@ cd /opt/leed
 
 # 2. Configure environment
 cp .env.example .env
-nano .env # Set DATABASE_URL and secrets
+nano .env # Set NODE_ENV=production, DATABASE_URL (?sslmode=require), CONNECTOR_ENCRYPTION_KEY, and optional provider keys
 
-# 3. Install and build
+# 3. Install dependencies and build frontend bundle (dist/)
 npm install
 npm run build
 
-# 4. Start production service
-npm run start
+# 4. Start production service (runs tsx server.ts on PORT=3000)
+NODE_ENV=production npm run start
 ```
