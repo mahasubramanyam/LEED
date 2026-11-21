@@ -100,22 +100,22 @@ export function Sidebar({
   return (
     <aside
       aria-label="Primary navigation"
-      className={`relative flex flex-col bg-[#335C67] dark:bg-[#132227] border-r border-[#274952] dark:border-[#24383F] text-[#E6EFF1] transition-[width] duration-200 z-30 shrink-0 ${
+      className={`relative flex flex-col bg-[#0B1113] border-r border-[#3A4D50] text-[#F0F4F3] transition-[width] duration-200 z-30 shrink-0 ${
         collapsed ? 'w-16' : 'w-60'
       }`}
     >
       {/* Brand Header */}
-      <div className="h-16 flex items-center justify-between px-4 border-b border-white/10">
+      <div className="h-16 flex items-center justify-between px-4 border-b border-[#3A4D50]/80">
         {!collapsed ? (
           <button
             type="button"
             onClick={() => onSelectTab('dashboard')}
             className="flex items-center gap-2.5 text-left focus-visible:outline-none group"
           >
-            <span className="w-8 h-8 rounded-lg bg-[#540B0E] border border-[#E09F3E]/40 flex items-center justify-center text-[#FFF3B0] font-bold text-lg tracking-tight shrink-0">
+            <span className="w-8 h-8 rounded-lg bg-[#192629] border border-[#C49A52]/60 flex items-center justify-center text-[#DFB76D] font-extrabold text-base tracking-tight shrink-0">
               L
             </span>
-            <span className="text-xl font-semibold tracking-wide text-white whitespace-nowrap">
+            <span className="text-lg font-extrabold tracking-tight text-[#F2F6F5] whitespace-nowrap">
               LEED
             </span>
           </button>
@@ -124,7 +124,7 @@ export function Sidebar({
             type="button"
             onClick={() => onSelectTab('dashboard')}
             title="LEED Dashboard"
-            className="mx-auto w-8 h-8 rounded-lg bg-[#540B0E] border border-[#E09F3E]/40 flex items-center justify-center text-[#FFF3B0] font-bold text-lg"
+            className="mx-auto w-8 h-8 rounded-lg bg-[#192629] border border-[#C49A52]/60 flex items-center justify-center text-[#DFB76D] font-extrabold text-base"
           >
             L
           </button>
@@ -135,9 +135,9 @@ export function Sidebar({
           onClick={onToggleCollapsed}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className={`p-1.5 rounded-lg text-[#C9DCE1] hover:text-[#FFF3B0] hover:bg-white/10 transition-colors ${
+          className={`p-1.5 rounded-lg text-[#B8C7C4] hover:text-[#F2F6F5] hover:bg-[#243638] transition-colors ${
             collapsed
-              ? 'hidden sm:flex items-center justify-center absolute -right-3 top-5 bg-[#25454E] dark:bg-[#1A2D33] border border-white/15 shadow-sm'
+              ? 'hidden sm:flex items-center justify-center absolute -right-3 top-5 bg-[#192629] border border-[#3E5256] shadow-sm'
               : ''
           }`}
         >
@@ -150,7 +150,7 @@ export function Sidebar({
         {navGroups.map((group) => (
           <div key={group.heading} className="space-y-0.5">
             {!collapsed && (
-              <div className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-[#B6CED4]/80">
+              <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-[#9EB2AE]">
                 {group.heading}
               </div>
             )}
@@ -164,21 +164,21 @@ export function Sidebar({
                   onClick={() => onSelectTab(item.id)}
                   aria-current={isActive ? 'page' : undefined}
                   title={collapsed ? item.label : undefined}
-                  className={`relative w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                  className={`relative w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors whitespace-nowrap ${
                     isActive
-                      ? 'bg-[#25454E] dark:bg-[#335C67]/45 text-[#FFF3B0] font-semibold'
-                      : 'text-[#DCE8EB]/85 hover:text-white hover:bg-white/8'
+                      ? 'bg-[#335C67]/40 text-[#F4F8F7] font-bold'
+                      : 'text-[#C2D0CD] font-semibold hover:text-[#F4F8F7] hover:bg-[#243638]/85'
                   } ${collapsed ? 'justify-center px-0' : ''}`}
                 >
                   {isActive && !collapsed && (
                     <span
                       aria-hidden="true"
-                      className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r bg-[#E09F3E]"
+                      className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r bg-[#DFB76D]"
                     />
                   )}
                   <Icon
                     className={`w-4 h-4 shrink-0 ${
-                      isActive ? 'text-[#E09F3E]' : 'text-[#B6CED4]'
+                      isActive ? 'text-[#DFB76D]' : 'text-[#A9BBB8]'
                     }`}
                   />
                   {!collapsed && (
@@ -186,8 +186,8 @@ export function Sidebar({
                       <span className="flex-1 text-left truncate">{item.label}</span>
                       {item.count !== undefined && item.count > 0 && (
                         <span
-                          className={`text-xs font-mono tabular-nums ${
-                            isActive ? 'text-[#FFF3B0]' : 'text-[#B6CED4]/80'
+                          className={`text-xs font-bold font-mono tabular-nums ${
+                            isActive ? 'text-[#DFB76D]' : 'text-[#B8C7C4]'
                           }`}
                         >
                           {item.count}
@@ -203,18 +203,18 @@ export function Sidebar({
       </nav>
 
       {/* Owner Footer */}
-      <div className="p-3 border-t border-white/10 bg-[#284952]/70 dark:bg-[#0F181B]/70">
+      <div className="p-3 border-t border-[#3A4D50]/80 bg-[#0B1113]">
         {!collapsed ? (
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-[#540B0E] border border-[#E09F3E]/40 text-[#FFF3B0] flex items-center justify-center font-semibold text-sm shrink-0">
+              <div className="w-8 h-8 rounded-full bg-[#192629] border border-[#C49A52]/60 text-[#DFB76D] flex items-center justify-center font-bold text-sm shrink-0">
                 {ownerName ? ownerName.charAt(0).toUpperCase() : 'O'}
               </div>
               <div className="min-w-0">
-                <span className="text-sm font-semibold text-white block truncate leading-tight">
+                <span className="text-sm font-bold text-[#F2F6F5] block truncate leading-tight">
                   {ownerName || 'Owner'}
                 </span>
-                <span className="text-[11px] text-[#C9DCE1]/80 block truncate">
+                <span className="text-[11px] font-medium text-[#B8C7C4] block truncate">
                   {ownerEmail}
                 </span>
               </div>
@@ -222,7 +222,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={onLogout}
-              className="p-1.5 text-[#C9DCE1] hover:text-[#FFF3B0] hover:bg-white/10 rounded-lg transition-colors shrink-0"
+              className="p-1.5 text-[#B8C7C4] hover:text-[#DFB76D] hover:bg-[#243638] rounded-lg transition-colors shrink-0"
               title="Sign out"
               aria-label="Sign out"
             >
@@ -233,14 +233,14 @@ export function Sidebar({
           <div className="flex flex-col items-center gap-2">
             <div
               title={ownerName || 'Owner'}
-              className="w-8 h-8 rounded-full bg-[#540B0E] border border-[#E09F3E]/40 text-[#FFF3B0] flex items-center justify-center font-semibold text-sm"
+              className="w-8 h-8 rounded-full bg-[#192629] border border-[#C49A52]/60 text-[#DFB76D] flex items-center justify-center font-bold text-sm"
             >
               {ownerName ? ownerName.charAt(0).toUpperCase() : 'O'}
             </div>
             <button
               type="button"
               onClick={onLogout}
-              className="p-1.5 text-[#C9DCE1] hover:text-[#FFF3B0] hover:bg-white/10 rounded-lg transition-colors"
+              className="p-1.5 text-[#B8C7C4] hover:text-[#DFB76D] hover:bg-[#243638] rounded-lg transition-colors"
               title="Sign out"
               aria-label="Sign out"
             >

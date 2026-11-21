@@ -961,7 +961,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
           <div className="flex items-center gap-2.5 shrink-0">
             <span
               className={`text-xs font-semibold tabular-nums flex items-center gap-1 ${
-                lead.confidenceScore >= 80 ? 'text-[#8AB0BA]' : 'text-[#E09F3E]'
+                lead.confidenceScore >= 80 ? 'text-[#6392A0]' : 'text-[#C49A52]'
               }`}
             >
               <ShieldCheck className="w-3.5 h-3.5" />

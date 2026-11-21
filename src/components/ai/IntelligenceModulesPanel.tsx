@@ -516,14 +516,14 @@ export const IntelligenceModulesPanel: React.FC<IntelligenceModulesPanelProps> =
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] uppercase tracking-wider text-slate-500">
-                    <th className="py-2 pr-3 font-medium">Company</th>
-                    <th className="py-2 px-3 font-medium text-right">Priority</th>
-                    <th className="py-2 px-3 font-medium text-right">ICP</th>
-                    <th className="py-2 px-3 font-medium text-right">DQ</th>
-                    <th className="py-2 px-3 font-medium text-right">Contacts</th>
-                    <th className="py-2 px-3 font-medium">Recommended Next Action</th>
-                    <th className="py-2 pl-3 font-medium text-right">Actions</th>
+                  <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE]">
+                    <th className="py-2 pr-3 font-bold">Company</th>
+                    <th className="py-2 px-3 font-bold text-right">Priority</th>
+                    <th className="py-2 px-3 font-bold text-right">ICP</th>
+                    <th className="py-2 px-3 font-bold text-right">DQ</th>
+                    <th className="py-2 px-3 font-bold text-right">Contacts</th>
+                    <th className="py-2 px-3 font-bold">Recommended Next Action</th>
+                    <th className="py-2 pl-3 font-bold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">

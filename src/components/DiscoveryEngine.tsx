@@ -976,9 +976,9 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
               <button
                 type="button"
                 onClick={() => setShowUrlInspector(false)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-[#FFF9D8] dark:bg-[#232A24] border border-[#E09F3E]/50 text-[#540B0E] dark:text-[#FFF3B0] transition"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-[#243638] border border-[#C49A52]/60 text-[#83632E] dark:text-[#C49A52] transition"
               >
-                <ShieldCheck className="w-3.5 h-3.5 text-[#E09F3E]" />
+                <ShieldCheck className="w-3.5 h-3.5 text-[#C49A52]" />
                 <span>URL Inspector Open</span>
               </button>
             )}
@@ -1018,8 +1018,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                     onClick={() => handleCountryChange(c.code)}
                     className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md font-medium transition border ${
                       isSelected
-                        ? 'bg-[#335C67] border-[#335C67] text-white'
-                        : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-[#E09F3E]/60 hover:bg-[#FFF9D8]/50 dark:hover:bg-slate-800'
+                        ? 'bg-[#335C67] border-[#C49A52]/50 text-[#D8DEDC]'
+                        : 'bg-slate-50 dark:bg-[#101719] border-slate-200 dark:border-[#344447] text-slate-700 dark:text-[#A1ADAA] hover:border-[#C49A52]/60 hover:bg-slate-100 dark:hover:bg-[#243638] dark:hover:text-[#D8DEDC]'
                     }`}
                   >
                     <span>{c.flag}</span>
@@ -1558,13 +1558,13 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
+                <thead className="border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-[#D5E0DE]">
                   <tr>
-                    <th className="py-2 pr-3 font-medium">Provider</th>
-                    <th className="py-2 pr-3 font-medium">Availability</th>
-                    <th className="py-2 pr-3 font-medium">Authentication &amp; Quota</th>
-                    <th className="py-2 pr-3 font-medium">Coverage &amp; Rate Limits</th>
-                    <th className="py-2 font-medium">Commercial &amp; Status Note</th>
+                    <th className="py-2 pr-3 font-bold">Provider</th>
+                    <th className="py-2 pr-3 font-bold">Availability</th>
+                    <th className="py-2 pr-3 font-bold">Authentication &amp; Quota</th>
+                    <th className="py-2 pr-3 font-bold">Coverage &amp; Rate Limits</th>
+                    <th className="py-2 font-bold">Commercial &amp; Status Note</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1719,16 +1719,16 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
+                <thead className="border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-[#D5E0DE]">
                   <tr>
-                    <th className="py-1.5 pr-3 font-medium">Connector</th>
-                    <th className="py-1.5 pr-3 font-medium">Operation</th>
-                    <th className="py-1.5 pr-3 font-medium">Query</th>
-                    <th className="py-1.5 pr-3 font-medium">Status</th>
-                    <th className="py-1.5 pr-3 font-medium text-right">Records</th>
-                    <th className="py-1.5 pr-3 font-medium text-right">Duration</th>
-                    <th className="py-1.5 pr-3 font-medium">Timestamp</th>
-                    <th className="py-1.5 font-medium text-right">Action</th>
+                    <th className="py-1.5 pr-3 font-bold">Connector</th>
+                    <th className="py-1.5 pr-3 font-bold">Operation</th>
+                    <th className="py-1.5 pr-3 font-bold">Query</th>
+                    <th className="py-1.5 pr-3 font-bold">Status</th>
+                    <th className="py-1.5 pr-3 font-bold text-right">Records</th>
+                    <th className="py-1.5 pr-3 font-bold text-right">Duration</th>
+                    <th className="py-1.5 pr-3 font-bold">Timestamp</th>
+                    <th className="py-1.5 font-bold text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -2023,10 +2023,10 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
+              <thead className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-[#D5E0DE]">
                 <tr>
                   <th className="py-2.5 px-3 w-8">
-                    <button type="button" onClick={toggleSelectPage} className="text-slate-500 hover:text-blue-600">
+                    <button type="button" onClick={toggleSelectPage} className="text-slate-600 dark:text-slate-300 hover:text-blue-600">
                       {results.every((r) => selectedIds.has(r.id)) ? (
                         <CheckSquare className="w-4 h-4 text-blue-600" />
                       ) : (
@@ -2034,13 +2034,13 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                       )}
                     </button>
                   </th>
-                  <th className="py-2.5 px-3 font-medium">Business</th>
-                  <th className="py-2.5 px-3 font-medium">Location</th>
-                  <th className="py-2.5 px-3 font-medium">Identifier &amp; Provenance</th>
-                  <th className="py-2.5 px-3 font-medium">Industry</th>
-                  <th className="py-2.5 px-3 font-medium text-right">Confidence</th>
-                  <th className="py-2.5 px-3 font-medium">Status</th>
-                  <th className="py-2.5 px-3 font-medium text-right">Actions</th>
+                  <th className="py-2.5 px-3 font-bold">Business</th>
+                  <th className="py-2.5 px-3 font-bold">Location</th>
+                  <th className="py-2.5 px-3 font-bold">Identifier &amp; Provenance</th>
+                  <th className="py-2.5 px-3 font-bold">Industry</th>
+                  <th className="py-2.5 px-3 font-bold text-right">Confidence</th>
+                  <th className="py-2.5 px-3 font-bold">Status</th>
+                  <th className="py-2.5 px-3 font-bold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">

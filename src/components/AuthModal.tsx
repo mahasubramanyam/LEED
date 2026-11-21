@@ -114,38 +114,38 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0F181B]/75 backdrop-blur-xs">
-      <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl p-6 sm:p-8 relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0B1113]/80 backdrop-blur-xs">
+      <div className="w-full max-w-md bg-white dark:bg-[#192629] border border-slate-300 dark:border-[#3E5256] rounded-xl shadow-2xl p-6 sm:p-8 relative">
         {mode === 'change_password' && onClose && (
           <button
             type="button"
             onClick={onClose}
             aria-label="Close modal"
-            className="absolute top-4 right-4 p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+            className="absolute top-4 right-4 p-1 rounded-lg text-slate-500 dark:text-[#B8C7C4] hover:text-slate-950 dark:hover:text-[#F2F6F5] transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         )}
 
         <div className="text-center mb-6">
-          <div className="w-11 h-11 mx-auto rounded-xl bg-[#335C67] flex items-center justify-center mb-3">
+          <div className="w-11 h-11 mx-auto rounded-xl bg-[#335C67] border border-[#C49A52]/50 flex items-center justify-center mb-3">
             {mode === 'setup' ? (
-              <ShieldCheck className="w-5 h-5 text-[#FFF3B0]" />
+              <ShieldCheck className="w-5 h-5 text-[#DFB76D]" />
             ) : mode === 'change_password' ? (
-              <KeyRound className="w-5 h-5 text-[#FFF3B0]" />
+              <KeyRound className="w-5 h-5 text-[#DFB76D]" />
             ) : (
-              <Lock className="w-5 h-5 text-[#FFF3B0]" />
+              <Lock className="w-5 h-5 text-[#DFB76D]" />
             )}
           </div>
 
-          <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50 tracking-tight">
+          <h2 className="text-2xl font-extrabold text-slate-950 dark:text-[#F2F6F5] tracking-tight">
             {mode === 'setup'
               ? 'Create Owner Account'
               : mode === 'change_password'
               ? 'Change Password'
               : 'Sign In to LEED'}
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-xs font-medium text-slate-600 dark:text-[#B8C7C4] mt-1">
             {mode === 'setup'
               ? 'Set your private credentials to lock this single-owner workspace.'
               : mode === 'change_password'
@@ -155,15 +155,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
         </div>
 
         {error && (
-          <div className="mb-4 p-3 rounded-lg bg-[#FDF3F3] dark:bg-[#540B0E]/40 border border-[#9E2A2B]/40 text-[#540B0E] dark:text-[#F9E3E3] text-xs flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 text-[#9E2A2B] dark:text-[#E09D9E] shrink-0 mt-0.5" />
+          <div className="mb-4 p-3 rounded-lg bg-[#F9EFEF] dark:bg-[#280D0F]/90 border border-[#8F3438]/70 text-[#662226] dark:text-[#F0C9CB] text-xs font-medium flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-[#8F3438] dark:text-[#E58E92] shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
         )}
 
         {successMsg && (
-          <div className="mb-4 p-3 rounded-lg bg-[#EFF5F4] dark:bg-[#162E2A]/60 border border-[#335C67]/40 text-[#1F3940] dark:text-[#B0CFC9] text-xs flex items-start gap-2">
-            <CheckCircle2 className="w-4 h-4 text-[#335C67] dark:text-[#8AB0BA] shrink-0 mt-0.5" />
+          <div className="mb-4 p-3 rounded-lg bg-[#EDF4F2] dark:bg-[#243638] border border-[#335C67] text-[#14282D] dark:text-[#F0F4F3] text-xs font-medium flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 text-[#335C67] dark:text-[#86BCC9] shrink-0 mt-0.5" />
             <span>{successMsg}</span>
           </div>
         )}
@@ -171,18 +171,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'setup' && (
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-slate-800 dark:text-[#E6EEEC] mb-1">
                 Full Name
               </label>
               <div className="relative">
-                <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <User className="w-4 h-4 text-slate-500 dark:text-[#B8C7C4] absolute left-3 top-2.5" />
                 <input
                   type="text"
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Your name"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-[#101719] border border-slate-300 dark:border-[#3E5256] rounded-lg text-sm font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:outline-none focus:border-[#C49A52]"
                 />
               </div>
             </div>
@@ -190,18 +190,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
 
           {mode !== 'change_password' && (
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-slate-800 dark:text-[#E6EEEC] mb-1">
                 Email
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <Mail className="w-4 h-4 text-slate-500 dark:text-[#B8C7C4] absolute left-3 top-2.5" />
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="owner@domain.com"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-[#101719] border border-slate-300 dark:border-[#3E5256] rounded-lg text-sm font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:outline-none focus:border-[#C49A52]"
                 />
               </div>
             </div>
@@ -209,40 +209,40 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
 
           {mode === 'change_password' && (
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-slate-800 dark:text-[#E6EEEC] mb-1">
                 Current Password
               </label>
               <div className="relative">
-                <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <KeyRound className="w-4 h-4 text-slate-500 dark:text-[#B8C7C4] absolute left-3 top-2.5" />
                 <input
                   type="password"
                   required
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-[#101719] border border-slate-300 dark:border-[#3E5256] rounded-lg text-sm font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:outline-none focus:border-[#C49A52]"
                 />
               </div>
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+            <label className="block text-xs font-semibold text-slate-800 dark:text-[#E6EEEC] mb-1">
               {mode === 'change_password' ? 'New Password' : 'Password'}
             </label>
             <div className="relative">
-              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <Lock className="w-4 h-4 text-slate-500 dark:text-[#B8C7C4] absolute left-3 top-2.5" />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-[#101719] border border-slate-300 dark:border-[#3E5256] rounded-lg text-sm font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:outline-none focus:border-[#C49A52]"
               />
             </div>
             {password && password.length < 8 && (
-              <p className="text-xs text-[#9E2A2B] dark:text-[#E09D9E] mt-1">
+              <p className="text-xs font-medium text-[#8F3438] dark:text-[#E58E92] mt-1">
                 Minimum 8 characters required
               </p>
             )}
@@ -250,18 +250,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
 
           {(mode === 'setup' || mode === 'change_password') && (
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-slate-800 dark:text-[#E6EEEC] mb-1">
                 Confirm Password
               </label>
               <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <Lock className="w-4 h-4 text-slate-500 dark:text-[#B8C7C4] absolute left-3 top-2.5" />
                 <input
                   type="password"
                   required
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-[#101719] border border-slate-300 dark:border-[#3E5256] rounded-lg text-sm font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:outline-none focus:border-[#C49A52]"
                 />
               </div>
             </div>
@@ -270,7 +270,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 px-4 bg-[#335C67] hover:bg-[#25454E] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 mt-2"
+            className="w-full py-2.5 px-4 bg-[#335C67] hover:bg-[#3D6C79] disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center justify-center gap-2 mt-2"
           >
             {isLoading ? (
               <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

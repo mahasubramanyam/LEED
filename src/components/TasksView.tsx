@@ -193,7 +193,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const leadOpps = opportunities.filter((o) => !selectedLeadId || o.leadId === selectedLeadId);
 
   const inputClass =
-    'w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-[#E09F3E]';
+    'w-full bg-slate-50 dark:bg-[#101719] border border-slate-300 dark:border-[#3E5256] text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] text-sm font-medium rounded-lg px-3 py-1.5 focus:outline-none focus:border-[#C49A52]';
 
   return (
     <div className="space-y-5">
@@ -206,16 +206,16 @@ export const TasksView: React.FC<TasksViewProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenAiAgent({ tab: 'briefing' })}
-                className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap"
+                className="px-3 py-1.5 border border-slate-300 dark:border-[#3E5256] bg-white dark:bg-[#192629] text-slate-800 dark:text-[#F0F4F3] hover:bg-slate-50 dark:hover:bg-[#243638] text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap"
               >
-                <Bot className="w-3.5 h-3.5 text-[#335C67] dark:text-[#E09F3E]" />
+                <Bot className="w-3.5 h-3.5 text-[#335C67] dark:text-[#DFB76D]" />
                 <span>AI Briefing</span>
               </button>
             )}
             <button
               type="button"
               onClick={() => setIsCreating((v) => !v)}
-              className="px-3.5 py-1.5 bg-[#335C67] hover:bg-[#25454E] text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              className="px-3.5 py-1.5 bg-[#335C67] hover:bg-[#3D6C79] text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Task</span>
@@ -244,7 +244,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
       {isCreating && (
         <SurfaceCard>
           <form onSubmit={handleCreate} className="space-y-4">
-            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-50">
+            <h3 className="text-base font-bold text-slate-950 dark:text-[#F2F6F5]">
               New Task
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
@@ -407,7 +407,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 bg-[#335C67] hover:bg-[#25454E] text-white text-xs font-semibold rounded-lg"
+                className="px-4 py-1.5 bg-[#335C67] hover:bg-[#3D6C79] text-white text-xs font-bold rounded-lg"
               >
                 Save Task
               </button>
@@ -434,7 +434,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             return (
               <div
                 key={task.id}
-                className={`px-5 py-3.5 hover:bg-[#FFF9D8]/40 dark:hover:bg-slate-800/40 transition-colors ${
+                className={`px-5 py-3.5 hover:bg-slate-100/70 dark:hover:bg-[#243638] transition-colors ${
                   task.completed ? 'opacity-65' : ''
                 }`}
               >
@@ -446,8 +446,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       aria-label={task.completed ? 'Mark pending' : 'Mark completed'}
                       className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center transition-colors shrink-0 ${
                         task.completed
-                          ? 'bg-[#335C67] border-[#335C67] text-white'
-                          : 'border-slate-300 dark:border-slate-600 hover:border-[#E09F3E]'
+                          ? 'bg-[#335C67] border-[#335C67] text-[#D8DEDC]'
+                          : 'border-slate-300 dark:border-[#344447] hover:border-[#C49A52]'
                       }`}
                     >
                       {task.completed && <Check className="w-3.5 h-3.5" />}
@@ -457,24 +457,24 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       <div
                         className={`text-sm font-semibold ${
                           task.completed
-                            ? 'line-through text-slate-400'
-                            : 'text-slate-900 dark:text-slate-100'
+                            ? 'line-through text-slate-500 dark:text-[#9FB2AF]'
+                            : 'text-slate-950 dark:text-[#F2F6F5]'
                         }`}
                       >
                         {task.title}
                       </div>
                       {task.description && (
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        <p className="text-xs font-medium text-slate-600 dark:text-[#B8C7C4] mt-0.5">
                           {task.description}
                         </p>
                       )}
 
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-slate-600 dark:text-[#B8C7C4] mt-1">
                         {lead && (
                           <button
                             type="button"
                             onClick={() => onSelectLead(lead)}
-                            className="text-[#335C67] dark:text-[#8AB0BA] font-semibold hover:underline"
+                            className="text-[#25464F] dark:text-[#86BCC9] font-bold hover:underline"
                           >
                             {lead.companyName}
                           </button>
@@ -485,7 +485,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                             <button
                               type="button"
                               onClick={() => onOpenPersonProfile?.(person.id)}
-                              className="hover:underline text-slate-700 dark:text-slate-300"
+                              className="hover:underline font-semibold text-slate-800 dark:text-[#F0F4F3]"
                             >
                               {person.fullName}
                             </button>
@@ -500,7 +500,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         {(lead || person || opp) && <span>·</span>}
                         <span
                           className={`inline-flex items-center gap-1 tabular-nums ${
-                            isOverdue ? 'text-[#9E2A2B] dark:text-[#E09D9E] font-semibold' : ''
+                            isOverdue ? 'text-[#8F3438] dark:text-[#E58E92] font-bold' : ''
                           }`}
                         >
                           <Calendar className="w-3 h-3" />
@@ -511,9 +511,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         <span
                           className={
                             task.priority === 'high'
-                              ? 'text-[#9E2A2B] dark:text-[#E09D9E] font-semibold'
+                              ? 'text-[#8F3438] dark:text-[#E58E92] font-bold'
                               : task.priority === 'medium'
-                              ? 'text-[#956219] dark:text-[#E09F3E]'
+                              ? 'text-[#7A5924] dark:text-[#DFB76D] font-semibold'
                               : ''
                           }
                         >
@@ -522,7 +522,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         {task.recurrence && task.recurrence.frequency !== 'none' && (
                           <>
                             <span>·</span>
-                            <span className="inline-flex items-center gap-1 text-[#335C67] dark:text-[#8AB0BA]">
+                            <span className="inline-flex items-center gap-1 text-[#335C67] dark:text-[#6392A0]">
                               <Repeat className="w-3 h-3" />
                               {task.recurrence.frequency}
                             </span>
@@ -531,7 +531,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       </div>
 
                       {task.outcome && editingOutcomeId !== task.id && (
-                        <div className="text-xs text-[#335C67] dark:text-[#B0CFC9] mt-1">
+                        <div className="text-xs text-[#335C67] dark:text-[#82AFA7] mt-1">
                           Outcome: {task.outcome}
                         </div>
                       )}
@@ -543,19 +543,19 @@ export const TasksView: React.FC<TasksViewProps> = ({
                             value={outcomeDraft}
                             onChange={(e) => setOutcomeDraft(e.target.value)}
                             placeholder="Record outcome..."
-                            className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1 text-xs text-slate-900 dark:text-white"
+                            className="flex-1 bg-slate-50 dark:bg-[#101719] border border-slate-200 dark:border-[#344447] rounded-lg px-3 py-1 text-xs text-slate-900 dark:text-[#D8DEDC] focus:outline-none focus:border-[#C49A52]"
                           />
                           <button
                             type="button"
                             onClick={() => handleSaveOutcome(task)}
-                            className="px-2.5 py-1 bg-[#335C67] text-white rounded-lg text-xs inline-flex items-center gap-1"
+                            className="px-2.5 py-1 bg-[#335C67] hover:bg-[#3D6C79] text-[#D8DEDC] rounded-lg text-xs inline-flex items-center gap-1"
                           >
                             <Save className="w-3 h-3" /> Save
                           </button>
                           <button
                             type="button"
                             onClick={() => setEditingOutcomeId(null)}
-                            className="px-2.5 py-1 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-xs"
+                            className="px-2.5 py-1 border border-slate-200 dark:border-[#344447] text-slate-600 dark:text-[#A1ADAA] rounded-lg text-xs"
                           >
                             Cancel
                           </button>
@@ -568,7 +568,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                     <select
                       value={currentStatus}
                       onChange={(e) => handleStatusChange(task, e.target.value as any)}
-                      className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-700 dark:text-slate-200"
+                      className="bg-slate-50 dark:bg-[#101719] border border-slate-200 dark:border-[#344447] rounded-lg px-2 py-1 text-xs text-slate-700 dark:text-[#D8DEDC]"
                     >
                       {CRM_TASK_STATUSES.map((st) => (
                         <option key={st.id} value={st.id}>
@@ -584,7 +584,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                           setEditingOutcomeId(task.id);
                           setOutcomeDraft(task.outcome || '');
                         }}
-                        className="px-2.5 py-1 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-medium"
+                        className="px-2.5 py-1 border border-slate-200 dark:border-[#344447] hover:bg-slate-50 dark:hover:bg-[#243638] text-slate-700 dark:text-[#D8DEDC] rounded-lg text-xs font-medium"
                       >
                         {task.outcome ? 'Edit Outcome' : 'Outcome'}
                       </button>
@@ -593,7 +593,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteTask(task.id)}
-                      className="p-1.5 text-slate-400 hover:text-[#9E2A2B] transition-colors"
+                      className="p-1.5 text-slate-400 dark:text-[#A1ADAA] hover:text-[#8F3438] dark:hover:text-[#C66D71] transition-colors"
                       title="Delete task"
                       aria-label="Delete task"
                     >

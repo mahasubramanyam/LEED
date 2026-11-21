@@ -55,10 +55,10 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
   });
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#0F181B]/60 backdrop-blur-xs flex justify-end">
-      <div className="w-full max-w-lg bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 h-full flex flex-col shadow-2xl">
-        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">
+    <div className="fixed inset-0 z-50 bg-[#0B1113]/75 backdrop-blur-xs flex justify-end">
+      <div className="w-full max-w-lg bg-white dark:bg-[#192629] border-l border-slate-200 dark:border-[#3A4D50] h-full flex flex-col shadow-2xl">
+        <div className="px-5 py-4 border-b border-slate-200 dark:border-[#3A4D50] flex items-center justify-between gap-3">
+          <h2 className="text-lg font-bold tracking-tight text-slate-950 dark:text-[#F2F6F5]">
             Reminders
           </h2>
           <div className="flex items-center gap-1.5">
@@ -66,9 +66,9 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenAiAgent({ tab: 'briefing' })}
-                className="px-3 py-1.5 rounded-lg bg-[#335C67] hover:bg-[#25454E] text-white text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
+                className="px-3 py-1.5 rounded-lg bg-[#335C67] hover:bg-[#3D6C79] text-white text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap"
               >
-                <Bot className="w-3.5 h-3.5 text-[#FFF3B0]" />
+                <Bot className="w-3.5 h-3.5 text-[#DFB76D]" />
                 Briefing
               </button>
             )}
@@ -76,7 +76,7 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
               type="button"
               onClick={load}
               aria-label="Refresh reminders"
-              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-950 dark:text-[#B8C7C4] dark:hover:text-[#F2F6F5] hover:bg-slate-100 dark:hover:bg-[#243638]"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -84,14 +84,14 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Close reminders"
-              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-950 dark:text-[#B8C7C4] dark:hover:text-[#F2F6F5] hover:bg-slate-100 dark:hover:bg-[#243638]"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        <div className="px-4 pt-2 border-b border-slate-200 dark:border-slate-800">
+        <div className="px-4 pt-2 border-b border-slate-200 dark:border-[#3A4D50]">
           <SegmentedTabs
             activeId={filterKind}
             onChange={setFilterKind}
@@ -109,35 +109,35 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
           />
         </div>
 
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+        <div className="flex-1 overflow-y-auto divide-y divide-slate-200 dark:divide-[#3A4D50]">
           {loading && !data ? (
-            <div className="p-8 text-center text-xs text-slate-500">Loading reminders...</div>
+            <div className="p-8 text-center text-xs font-medium text-slate-600 dark:text-[#B8C7C4]">Loading reminders...</div>
           ) : filtered.length === 0 ? (
-            <div className="p-10 text-center text-xs text-slate-500 dark:text-slate-400">
+            <div className="p-10 text-center text-xs font-medium text-slate-600 dark:text-[#B8C7C4]">
               No active reminders in this view.
             </div>
           ) : (
             filtered.map((item) => (
               <div
                 key={item.id}
-                className="px-5 py-3.5 hover:bg-[#FFF9D8]/50 dark:hover:bg-slate-800/50 transition-colors space-y-1.5"
+                className="px-5 py-3.5 hover:bg-slate-100/70 dark:hover:bg-[#243638] transition-colors space-y-1.5"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                    <div className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5] flex items-center gap-1.5">
                       {item.severity === 'urgent' ? (
-                        <AlertTriangle className="w-3.5 h-3.5 text-[#9E2A2B] dark:text-[#E09D9E] shrink-0" />
+                        <AlertTriangle className="w-3.5 h-3.5 text-[#8F3438] dark:text-[#E58E92] shrink-0" />
                       ) : item.kind === 'upcoming_meeting' ? (
-                        <Calendar className="w-3.5 h-3.5 text-[#335C67] dark:text-[#8AB0BA] shrink-0" />
+                        <Calendar className="w-3.5 h-3.5 text-[#335C67] dark:text-[#86BCC9] shrink-0" />
                       ) : (
-                        <Clock className="w-3.5 h-3.5 text-[#E09F3E] shrink-0" />
+                        <Clock className="w-3.5 h-3.5 text-[#C49A52] dark:text-[#DFB76D] shrink-0" />
                       )}
                       <span className="truncate">{item.title}</span>
                     </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{item.detail}</p>
+                    <p className="text-xs font-medium text-slate-600 dark:text-[#B8C7C4] mt-0.5">{item.detail}</p>
                   </div>
                   {item.dueAt && (
-                    <span className="text-xs font-mono tabular-nums text-slate-500 shrink-0">
+                    <span className="text-xs font-mono font-medium tabular-nums text-slate-600 dark:text-[#B8C7C4] shrink-0">
                       {new Date(item.dueAt).toLocaleDateString()}
                     </span>
                   )}
@@ -151,7 +151,7 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
                         onOpenCompany(item.leadId!);
                         onClose();
                       }}
-                      className="text-[#335C67] dark:text-[#8AB0BA] font-semibold hover:underline"
+                      className="text-[#335C67] dark:text-[#86BCC9] font-semibold hover:underline"
                     >
                       {item.companyName || 'Company'}
                     </button>
@@ -163,7 +163,7 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
                         onOpenPerson(item.personId!);
                         onClose();
                       }}
-                      className="text-[#956219] dark:text-[#E09F3E] font-semibold hover:underline"
+                      className="text-[#83632E] dark:text-[#DFB76D] font-semibold hover:underline"
                     >
                       {item.personName || 'Contact'}
                     </button>
@@ -175,7 +175,7 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
                         onNavigateTasks();
                         onClose();
                       }}
-                      className="text-slate-600 dark:text-slate-300 hover:underline"
+                      className="text-slate-700 dark:text-[#F2F6F5] font-semibold hover:underline"
                     >
                       Open Task
                     </button>

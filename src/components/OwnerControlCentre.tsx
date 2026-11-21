@@ -845,7 +845,7 @@ export function OwnerControlCentre({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                  <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">
                     Migration 003 (Global Intelligence) Live Schema Status
                   </h2>
                 </div>
@@ -1236,7 +1236,7 @@ export function OwnerControlCentre({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">
                   PostgreSQL Schema Ledger ({diagData?.diagnostics?.tables?.length ?? 23} Tables)
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -1308,7 +1308,7 @@ export function OwnerControlCentre({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Active Owner Sessions</h2>
+                <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">Active Owner Sessions</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Cryptographically hashed sessions stored in Neon <code className="font-mono text-slate-700 dark:text-slate-300">owner_sessions</code>. Dual cookie + Bearer authentication.
                 </p>
@@ -1390,7 +1390,7 @@ export function OwnerControlCentre({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs">
             <div className="flex items-center gap-2 mb-4">
               <UserCheck className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Owner Identity</h2>
+              <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">Owner Identity</h2>
             </div>
             <form onSubmit={handleUpdateProfile} className="space-y-4">
               <div>
@@ -1441,7 +1441,7 @@ export function OwnerControlCentre({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs">
             <div className="flex items-center gap-2 mb-4">
               <Key className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Change Owner Password</h2>
+              <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">Change Owner Password</h2>
             </div>
             <form onSubmit={handleChangePassword} className="space-y-4">
               <div>
@@ -1512,7 +1512,7 @@ export function OwnerControlCentre({
               <div>
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                  <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">
                     Security Posture &amp; Data Protection Diagnostics
                   </h2>
                   {securityPosture && (
@@ -1717,7 +1717,7 @@ export function OwnerControlCentre({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Lock className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">
                   AES-256-GCM Credential Encryption Status
                 </h2>
               </div>
@@ -1746,7 +1746,7 @@ export function OwnerControlCentre({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
               <div className="flex items-center gap-2">
                 <Key className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">
                   Owner Connector Credential Vault
                 </h2>
               </div>
@@ -1936,7 +1936,7 @@ export function OwnerControlCentre({
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs">
           <div className="flex items-center gap-2 mb-4">
             <Sliders className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Application Global Preferences</h2>
+            <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">Application Global Preferences</h2>
           </div>
 
           <form onSubmit={handleSaveSettings} className="space-y-5">
@@ -2130,7 +2130,7 @@ export function OwnerControlCentre({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Security & Administrative Events</h2>
+                <h2 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">Security & Administrative Events</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Append-only immutable event log with SHA-256 parent hash verification
                 </p>
@@ -2146,7 +2146,7 @@ export function OwnerControlCentre({
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-semibold">
+                  <tr className="bg-slate-50 dark:bg-slate-800/70 border-b border-slate-200 dark:border-[#3A4D50] text-slate-700 dark:text-[#D5E0DE] font-bold">
                     <th className="py-3 px-3">#</th>
                     <th className="py-3 px-4">Action</th>
                     <th className="py-3 px-4">Actor</th>

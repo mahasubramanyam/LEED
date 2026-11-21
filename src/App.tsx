@@ -93,9 +93,13 @@ export default function App() {
     suppressionDomains: [],
   });
 
-  // Theme Management (Light mode default)
+  // Theme Management (Midnight Teal Dark Mode default; optional Light Mode toggle preserved)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    return (localStorage.getItem('leed_theme') as 'light' | 'dark') || 'light';
+    try {
+      return localStorage.getItem('leed_theme_v2') === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
   });
 
   // Sidebar collapse state
@@ -146,7 +150,11 @@ export default function App() {
     } else {
       document.documentElement.classList.remove('dark');
     }
-    localStorage.setItem('leed_theme', theme);
+    try {
+      localStorage.setItem('leed_theme_v2', theme);
+    } catch {
+      // Ignore storage quota / privacy mode errors
+    }
   }, [theme]);
 
   const toggleTheme = () => {
@@ -635,7 +643,7 @@ export default function App() {
   );
 
   return (
-    <div className={`min-h-screen flex ${theme === 'dark' ? 'dark' : ''} bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans selection:bg-[#FFF3B0] selection:text-[#540B0E]`}>
+    <div className={`min-h-screen flex ${theme === 'dark' ? 'dark' : ''} bg-slate-50 dark:bg-[#101719] text-slate-950 dark:text-[#F0F4F3] font-sans selection:bg-[#335C67] selection:text-white`}>
       {/* Desktop & Collapsible Sidebar */}
       <div className="hidden lg:flex shrink-0">
         <Sidebar
@@ -657,7 +665,7 @@ export default function App() {
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden flex">
           <div
-            className="fixed inset-0 bg-[#0F181B]/60 backdrop-blur-xs"
+            className="fixed inset-0 bg-[#0B1113]/75 backdrop-blur-xs"
             onClick={() => setMobileMenuOpen(false)}
           />
           <div className="relative z-50 flex w-60">
@@ -707,7 +715,7 @@ export default function App() {
           {isLoading ? (
             <div className="flex flex-col items-center justify-center min-h-[360px] space-y-3">
               <div className="w-7 h-7 border-2 border-[#335C67] border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm text-slate-500 dark:text-slate-400">
+              <span className="text-sm font-medium text-slate-600 dark:text-[#B8C7C4]">
                 Loading workspace...
               </span>
             </div>
@@ -716,7 +724,7 @@ export default function App() {
               fallback={
                 <div className="flex flex-col items-center justify-center min-h-[300px] space-y-2.5">
                   <div className="w-6 h-6 border-2 border-[#335C67] border-t-transparent rounded-full animate-spin" />
-                  <span className="text-sm text-slate-500 dark:text-slate-400">Loading view...</span>
+                  <span className="text-sm font-medium text-slate-600 dark:text-[#B8C7C4]">Loading view...</span>
                 </div>
               }
             >

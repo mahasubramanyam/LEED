@@ -2,263 +2,372 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ============================================================================
- * LEED Dark Sunset Design System & Cormorant Garamond Typography
- * Approved Palette:
- *   Deep Teal:     #335C67  (Primary navigation, structural anchors, CTAs)
- *   Pale Yellow:   #FFF3B0  (Subtle highlights, selected surfaces)
- *   Amber:         #E09F3E  (Primary accents, active indicators, key actions)
- *   Muted Red:     #9E2A2B  (Warnings, errors, destructive indicators)
- *   Deep Burgundy: #540B0E  (High-contrast emphasis, deep accents)
+ * LEED Midnight Teal & Burnished Gold Design System
+ * Typography: Inter (Bold, High-Contrast Enterprise Hierarchy)
+ *
+ * Approved Palette (preserved unchanged):
+ *   Obsidian Teal:  #101719  (Main application background)
+ *   Midnight Black: #0B1113  (Sidebar, navigation background, deepest surfaces)
+ *   Deep Slate:     #192629  (Cards, panels, tables, standard surfaces)
+ *   Elevated Slate: #243638  (Elevated cards, hover surfaces, modal sections, dropdowns)
+ *   Signature Teal: #335C67  (Primary buttons, branded components, active controls)
+ *   Burnished Gold: #C49A52  (Active nav indicators, premium accents, selected tabs, highlights)
+ *   Muted Crimson:  #8F3438  (Errors, destructive actions, overdue items, warnings)
+ *   Muted Plum:     #6F565F  (Secondary accents)
+ *   High-Contrast Dark Text: #F0F4F3 primary, #B6C6C3 secondary/muted
+ *   High-Contrast Light Text: #0D1517 primary, #3A4D51 / #485B5F secondary/muted
  * ============================================================================ */
 
 @theme {
-  /* Typography: Cormorant Garamond across headings, navigation, cards & UI */
-  --font-sans: "Cormorant Garamond", Georgia, "Times New Roman", serif;
-  --font-serif: "Cormorant Garamond", Georgia, "Times New Roman", serif;
-  --font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  /* Typography: Inter across the entire application */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
-  /* Named Dark Sunset Brand Tokens */
-  --color-ds-teal: #335C67;
-  --color-ds-teal-dark: #25454E;
-  --color-ds-teal-deep: #1B333A;
-  --color-ds-teal-soft: #EBF1F2;
-  --color-ds-yellow: #FFF3B0;
-  --color-ds-yellow-soft: #FFF9D8;
-  --color-ds-amber: #E09F3E;
-  --color-ds-amber-dark: #B97D22;
-  --color-ds-red: #9E2A2B;
-  --color-ds-red-soft: #F9EBEB;
-  --color-ds-burgundy: #540B0E;
+  /* Named Midnight Teal & Burnished Gold Brand Tokens */
+  --color-mt-obsidian: #101719;
+  --color-mt-midnight: #0B1113;
+  --color-mt-slate: #192629;
+  --color-mt-elevated: #243638;
+  --color-mt-teal: #335C67;
+  --color-mt-teal-hover: #3D6C79;
+  --color-mt-teal-deep: #25464F;
+  --color-mt-gold: #C49A52;
+  --color-mt-gold-soft: #DFB76D;
+  --color-mt-crimson: #8F3438;
+  --color-mt-crimson-soft: #DF8589;
+  --color-mt-plum: #6F565F;
+  --color-mt-plum-soft: #BAA2AC;
+  --color-mt-silver: #F0F4F3;
+  --color-mt-muted: #B6C6C3;
+  --color-mt-border: #3A4D50;
 
-  /* Harmonized Accent Scales — ensures every module adheres to Dark Sunset */
-  --color-blue-50: #F0F5F6;
-  --color-blue-100: #DCE8EB;
-  --color-blue-200: #B9D1D7;
-  --color-blue-300: #8AB0BA;
-  --color-blue-400: #5B8C99;
-  --color-blue-500: #3E6D7A;
+  /* High-Contrast Neutral Surface & Ink Scale (Light Mode Defaults) */
+  --color-slate-50: #F4F7F6;
+  --color-slate-100: #E8EEED;
+  --color-slate-200: #CFD9D7;
+  --color-slate-300: #B4C2C0;
+  --color-slate-400: #596D71;
+  --color-slate-500: #485B5F;
+  --color-slate-600: #3A4D51;
+  --color-slate-700: #2C3D41;
+  --color-slate-800: #1D2C30;
+  --color-slate-900: #101719;
+  --color-slate-950: #0B1113;
+
+  /* Signature Teal Ramp (#335C67) — replaces generic blue/indigo/cyan/sky */
+  --color-blue-50: #EEF4F5;
+  --color-blue-100: #D6E4E7;
+  --color-blue-200: #B0CBD1;
+  --color-blue-300: #93BDC7;
+  --color-blue-400: #7EB0BE;
+  --color-blue-500: #3E6E7B;
   --color-blue-600: #335C67;
-  --color-blue-700: #284952;
-  --color-blue-800: #1F3940;
-  --color-blue-900: #172B30;
+  --color-blue-700: #2A4D56;
+  --color-blue-800: #213D45;
+  --color-blue-900: #182D33;
   --color-blue-950: #101E22;
 
-  --color-indigo-50: #F0F5F6;
-  --color-indigo-100: #DCE8EB;
-  --color-indigo-200: #B9D1D7;
-  --color-indigo-300: #8AB0BA;
-  --color-indigo-400: #5B8C99;
-  --color-indigo-500: #3E6D7A;
+  --color-indigo-50: #EEF4F5;
+  --color-indigo-100: #D6E4E7;
+  --color-indigo-200: #B0CBD1;
+  --color-indigo-300: #93BDC7;
+  --color-indigo-400: #7EB0BE;
+  --color-indigo-500: #3E6E7B;
   --color-indigo-600: #335C67;
-  --color-indigo-700: #284952;
-  --color-indigo-800: #1F3940;
-  --color-indigo-900: #172B30;
+  --color-indigo-700: #2A4D56;
+  --color-indigo-800: #213D45;
+  --color-indigo-900: #182D33;
   --color-indigo-950: #101E22;
 
-  --color-violet-50: #FBF4F4;
-  --color-violet-100: #F4E3E4;
-  --color-violet-200: #E6C5C7;
-  --color-violet-300: #CE999C;
-  --color-violet-400: #B56265;
-  --color-violet-500: #8E3033;
-  --color-violet-600: #6E1C20;
-  --color-violet-700: #540B0E;
-  --color-violet-800: #42090B;
-  --color-violet-900: #310708;
-  --color-violet-950: #210405;
-
-  --color-purple-50: #FBF4F4;
-  --color-purple-100: #F4E3E4;
-  --color-purple-200: #E6C5C7;
-  --color-purple-300: #CE999C;
-  --color-purple-400: #B56265;
-  --color-purple-500: #8E3033;
-  --color-purple-600: #6E1C20;
-  --color-purple-700: #540B0E;
-  --color-purple-800: #42090B;
-  --color-purple-900: #310708;
-  --color-purple-950: #210405;
-
-  --color-cyan-50: #F0F5F6;
-  --color-cyan-100: #DCE8EB;
-  --color-cyan-200: #B9D1D7;
-  --color-cyan-300: #8AB0BA;
-  --color-cyan-400: #5B8C99;
-  --color-cyan-500: #3E6D7A;
+  --color-cyan-50: #EEF4F5;
+  --color-cyan-100: #D6E4E7;
+  --color-cyan-200: #B0CBD1;
+  --color-cyan-300: #93BDC7;
+  --color-cyan-400: #7EB0BE;
+  --color-cyan-500: #3E6E7B;
   --color-cyan-600: #335C67;
-  --color-cyan-700: #284952;
-  --color-cyan-800: #1F3940;
-  --color-cyan-900: #172B30;
+  --color-cyan-700: #2A4D56;
+  --color-cyan-800: #213D45;
+  --color-cyan-900: #182D33;
   --color-cyan-950: #101E22;
 
-  --color-sky-50: #F0F5F6;
-  --color-sky-100: #DCE8EB;
-  --color-sky-200: #B9D1D7;
-  --color-sky-300: #8AB0BA;
-  --color-sky-400: #5B8C99;
-  --color-sky-500: #3E6D7A;
+  --color-sky-50: #EEF4F5;
+  --color-sky-100: #D6E4E7;
+  --color-sky-200: #B0CBD1;
+  --color-sky-300: #93BDC7;
+  --color-sky-400: #7EB0BE;
+  --color-sky-500: #3E6E7B;
   --color-sky-600: #335C67;
-  --color-sky-700: #284952;
-  --color-sky-800: #1F3940;
-  --color-sky-900: #172B30;
+  --color-sky-700: #2A4D56;
+  --color-sky-800: #213D45;
+  --color-sky-900: #182D33;
   --color-sky-950: #101E22;
 
-  /* Amber & Pale Yellow Ramp (#FFF3B0 / #E09F3E) */
-  --color-amber-50: #FFFCEB;
-  --color-amber-100: #FFF3B0;
-  --color-amber-200: #FCE58A;
-  --color-amber-300: #F2CB6B;
-  --color-amber-400: #E8B452;
-  --color-amber-500: #E09F3E;
-  --color-amber-600: #BE8025;
-  --color-amber-700: #956219;
-  --color-amber-800: #724A14;
-  --color-amber-900: #54360F;
-  --color-amber-950: #332008;
+  /* Burnished Gold Ramp (#C49A52) */
+  --color-amber-50: #F8F3E8;
+  --color-amber-100: #EFE4CC;
+  --color-amber-200: #E5D1A8;
+  --color-amber-300: #E2C07E;
+  --color-amber-400: #DFB76D;
+  --color-amber-500: #C49A52;
+  --color-amber-600: #997435;
+  --color-amber-700: #7A5924;
+  --color-amber-800: #5C431B;
+  --color-amber-900: #423117;
+  --color-amber-950: #261C0D;
 
-  /* Muted Red & Deep Burgundy Ramp (#9E2A2B / #540B0E) */
-  --color-red-50: #FDF3F3;
-  --color-red-100: #F9E3E3;
-  --color-red-200: #F0C6C6;
-  --color-red-300: #E09D9E;
-  --color-red-400: #C46364;
-  --color-red-500: #B03C3D;
-  --color-red-600: #9E2A2B;
-  --color-red-700: #7F1D1F;
-  --color-red-800: #661316;
-  --color-red-900: #540B0E;
-  --color-red-950: #330608;
+  --color-yellow-50: #F8F3E8;
+  --color-yellow-100: #EFE4CC;
+  --color-yellow-200: #E5D1A8;
+  --color-yellow-300: #E2C07E;
+  --color-yellow-400: #DFB76D;
+  --color-yellow-500: #C49A52;
+  --color-yellow-600: #997435;
+  --color-yellow-700: #7A5924;
+  --color-yellow-800: #5C431B;
+  --color-yellow-900: #423117;
+  --color-yellow-950: #261C0D;
 
-  --color-rose-50: #FDF3F3;
-  --color-rose-100: #F9E3E3;
-  --color-rose-200: #F0C6C6;
-  --color-rose-300: #E09D9E;
-  --color-rose-400: #C46364;
-  --color-rose-500: #B03C3D;
-  --color-rose-600: #9E2A2B;
-  --color-rose-700: #7F1D1F;
-  --color-rose-800: #661316;
-  --color-rose-900: #540B0E;
-  --color-rose-950: #330608;
+  /* Muted Crimson Ramp (#8F3438) — errors, overdue, destructive */
+  --color-red-50: #F9EFEF;
+  --color-red-100: #F1DCDC;
+  --color-red-200: #E8C3C5;
+  --color-red-300: #E8A3A6;
+  --color-red-400: #E58E92;
+  --color-red-500: #A64448;
+  --color-red-600: #8F3438;
+  --color-red-700: #73282C;
+  --color-red-800: #591E21;
+  --color-red-900: #401518;
+  --color-red-950: #280D0F;
 
-  /* Muted Botanical Teal-Sage (harmonized positive states with #335C67) */
-  --color-emerald-50: #EFF5F4;
-  --color-emerald-100: #D7E7E4;
-  --color-emerald-200: #B0CFC9;
-  --color-emerald-300: #7EB1A8;
-  --color-emerald-400: #4F8F84;
-  --color-emerald-500: #377368;
-  --color-emerald-600: #2C5E55;
-  --color-emerald-700: #244C45;
-  --color-emerald-800: #1D3D38;
+  --color-rose-50: #F9EFEF;
+  --color-rose-100: #F1DCDC;
+  --color-rose-200: #E8C3C5;
+  --color-rose-300: #E8A3A6;
+  --color-rose-400: #E58E92;
+  --color-rose-500: #A64448;
+  --color-rose-600: #8F3438;
+  --color-rose-700: #73282C;
+  --color-rose-800: #591E21;
+  --color-rose-900: #401518;
+  --color-rose-950: #280D0F;
+
+  /* Muted Plum Ramp (#6F565F) — refined secondary accents & tertiary series */
+  --color-violet-50: #F5F1F3;
+  --color-violet-100: #E8DFE3;
+  --color-violet-200: #D8C9CE;
+  --color-violet-300: #C8B2BA;
+  --color-violet-400: #BAA2AC;
+  --color-violet-500: #856A74;
+  --color-violet-600: #6F565F;
+  --color-violet-700: #59444C;
+  --color-violet-800: #45343A;
+  --color-violet-900: #312529;
+  --color-violet-950: #20181B;
+
+  --color-purple-50: #F5F1F3;
+  --color-purple-100: #E8DFE3;
+  --color-purple-200: #D8C9CE;
+  --color-purple-300: #C8B2BA;
+  --color-purple-400: #BAA2AC;
+  --color-purple-500: #856A74;
+  --color-purple-600: #6F565F;
+  --color-purple-700: #59444C;
+  --color-purple-800: #45343A;
+  --color-purple-900: #312529;
+  --color-purple-950: #20181B;
+
+  /* Restrained Deep Teal-Sage (harmonized positive states, zero neon) */
+  --color-emerald-50: #EDF4F2;
+  --color-emerald-100: #D5E5E2;
+  --color-emerald-200: #B4D2CC;
+  --color-emerald-300: #93C2B9;
+  --color-emerald-400: #7BB0A7;
+  --color-emerald-500: #3F796F;
+  --color-emerald-600: #2E6058;
+  --color-emerald-700: #244D46;
+  --color-emerald-800: #1C3B36;
   --color-emerald-900: #162E2A;
-  --color-emerald-950: #0D1D1A;
+  --color-emerald-950: #0E1D1B;
 
-  /* Warm Alabaster & Deep Twilight-Teal Neutral Scale */
-  --color-slate-50: #FAF8F4;
-  --color-slate-100: #F3EFE7;
-  --color-slate-200: #E4DDD1;
-  --color-slate-300: #CFC7B8;
-  --color-slate-400: #8D999C;
-  --color-slate-500: #627277;
-  --color-slate-600: #46565B;
-  --color-slate-700: #2F4046;
-  --color-slate-800: #213238;
-  --color-slate-900: #162328;
-  --color-slate-950: #0F181B;
+  --color-green-50: #EDF4F2;
+  --color-green-100: #D5E5E2;
+  --color-green-200: #B4D2CC;
+  --color-green-300: #93C2B9;
+  --color-green-400: #7BB0A7;
+  --color-green-500: #3F796F;
+  --color-green-600: #2E6058;
+  --color-green-700: #244D46;
+  --color-green-800: #1C3B36;
+  --color-green-900: #162E2A;
+  --color-green-950: #0E1D1B;
 }
 
 @layer base {
+  /* High-Contrast Light Mode */
   :root {
     color-scheme: light;
-    --ds-canvas: #FAF8F4;
-    --ds-surface: #FFFFFF;
-    --ds-surface-subtle: #F4F0E8;
-    --ds-border: #E4DDD1;
-    --ds-border-strong: #CFC7B8;
-    --ds-ink: #1B2629;
-    --ds-ink-secondary: #46565B;
-    --ds-ink-muted: #627277;
-    --ds-highlight-bg: rgba(255, 243, 176, 0.42);
-    --ds-highlight-border: rgba(224, 159, 62, 0.45);
+    --mt-bg: #F4F7F6;
+    --mt-sidebar: #0B1113;
+    --mt-surface: #FFFFFF;
+    --mt-elevated: #EAF0EE;
+    --mt-border: #C8D3D1;
+    --mt-text: #0D1517;
+    --mt-text-secondary: #34474A;
+    --mt-text-muted: #485B5F;
+    --mt-accent: #335C67;
+    --mt-gold: #C49A52;
+    --mt-crimson: #8F3438;
+    --mt-plum: #6F565F;
   }
 
+  /* Default Dark Mode — Midnight Teal & Burnished Gold with Elevated Text & Border Contrast */
   :root.dark {
     color-scheme: dark;
-    --ds-canvas: #0F181B;
-    --ds-surface: #162328;
-    --ds-surface-subtle: #111D21;
-    --ds-border: #24383F;
-    --ds-border-strong: #334E57;
-    --ds-ink: #F6F2E9;
-    --ds-ink-secondary: #C5D2D6;
-    --ds-ink-muted: #8FA3A9;
-    --ds-highlight-bg: rgba(224, 159, 62, 0.16);
-    --ds-highlight-border: rgba(224, 159, 62, 0.42);
+    --mt-bg: #101719;
+    --mt-sidebar: #0B1113;
+    --mt-surface: #192629;
+    --mt-elevated: #243638;
+    --mt-border: #3A4D50;
+    --mt-text: #F0F4F3;
+    --mt-text-secondary: #D4DFDD;
+    --mt-text-muted: #B6C6C3;
+    --mt-accent: #335C67;
+    --mt-gold: #C49A52;
+    --mt-crimson: #8F3438;
+    --mt-plum: #6F565F;
+
+    /* Dark-mode neutral scale calibration: crisp off-white primary text, AA+ muted text, preserved dark surfaces */
+    --color-slate-50: #F6F9F8;
+    --color-slate-100: #F0F4F3;
+    --color-slate-200: #E5ECEA;
+    --color-slate-300: #CFDAD8;
+    --color-slate-400: #B6C6C3;
+    --color-slate-500: #9FB2AF;
+    --color-slate-600: #56696C;
+    --color-slate-700: #3A4D50;
+    --color-slate-800: #243638;
+    --color-slate-900: #192629;
+    --color-slate-950: #101719;
   }
 
   html {
     font-size: 16px;
-    font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+    font-family: var(--font-sans);
+    background-color: var(--mt-bg);
   }
 
   body {
-    background-color: var(--ds-canvas);
-    color: var(--ds-ink);
-    font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+    background-color: var(--mt-bg);
+    color: var(--mt-text);
+    font-family: var(--font-sans);
     font-weight: 500;
-    font-feature-settings: "lnum" 1, "tnum" 1;
-    font-variant-numeric: lining-nums tabular-nums;
-    line-height: 1.5;
+    font-feature-settings: "cv02" 1, "cv03" 1, "cv04" 1, "cv11" 1, "tnum" 1;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Optical legibility calibration for Cormorant Garamond at UI & dense table scales */
-  h1, h2, h3, h4 {
-    font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif;
-    letter-spacing: -0.01em;
+  /* Bold & Readable Inter Typographic Hierarchy */
+  h1 {
+    font-family: var(--font-sans);
+    font-weight: 800;
+    letter-spacing: -0.025em;
     text-wrap: balance;
   }
 
-  button, input, select, textarea {
-    font-family: inherit;
-    font-variant-numeric: lining-nums tabular-nums;
+  h2 {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
   }
 
-  /* Ensure compact Tailwind text sizes remain crisp & readable in Cormorant Garamond */
+  h3, h4 {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  th {
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  td {
+    font-weight: 500;
+  }
+
+  button {
+    font-family: inherit;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  input, select, textarea {
+    font-family: inherit;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* High-Contrast Placeholders (Light & Dark Modes) */
+  input::placeholder,
+  textarea::placeholder {
+    color: #54686C;
+    opacity: 1;
+    font-weight: 400;
+  }
+
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: #9FB2AF;
+    opacity: 1;
+    font-weight: 400;
+  }
+
+  /* Ensure charts & SVG data labels consistently render in Inter */
+  svg text,
+  .recharts-text {
+    font-family: var(--font-sans);
+    font-weight: 500;
+  }
+
+  /* Clean Inter optical scale for compact metadata & dense tables */
   .text-\[10px\],
   .text-\[11px\] {
-    font-size: 0.78rem;
-    line-height: 1.3;
-    letter-spacing: 0.015em;
+    font-size: 0.72rem;
+    line-height: 1.35;
   }
 
   .text-xs {
-    font-size: 0.875rem;
-    line-height: 1.4;
-  }
-
-  .text-sm {
-    font-size: 0.975rem;
+    font-size: 0.785rem;
     line-height: 1.45;
   }
 
+  .text-sm {
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
   .font-mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-family: var(--font-mono);
     font-size: 0.8125rem;
     font-variant-numeric: tabular-nums;
   }
 
-  /* Accessible Dark Sunset Focus Rings */
+  /* Accessible Burnished Gold Focus Rings */
   :focus-visible {
-    outline: 2px solid #E09F3E;
+    outline: 2px solid #C49A52;
     outline-offset: 2px;
   }
 }
 
-/* Custom scrollbars harmonized with Dark Sunset */
+/* Custom scrollbars harmonized with Midnight Teal */
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -267,18 +376,18 @@
   background: transparent;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #CFC7B8;
+  background: #A9B8B6;
   border-radius: 3px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #8D999C;
+  background: #6D7F7D;
 }
 
 .dark .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #2C434B;
+  background: #3A4D50;
 }
 .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #3D5C66;
+  background: #52676B;
 }
 
 .scrollbar-none::-webkit-scrollbar {
@@ -287,40 +396,6 @@
 .scrollbar-none {
   -ms-overflow-style: none;
   scrollbar-width: none;
-}
-
-/* Dark mode harmonization for light-authored nested sub-panels (e.g. Outreach) */
-.dark .sunset-adaptive-surface .bg-white {
-  background-color: #162328 !important;
-}
-.dark .sunset-adaptive-surface .bg-slate-50 {
-  background-color: #111D21 !important;
-}
-.dark .sunset-adaptive-surface .bg-slate-100 {
-  background-color: #1C2C32 !important;
-}
-.dark .sunset-adaptive-surface .border-slate-200,
-.dark .sunset-adaptive-surface .border-slate-100,
-.dark .sunset-adaptive-surface .border-slate-300 {
-  border-color: #24383F !important;
-}
-.dark .sunset-adaptive-surface .text-slate-900,
-.dark .sunset-adaptive-surface .text-slate-800 {
-  color: #F6F2E9 !important;
-}
-.dark .sunset-adaptive-surface .text-slate-700,
-.dark .sunset-adaptive-surface .text-slate-600 {
-  color: #C5D2D6 !important;
-}
-.dark .sunset-adaptive-surface .text-slate-500 {
-  color: #8FA3A9 !important;
-}
-.dark .sunset-adaptive-surface input,
-.dark .sunset-adaptive-surface select,
-.dark .sunset-adaptive-surface textarea {
-  background-color: #0F181B;
-  color: #F6F2E9;
-  border-color: #2F4046;
 }
 
 @media (prefers-reduced-motion: reduce) {

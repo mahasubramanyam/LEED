@@ -444,9 +444,9 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
             <button
               type="button"
               onClick={onOpenMatrix}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-[#192629] hover:bg-slate-50 dark:hover:bg-[#243638] border border-slate-200 dark:border-[#344447] rounded-lg text-xs font-semibold text-slate-700 dark:text-[#D8DEDC] transition"
             >
-              <Globe2 className="w-3.5 h-3.5 text-[#335C67] dark:text-[#8AB0BA]" />
+              <Globe2 className="w-3.5 h-3.5 text-[#335C67] dark:text-[#6392A0]" />
               <span>Country Matrix</span>
             </button>
           ) : undefined
