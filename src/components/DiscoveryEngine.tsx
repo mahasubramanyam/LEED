@@ -976,9 +976,9 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
               <button
                 type="button"
                 onClick={() => setShowUrlInspector(false)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-[#243638] border border-[#C49A52]/60 text-[#83632E] dark:text-[#C49A52] transition"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-[#910303]/10 dark:bg-[#910303] border border-[#CE0404] text-[#910303] dark:text-[#FAF4F4] transition"
               >
-                <ShieldCheck className="w-3.5 h-3.5 text-[#C49A52]" />
+                <ShieldCheck className="w-3.5 h-3.5 text-[#CE0404] dark:text-[#FF9492]" />
                 <span>URL Inspector Open</span>
               </button>
             )}
@@ -1018,8 +1018,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                     onClick={() => handleCountryChange(c.code)}
                     className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md font-medium transition border ${
                       isSelected
-                        ? 'bg-[#335C67] border-[#C49A52]/50 text-[#D8DEDC]'
-                        : 'bg-slate-50 dark:bg-[#101719] border-slate-200 dark:border-[#344447] text-slate-700 dark:text-[#A1ADAA] hover:border-[#C49A52]/60 hover:bg-slate-100 dark:hover:bg-[#243638] dark:hover:text-[#D8DEDC]'
+                        ? 'bg-[#910303] border-[#CE0404] text-white'
+                        : 'bg-slate-50 dark:bg-[#240202] border-slate-200 dark:border-[#7A1E1E] text-slate-700 dark:text-[#E6D2D2] hover:border-[#CE0404] hover:bg-slate-100 dark:hover:bg-[#690303] dark:hover:text-[#FAF4F4]'
                     }`}
                   >
                     <span>{c.flag}</span>
@@ -1558,7 +1558,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-[#D5E0DE]">
+                <thead className="border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-[#F4E8E8]">
                   <tr>
                     <th className="py-2 pr-3 font-bold">Provider</th>
                     <th className="py-2 pr-3 font-bold">Availability</th>
@@ -1719,7 +1719,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-[#D5E0DE]">
+                <thead className="border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-[#F4E8E8]">
                   <tr>
                     <th className="py-1.5 pr-3 font-bold">Connector</th>
                     <th className="py-1.5 pr-3 font-bold">Operation</th>
@@ -2023,7 +2023,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-[#D5E0DE]">
+              <thead className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-[#F4E8E8]">
                 <tr>
                   <th className="py-2.5 px-3 w-8">
                     <button type="button" onClick={toggleSelectPage} className="text-slate-600 dark:text-slate-300 hover:text-blue-600">

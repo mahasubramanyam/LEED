@@ -226,8 +226,8 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
               onClick={() => setSelectedRegistryState(isSelected ? 'ALL' : stateKey)}
               className={`text-left border rounded-xl p-3 transition ${
                 isSelected
-                  ? 'bg-slate-100 dark:bg-[#243638] border-[#C49A52] text-[#335C67] dark:text-[#C49A52]'
-                  : 'bg-white dark:bg-[#192629] border-slate-200 dark:border-[#344447] hover:border-[#C49A52]/60 dark:hover:bg-[#243638]/70'
+                  ? 'bg-[#910303]/10 dark:bg-[#910303] border-[#CE0404] text-[#910303] dark:text-[#FAF4F4]'
+                  : 'bg-white dark:bg-[#440303] border-slate-200 dark:border-[#7A1E1E] hover:border-[#CE0404] dark:hover:bg-[#690303]'
               }`}
             >
               <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">

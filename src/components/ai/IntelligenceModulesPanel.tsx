@@ -516,7 +516,7 @@ export const IntelligenceModulesPanel: React.FC<IntelligenceModulesPanelProps> =
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE]">
+                  <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#F4E8E8]">
                     <th className="py-2 pr-3 font-bold">Company</th>
                     <th className="py-2 px-3 font-bold text-right">Priority</th>
                     <th className="py-2 px-3 font-bold text-right">ICP</th>

@@ -93,7 +93,7 @@ export default function App() {
     suppressionDomains: [],
   });
 
-  // Theme Management (Midnight Teal Dark Mode default; optional Light Mode toggle preserved)
+  // Theme Management (Dark Red & Maroon Dark Mode default; optional Light Mode toggle preserved)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try {
       return localStorage.getItem('leed_theme_v2') === 'light' ? 'light' : 'dark';
@@ -643,7 +643,7 @@ export default function App() {
   );
 
   return (
-    <div className={`min-h-screen flex ${theme === 'dark' ? 'dark' : ''} bg-slate-50 dark:bg-[#101719] text-slate-950 dark:text-[#F0F4F3] font-sans selection:bg-[#335C67] selection:text-white`}>
+    <div className={`min-h-screen flex ${theme === 'dark' ? 'dark' : ''} bg-slate-50 dark:bg-[#240202] text-slate-950 dark:text-[#FAF4F4] font-sans selection:bg-[#B30303] selection:text-white`}>
       {/* Desktop & Collapsible Sidebar */}
       <div className="hidden lg:flex shrink-0">
         <Sidebar
@@ -665,7 +665,7 @@ export default function App() {
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden flex">
           <div
-            className="fixed inset-0 bg-[#0B1113]/75 backdrop-blur-xs"
+            className="fixed inset-0 bg-[#240202]/80 backdrop-blur-xs"
             onClick={() => setMobileMenuOpen(false)}
           />
           <div className="relative z-50 flex w-60">
@@ -714,8 +714,8 @@ export default function App() {
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center min-h-[360px] space-y-3">
-              <div className="w-7 h-7 border-2 border-[#335C67] border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm font-medium text-slate-600 dark:text-[#B8C7C4]">
+              <div className="w-7 h-7 border-2 border-[#CE0404] border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm font-medium text-slate-600 dark:text-[#E6D2D2]">
                 Loading workspace...
               </span>
             </div>
@@ -723,8 +723,8 @@ export default function App() {
             <Suspense
               fallback={
                 <div className="flex flex-col items-center justify-center min-h-[300px] space-y-2.5">
-                  <div className="w-6 h-6 border-2 border-[#335C67] border-t-transparent rounded-full animate-spin" />
-                  <span className="text-sm font-medium text-slate-600 dark:text-[#B8C7C4]">Loading view...</span>
+                  <div className="w-6 h-6 border-2 border-[#CE0404] border-t-transparent rounded-full animate-spin" />
+                  <span className="text-sm font-medium text-slate-600 dark:text-[#E6D2D2]">Loading view...</span>
                 </div>
               }
             >

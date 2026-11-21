@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, MoreHorizontal, X } from 'lucide-react';
 
 /**
- * Shared Midnight Teal & Burnished Gold UI Primitives
- * Reusable, zero-pill, accessible building blocks for LEED workspaces.
+ * Shared Dark Red & Maroon UI Primitives
+ * Reusable, zero-pill, high-contrast building blocks for LEED workspaces.
  */
 
 export interface WorkspaceToolbarProps {
@@ -22,16 +22,16 @@ export const WorkspaceToolbar: React.FC<WorkspaceToolbarProps> = ({
   className = '',
 }) => (
   <div
-    className={`flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-[#3A4D50] ${className}`}
+    className={`flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-[#7A1E1E] ${className}`}
   >
     <div className="flex flex-wrap items-center gap-3 min-w-0">
       {title && (
-        <h2 className="text-xl font-bold text-slate-950 dark:text-[#F2F6F5] tracking-tight truncate">
+        <h2 className="text-xl font-bold text-slate-950 dark:text-[#FAF4F4] tracking-tight truncate">
           {title}
         </h2>
       )}
       {meta && (
-        <span className="text-xs font-medium text-slate-600 dark:text-[#B8C7C4] truncate">
+        <span className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] truncate">
           {meta}
         </span>
       )}
@@ -64,8 +64,8 @@ export const SurfaceCard: React.FC<SurfaceCardProps> = ({
     <div
       className={`rounded-xl border transition-colors ${
         highlighted
-          ? 'bg-slate-100/90 dark:bg-[#243638] border-[#C49A52]/65 dark:border-[#C49A52]/55'
-          : 'bg-white dark:bg-[#192629] border-slate-200 dark:border-[#3A4D50]'
+          ? 'bg-slate-100/90 dark:bg-[#690303] border-[#B30303]/55 dark:border-[#CE0404]/70'
+          : 'bg-white dark:bg-[#440303] border-slate-200 dark:border-[#7A1E1E]'
       } ${padMap[padding]} ${className}`}
     >
       {children}
@@ -89,11 +89,11 @@ export const KpiMetric: React.FC<KpiMetricProps> = ({
   onClick,
 }) => {
   const valueTone = {
-    default: 'text-slate-950 dark:text-[#F2F6F5]',
-    teal: 'text-[#25464F] dark:text-[#86BCC9]',
-    amber: 'text-[#7A5924] dark:text-[#DFB76D]',
-    danger: 'text-[#8F3438] dark:text-[#E58E92]',
-    burgundy: 'text-[#59444C] dark:text-[#C8B2BA]',
+    default: 'text-slate-950 dark:text-[#FAF4F4]',
+    teal: 'text-[#167C4D] dark:text-[#6EE7B7]',
+    amber: 'text-[#B45309] dark:text-[#FCD34D]',
+    danger: 'text-[#CE0404] dark:text-[#FF8A87]',
+    burgundy: 'text-[#910303] dark:text-[#FF9492]',
   }[tone];
 
   const Tag = onClick ? 'button' : 'div';
@@ -101,18 +101,18 @@ export const KpiMetric: React.FC<KpiMetricProps> = ({
     <Tag
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`w-full text-left rounded-xl border border-slate-200 dark:border-[#3A4D50] bg-white dark:bg-[#192629] px-5 py-4 transition-colors ${
-        onClick ? 'hover:border-[#C49A52] dark:hover:bg-[#243638] cursor-pointer' : ''
+      className={`w-full text-left rounded-xl border border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] px-5 py-4 transition-colors ${
+        onClick ? 'hover:border-[#CE0404] dark:hover:bg-[#690303] cursor-pointer' : ''
       }`}
     >
-      <div className="text-xs font-semibold text-slate-600 dark:text-[#B8C7C4] tracking-wide">
+      <div className="text-xs font-semibold text-slate-600 dark:text-[#E6D2D2] tracking-wide">
         {label}
       </div>
       <div className={`mt-1.5 text-2xl font-extrabold tabular-nums tracking-tight truncate ${valueTone}`}>
         {value}
       </div>
       {detail && (
-        <div className="mt-1 text-xs font-medium text-slate-600 dark:text-[#B8C7C4] truncate tabular-nums">
+        <div className="mt-1 text-xs font-medium text-slate-600 dark:text-[#C9A7A7] truncate tabular-nums">
           {detail}
         </div>
       )}
@@ -140,7 +140,7 @@ export function SegmentedTabs<T extends string>({
 }) {
   if (variant === 'segmented') {
     return (
-      <div className="inline-flex items-center rounded-lg border border-slate-300 dark:border-[#3E5256] bg-slate-100/90 dark:bg-[#0B1113] p-0.5 overflow-x-auto scrollbar-none">
+      <div className="inline-flex items-center rounded-lg border border-slate-300 dark:border-[#8C2828] bg-slate-100/90 dark:bg-[#240202] p-0.5 overflow-x-auto scrollbar-none">
         {items.map((item) => {
           const active = item.id === activeId;
           return (
@@ -150,8 +150,8 @@ export function SegmentedTabs<T extends string>({
               onClick={() => onChange(item.id)}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 active
-                  ? 'bg-[#335C67] text-white font-bold'
-                  : 'text-slate-700 dark:text-[#B8C7C4] font-semibold hover:text-slate-950 dark:hover:text-[#F2F6F5]'
+                  ? 'bg-[#910303] text-white font-bold shadow-xs'
+                  : 'text-slate-700 dark:text-[#E6D2D2] font-semibold hover:text-slate-950 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-[#690303]'
               }`}
             >
               {item.icon}
@@ -159,7 +159,7 @@ export function SegmentedTabs<T extends string>({
               {typeof item.count === 'number' && item.count > 0 && (
                 <span
                   className={`tabular-nums text-[11px] font-bold ${
-                    active ? 'text-[#EFE4CC]' : 'text-slate-600 dark:text-[#B8C7C4]'
+                    active ? 'text-[#FAF4F4]' : 'text-slate-600 dark:text-[#C9A7A7]'
                   }`}
                 >
                   {item.count}
@@ -173,7 +173,7 @@ export function SegmentedTabs<T extends string>({
   }
 
   return (
-    <div className="flex items-center gap-1 border-b border-slate-200 dark:border-[#3A4D50] overflow-x-auto scrollbar-none">
+    <div className="flex items-center gap-1 border-b border-slate-200 dark:border-[#7A1E1E] overflow-x-auto scrollbar-none">
       {items.map((item) => {
         const active = item.id === activeId;
         return (
@@ -183,14 +183,18 @@ export function SegmentedTabs<T extends string>({
             onClick={() => onChange(item.id)}
             className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 text-sm border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               active
-                ? 'border-[#C49A52] text-[#25464F] dark:text-[#DFB76D] font-bold'
-                : 'border-transparent text-slate-600 dark:text-[#B8C7C4] font-semibold hover:text-slate-950 dark:hover:text-[#F2F6F5]'
+                ? 'border-[#CE0404] text-[#910303] dark:text-white font-bold'
+                : 'border-transparent text-slate-600 dark:text-[#E6D2D2] font-semibold hover:text-slate-950 dark:hover:text-white'
             }`}
           >
             {item.icon}
             <span>{item.label}</span>
             {typeof item.count === 'number' && item.count > 0 && (
-              <span className="tabular-nums text-xs font-semibold text-slate-500 dark:text-[#B8C7C4]">
+              <span
+                className={`tabular-nums text-xs font-semibold ${
+                  active ? 'text-[#B30303] dark:text-[#FF9492]' : 'text-slate-500 dark:text-[#C9A7A7]'
+                }`}
+              >
                 ({item.count})
               </span>
             )}
@@ -243,14 +247,14 @@ export const ActionMenu: React.FC<{
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-[#3E5256] bg-white dark:bg-[#192629] text-slate-800 dark:text-[#F0F4F3] hover:bg-slate-50 dark:hover:bg-[#243638] transition-colors whitespace-nowrap shrink-0"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] text-slate-800 dark:text-[#FAF4F4] hover:bg-slate-50 dark:hover:bg-[#690303] transition-colors whitespace-nowrap shrink-0"
       >
         {iconOnly ? (
           <MoreHorizontal className="w-4 h-4" />
         ) : (
           <>
             <span>{label}</span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-500 dark:text-[#B8C7C4]" />
+            <ChevronDown className="w-3.5 h-3.5 text-slate-500 dark:text-[#C9A7A7]" />
           </>
         )}
       </button>
@@ -260,7 +264,7 @@ export const ActionMenu: React.FC<{
           role="menu"
           className={`absolute ${
             align === 'right' ? 'right-0' : 'left-0'
-          } top-full mt-1.5 min-w-[180px] rounded-xl border border-slate-300 dark:border-[#3E5256] bg-white dark:bg-[#243638] shadow-xl py-1 z-50`}
+          } top-full mt-1.5 min-w-[180px] rounded-xl border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#690303] shadow-xl py-1 z-50`}
         >
           {items.map((item) => (
             <button
@@ -274,8 +278,8 @@ export const ActionMenu: React.FC<{
               }}
               className={`w-full px-3.5 py-2 text-left text-xs font-medium flex items-center gap-2 transition-colors disabled:opacity-60 ${
                 item.destructive
-                  ? 'text-[#8F3438] dark:text-[#E58E92] hover:bg-[#F9EFEF] dark:hover:bg-[#8F3438]/25'
-                  : 'text-slate-800 dark:text-[#F0F4F3] hover:bg-slate-100 dark:hover:bg-[#335C67]/35'
+                  ? 'text-[#CE0404] dark:text-[#FF9492] hover:bg-[#FFF1F1] dark:hover:bg-[#910303]'
+                  : 'text-slate-800 dark:text-[#FAF4F4] hover:bg-slate-100 dark:hover:bg-[#910303]'
               }`}
             >
               {item.icon}
@@ -295,17 +299,26 @@ export const NoticeBanner: React.FC<{
 }> = ({ tone, message, onDismiss }) => {
   const styles = {
     success:
-      'bg-[#EDF4F2] dark:bg-[#192629] border-[#335C67]/50 dark:border-[#4D7F8E] text-[#14282D] dark:text-[#F0F4F3]',
+      'bg-[#ECFDF5] dark:bg-[#0C3824] border-[#167C4D]/50 dark:border-[#1E9E63] text-[#0F4B30] dark:text-[#D1FAE5]',
     warning:
-      'bg-[#F8F3E8] dark:bg-[#243638] border-[#C49A52]/70 dark:border-[#C49A52]/70 text-[#523C1A] dark:text-[#E8CB92]',
+      'bg-[#FFFBEB] dark:bg-[#4A2408] border-[#D97706]/60 dark:border-[#FBBF24]/70 text-[#78350F] dark:text-[#FEF3C7]',
     error:
-      'bg-[#F9EFEF] dark:bg-[#280D0F]/90 border-[#8F3438]/60 dark:border-[#A64448] text-[#662226] dark:text-[#F0C9CB]',
-    info: 'bg-slate-100 dark:bg-[#192629] border-slate-300 dark:border-[#3E5256] text-slate-900 dark:text-[#F0F4F3]',
+      'bg-[#FFF1F1] dark:bg-[#2A0303] border-[#E52825]/70 dark:border-[#E52825] text-[#910303] dark:text-[#FFE0DF]',
+    info:
+      'bg-[#F0F6FC] dark:bg-[#102D47] border-[#2B7CB8]/50 dark:border-[#7DD3FC]/60 text-[#143D5E] dark:text-[#DCEBFA]',
   }[tone];
 
   return (
     <div className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border text-xs font-medium ${styles}`}>
-      <span>{message}</span>
+      <div className="flex items-center gap-2 min-w-0">
+        {tone === 'error' && (
+          <span
+            aria-hidden="true"
+            className="w-2 h-2 rounded-full bg-[#FA0502] shrink-0"
+          />
+        )}
+        <span>{message}</span>
+      </div>
       {onDismiss && (
         <button
           type="button"
@@ -325,10 +338,10 @@ export const EmptyState: React.FC<{
   description?: string;
   action?: React.ReactNode;
 }> = ({ title, description, action }) => (
-  <div className="rounded-xl border border-dashed border-slate-300 dark:border-[#3E5256] bg-white/80 dark:bg-[#192629]/80 px-6 py-10 text-center">
-    <h3 className="text-base font-bold text-slate-950 dark:text-[#F2F6F5]">{title}</h3>
+  <div className="rounded-xl border border-dashed border-slate-300 dark:border-[#8C2828] bg-white/80 dark:bg-[#440303]/85 px-6 py-10 text-center">
+    <h3 className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">{title}</h3>
     {description && (
-      <p className="mt-1 text-xs font-medium text-slate-600 dark:text-[#B8C7C4] max-w-md mx-auto">
+      <p className="mt-1 text-xs font-medium text-slate-600 dark:text-[#E6D2D2] max-w-md mx-auto">
         {description}
       </p>
     )}

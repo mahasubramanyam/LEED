@@ -420,31 +420,31 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
               label="Tools"
               items={[
                 ...(onOpenAiAgent
-                  ? [
-                      {
-                        label: 'AI Sales Agent',
-                        icon: <Bot className="h-3.5 w-3.5 text-slate-400 dark:text-[#A1ADAA]" />,
-                        onClick: () => onOpenAiAgent(enrollLeadIds[0]),
-                      },
-                    ]
-                  : []),
-                {
-                  label: 'Refresh',
-                  icon: <RefreshCw className="h-3.5 w-3.5 text-slate-400 dark:text-[#A1ADAA]" />,
-                  onClick: handleRefreshAll,
-                },
-              ]}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('campaigns');
-                setShowCreateForm(true);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[#335C67] px-3.5 py-1.5 text-xs font-semibold text-[#D8DEDC] hover:bg-[#3D6C79] transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" /> New Campaign
-            </button>
+                    ? [
+                        {
+                          label: 'AI Sales Agent',
+                          icon: <Bot className="h-3.5 w-3.5 text-slate-400 dark:text-[#C9A7A7]" />,
+                          onClick: () => onOpenAiAgent(enrollLeadIds[0]),
+                        },
+                      ]
+                    : []),
+                  {
+                    label: 'Refresh',
+                    icon: <RefreshCw className="h-3.5 w-3.5 text-slate-400 dark:text-[#C9A7A7]" />,
+                    onClick: handleRefreshAll,
+                  },
+                ]}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('campaigns');
+                  setShowCreateForm(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#B30303] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[#CE0404] transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" /> New Campaign
+              </button>
           </>
         }
       />
@@ -512,60 +512,60 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
           {showCreateForm && (
             <form
               onSubmit={handleCreateCampaign}
-              className="rounded-xl border border-slate-200 dark:border-[#344447] bg-white dark:bg-[#192629] p-5 space-y-3"
+              className="rounded-xl border border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] p-5 space-y-3"
             >
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-[#344447] pb-2.5">
-                <h3 className="text-base font-semibold text-slate-900 dark:text-[#D8DEDC]">New Outreach Campaign</h3>
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-[#7A1E1E] pb-2.5">
+                <h3 className="text-base font-semibold text-slate-900 dark:text-[#FAF4F4]">New Outreach Campaign</h3>
                 <button
                   type="button"
                   onClick={() => setShowCreateForm(false)}
-                  className="text-xs text-slate-500 dark:text-[#A1ADAA] hover:text-slate-900 dark:hover:text-[#D8DEDC]"
+                  className="text-xs text-slate-500 dark:text-[#C9A7A7] hover:text-slate-900 dark:hover:text-[#FAF4F4]"
                 >
                   Close
                 </button>
               </div>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-800 dark:text-[#E6EEEC]">Campaign Name</label>
+                  <label className="block text-xs font-semibold text-slate-800 dark:text-[#FAF4F4]">Campaign Name</label>
                   <input
                     type="text"
                     required
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     placeholder="e.g., Q2 DACH Manufacturing Expansion"
-                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#3E5256] bg-white dark:bg-[#101719] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:border-[#C49A52] focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#FAF4F4] placeholder:text-slate-500 dark:placeholder:text-[#C9A7A7] focus:border-[#CE0404] focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-800 dark:text-[#E6EEEC]">Campaign Objective</label>
+                  <label className="block text-xs font-semibold text-slate-800 dark:text-[#FAF4F4]">Campaign Objective</label>
                   <input
                     type="text"
                     required
                     value={newObjective}
                     onChange={(e) => setNewObjective(e.target.value)}
                     placeholder="e.g., Introduce strategic supply chain partnership"
-                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#3E5256] bg-white dark:bg-[#101719] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:border-[#C49A52] focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#FAF4F4] placeholder:text-slate-500 dark:placeholder:text-[#C9A7A7] focus:border-[#CE0404] focus:outline-none"
                   />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-[#D8DEDC]">Mode</label>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-[#FAF4F4]">Mode</label>
                   <select
                     value={newMode}
                     onChange={(e) => setNewMode(e.target.value as OutreachCampaignModeV2)}
-                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#101719] px-2 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] focus:border-[#C49A52] focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] px-2 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] focus:border-[#CE0404] focus:outline-none"
                   >
                     <option value="individual">Individual</option>
                     <option value="controlled_batch">Controlled Batch</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-[#D8DEDC]">Channel</label>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-[#FAF4F4]">Channel</label>
                   <select
                     value={newChannel}
                     onChange={(e) => setNewChannel(e.target.value as OutreachChannelV2)}
-                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#101719] px-2 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] focus:border-[#C49A52] focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] px-2 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] focus:border-[#CE0404] focus:outline-none"
                   >
                     {OUTREACH_CHANNELS.map((ch) => (
                       <option key={ch.value} value={ch.value}>
@@ -575,11 +575,11 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-[#D8DEDC]">Target ICP (optional)</label>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-[#FAF4F4]">Target ICP (optional)</label>
                   <select
                     value={newIcpId}
                     onChange={(e) => setNewIcpId(e.target.value)}
-                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#101719] px-2 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] focus:border-[#C49A52] focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] px-2 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] focus:border-[#CE0404] focus:outline-none"
                   >
                     <option value="">None</option>
                     {icpProfiles.map((p) => (
@@ -590,11 +590,11 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-[#D8DEDC]">Default Tone</label>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-[#FAF4F4]">Default Tone</label>
                   <select
                     value={newTone}
                     onChange={(e) => setNewTone(e.target.value as AiDraftTone)}
-                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#101719] px-2 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] focus:border-[#C49A52] focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] px-2 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] focus:border-[#CE0404] focus:outline-none"
                   >
                     <option value="warm_professional">Warm Professional</option>
                     <option value="executive">Executive & Concise</option>
@@ -604,38 +604,38 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-[#D8DEDC]">Max Follow-Ups</label>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-[#FAF4F4]">Max Follow-Ups</label>
                   <input
                     type="number"
                     min={0}
                     max={10}
                     value={newMaxFollowUps}
                     onChange={(e) => setNewMaxFollowUps(Number(e.target.value))}
-                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#101719] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] tabular-nums focus:border-[#C49A52] focus:outline-none"
+                    className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] tabular-nums focus:border-[#CE0404] focus:outline-none"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-[#D8DEDC]">Description / Notes (optional)</label>
+                <label className="block text-xs font-medium text-slate-700 dark:text-[#FAF4F4]">Description / Notes (optional)</label>
                 <textarea
                   rows={2}
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#101719] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] focus:border-[#C49A52] focus:outline-none"
+                  className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] focus:border-[#CE0404] focus:outline-none"
                 />
               </div>
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowCreateForm(false)}
-                  className="rounded-md border border-slate-200 dark:border-[#344447] bg-white dark:bg-[#243638] px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-[#D8DEDC] hover:bg-slate-50 dark:hover:bg-[#2D4245]"
+                  className="rounded-md border border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#690303] px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-[#FAF4F4] hover:bg-slate-50 dark:hover:bg-[#910303]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={busy}
-                  className="rounded-md bg-[#335C67] px-4 py-1.5 text-xs font-semibold text-[#D8DEDC] hover:bg-[#3D6C79] disabled:opacity-50"
+                  className="rounded-md bg-[#B30303] px-4 py-1.5 text-xs font-bold text-white hover:bg-[#CE0404] disabled:opacity-50"
                 >
                   {busy ? 'Creating...' : 'Create Campaign'}
                 </button>
@@ -644,15 +644,15 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
           )}
 
           {campaignsV2.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 dark:border-[#344447] bg-white dark:bg-[#192629] p-10 text-center">
-              <Send className="mx-auto h-8 w-8 text-slate-400 dark:text-[#A1ADAA]" />
-              <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-[#D8DEDC]">No outreach campaigns yet</p>
-              <p className="mt-1 text-xs text-slate-500 dark:text-[#A1ADAA]">
+            <div className="rounded-lg border border-dashed border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#440303] p-10 text-center">
+              <Send className="mx-auto h-8 w-8 text-slate-400 dark:text-[#C9A7A7]" />
+              <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-[#FAF4F4]">No outreach campaigns yet</p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-[#E6D2D2]">
                 Create an individual or controlled-batch campaign to enroll CRM companies, generate evidence-grounded drafts, and review every message before dispatch.
               </p>
               <button
                 onClick={() => setShowCreateForm(true)}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-[#335C67] px-3.5 py-2 text-xs font-semibold text-[#D8DEDC] hover:bg-[#3D6C79]"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-[#B30303] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#CE0404]"
               >
                 <Plus className="h-3.5 w-3.5" /> Create First Campaign
               </button>
@@ -670,18 +670,18 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                       onClick={() => setSelectedCampaignId(c.id)}
                       className={`w-full rounded-lg border p-3.5 text-left transition-colors ${
                         active
-                          ? 'border-[#335C67] dark:border-[#C49A52] bg-[#335C67]/10 dark:bg-[#243638]'
-                          : 'border-slate-200 dark:border-[#344447] bg-white dark:bg-[#192629] hover:border-slate-300 dark:hover:border-[#C49A52]/40 dark:hover:bg-[#243638]/60'
+                          ? 'border-[#CE0404] bg-[#910303]/10 dark:bg-[#690303]'
+                          : 'border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] hover:border-slate-300 dark:hover:border-[#CE0404]/70 dark:hover:bg-[#690303]/70'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-semibold text-slate-900 dark:text-[#D8DEDC]">{c.name}</p>
-                        <span className="rounded border border-slate-200 dark:border-[#344447] bg-slate-50 dark:bg-[#101719] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-700 dark:text-[#C49A52]">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-[#FAF4F4]">{c.name}</p>
+                        <span className="rounded border border-slate-200 dark:border-[#7A1E1E] bg-slate-50 dark:bg-[#240202] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-700 dark:text-[#FF9492]">
                           {c.status}
                         </span>
                       </div>
-                      <p className="mt-1 line-clamp-2 text-xs text-slate-600 dark:text-[#A1ADAA]">{c.objective}</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-x-3 text-[11px] text-slate-500 dark:text-[#A1ADAA]">
+                      <p className="mt-1 line-clamp-2 text-xs text-slate-600 dark:text-[#E6D2D2]">{c.objective}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 text-[11px] text-slate-500 dark:text-[#C9A7A7]">
                         <span className="uppercase">{c.channel}</span>
                         <span>{c.mode.replace('_', ' ')}</span>
                         <span className="tabular-nums">{countEnrolled} enrolled</span>
@@ -695,12 +695,12 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
               {/* Right Selected Campaign Workspace */}
               {selectedCampaign && (
                 <div className="lg:col-span-8 space-y-4">
-                  <div className="rounded-lg border border-slate-200 dark:border-[#344447] bg-white dark:bg-[#192629] p-4 space-y-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 dark:border-[#344447] pb-3">
+                  <div className="rounded-lg border border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] p-4 space-y-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 dark:border-[#7A1E1E] pb-3">
                       <div>
-                        <h3 className="text-base font-semibold text-slate-900 dark:text-[#D8DEDC]">{selectedCampaign.name}</h3>
-                        <p className="text-xs text-slate-600 dark:text-[#A1ADAA] mt-0.5">{selectedCampaign.objective}</p>
-                        <p className="text-[11px] text-slate-500 dark:text-[#A1ADAA] mt-1">
+                        <h3 className="text-base font-semibold text-slate-900 dark:text-[#FAF4F4]">{selectedCampaign.name}</h3>
+                        <p className="text-xs text-slate-600 dark:text-[#E6D2D2] mt-0.5">{selectedCampaign.objective}</p>
+                        <p className="text-[11px] text-slate-500 dark:text-[#C9A7A7] mt-1">
                           Channel: {selectedCampaign.channel.toUpperCase()} · Tone: {selectedCampaign.defaultTone} · Max Follow-Ups: {selectedCampaign.maxFollowUps}
                           {selectedCampaign.targetIcpName ? ` · Target ICP: ${selectedCampaign.targetIcpName}` : ''}
                         </p>
@@ -710,7 +710,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                           <button
                             onClick={() => handleCampaignStatus(selectedCampaign.id, 'active')}
                             disabled={busy}
-                            className="inline-flex items-center gap-1 rounded-md border border-emerald-200 dark:border-[#31645C] bg-emerald-50 dark:bg-[#243638] px-2.5 py-1 text-xs font-medium text-emerald-800 dark:text-[#7CB0A6] hover:bg-emerald-100 dark:hover:bg-[#2D4245]"
+                            className="inline-flex items-center gap-1 rounded-md border border-emerald-200 dark:border-emerald-700/70 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60"
                           >
                             <Play className="h-3.5 w-3.5" /> Activate
                           </button>
@@ -719,7 +719,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                           <button
                             onClick={() => handleCampaignStatus(selectedCampaign.id, 'paused')}
                             disabled={busy}
-                            className="inline-flex items-center gap-1 rounded-md border border-amber-200 dark:border-[#C49A52]/60 bg-amber-50 dark:bg-[#243638] px-2.5 py-1 text-xs font-medium text-amber-800 dark:text-[#D3B073] hover:bg-amber-100 dark:hover:bg-[#2D4245]"
+                            className="inline-flex items-center gap-1 rounded-md border border-amber-200 dark:border-amber-600/60 bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 text-xs font-medium text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60"
                           >
                             <Pause className="h-3.5 w-3.5" /> Pause
                           </button>
@@ -728,7 +728,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                           <button
                             onClick={() => handleCampaignStatus(selectedCampaign.id, 'archived')}
                             disabled={busy}
-                            className="inline-flex items-center gap-1 rounded-md border border-slate-200 dark:border-[#344447] bg-white dark:bg-[#243638] px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-[#A1ADAA] hover:bg-slate-50 dark:hover:bg-[#2D4245] dark:hover:text-[#D8DEDC]"
+                            className="inline-flex items-center gap-1 rounded-md border border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#690303] px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-[#E6D2D2] hover:bg-slate-50 dark:hover:bg-[#910303] dark:hover:text-[#FAF4F4]"
                           >
                             <Archive className="h-3.5 w-3.5" /> Archive
                           </button>
@@ -738,49 +738,49 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
 
                     {/* Enroll CRM Companies / Decision-Makers */}
                     {selectedCampaign.status !== 'archived' && (
-                      <div className="rounded-md border border-slate-200 dark:border-[#344447] bg-slate-50 dark:bg-[#101719] p-3 space-y-2.5">
+                      <div className="rounded-md border border-slate-200 dark:border-[#7A1E1E] bg-slate-50 dark:bg-[#240202] p-3 space-y-2.5">
                         <div className="flex items-center justify-between">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-[#D8DEDC]">
-                            <Users className="h-3.5 w-3.5 text-[#335C67] dark:text-[#C49A52]" />
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-[#FAF4F4]">
+                            <Users className="h-3.5 w-3.5 text-[#B30303] dark:text-[#FF9492]" />
                             Enroll CRM Companies & Decision-Makers
                           </span>
-                          <span className="text-[11px] text-slate-500 dark:text-[#A1ADAA]">
+                          <span className="text-[11px] text-slate-500 dark:text-[#C9A7A7]">
                             Checks suppression, opt-outs, email validity & duplicate protection
                           </span>
                         </div>
-                        <div className="max-h-36 overflow-y-auto rounded border border-slate-200 dark:border-[#344447] bg-white dark:bg-[#192629] divide-y divide-slate-100 dark:divide-[#344447]">
+                        <div className="max-h-36 overflow-y-auto rounded border border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] divide-y divide-slate-100 dark:divide-[#7A1E1E]">
                           {leads.length === 0 ? (
-                            <p className="p-3 text-xs text-slate-500 dark:text-[#A1ADAA]">No CRM companies available to enroll.</p>
+                            <p className="p-3 text-xs text-slate-500 dark:text-[#C9A7A7]">No CRM companies available to enroll.</p>
                           ) : (
                             leads.slice(0, 40).map((l) => (
                               <label
                                 key={l.id}
-                                className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-[#243638] cursor-pointer"
+                                className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-[#690303] cursor-pointer"
                               >
                                 <span className="flex items-center gap-2 min-w-0">
                                   <input
                                     type="checkbox"
                                     checked={enrollLeadIds.includes(l.id)}
                                     onChange={() => toggleEnrollLead(l.id)}
-                                    className="accent-[#335C67]"
+                                    className="accent-[#B30303]"
                                   />
-                                  <span className="font-medium text-slate-800 dark:text-[#D8DEDC] truncate">{l.companyName}</span>
-                                  <span className="text-slate-500 dark:text-[#A1ADAA] truncate">{l.email || 'no company email'}</span>
+                                  <span className="font-medium text-slate-800 dark:text-[#FAF4F4] truncate">{l.companyName}</span>
+                                  <span className="text-slate-500 dark:text-[#C9A7A7] truncate">{l.email || 'no company email'}</span>
                                 </span>
-                                <span className="text-[11px] text-slate-400 dark:text-[#A1ADAA] shrink-0">{l.status}</span>
+                                <span className="text-[11px] text-slate-400 dark:text-[#C9A7A7] shrink-0">{l.status}</span>
                               </label>
                             ))
                           )}
                         </div>
                         {enrollLeadIds.length === 1 && persons.length > 0 && (
                           <div>
-                            <label className="block text-[11px] font-medium text-slate-700 dark:text-[#D8DEDC]">
+                            <label className="block text-[11px] font-medium text-slate-700 dark:text-[#FAF4F4]">
                               Specific Decision-Maker (optional)
                             </label>
                             <select
                               value={enrollPersonId}
                               onChange={(e) => setEnrollPersonId(e.target.value)}
-                              className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#192629] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] focus:border-[#C49A52] focus:outline-none"
+                              className="mt-1 w-full rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#440303] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] focus:border-[#CE0404] focus:outline-none"
                             >
                               <option value="">Company-level contact</option>
                               {persons.map((p) => (
@@ -792,14 +792,14 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                           </div>
                         )}
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] text-slate-600 dark:text-[#A1ADAA] tabular-nums">
+                          <span className="text-[11px] text-slate-600 dark:text-[#E6D2D2] tabular-nums">
                             {enrollLeadIds.length} company selected
                           </span>
                           <button
                             type="button"
                             onClick={handleEnroll}
                             disabled={busy || enrollLeadIds.length === 0}
-                            className="rounded-md bg-[#335C67] px-3 py-1.5 text-xs font-semibold text-[#D8DEDC] hover:bg-[#3D6C79] disabled:opacity-50"
+                            className="rounded-md bg-[#B30303] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#CE0404] disabled:opacity-50"
                           >
                             Enroll Selected
                           </button>
@@ -814,14 +814,14 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                         value={customDraftInstructions}
                         onChange={(e) => setCustomDraftInstructions(e.target.value)}
                         placeholder="Optional instructions for AI personalization (never fabricates unverified facts)"
-                        className="flex-1 min-w-[220px] rounded-md border border-slate-300 dark:border-[#3E5256] bg-white dark:bg-[#101719] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:border-[#C49A52] focus:outline-none"
+                        className="flex-1 min-w-[220px] rounded-md border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#240202] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#FAF4F4] placeholder:text-slate-500 dark:placeholder:text-[#C9A7A7] focus:border-[#CE0404] focus:outline-none"
                       />
-                      <label className="inline-flex items-center gap-1.5 text-slate-700 dark:text-[#D8DEDC]">
+                      <label className="inline-flex items-center gap-1.5 text-slate-700 dark:text-[#FAF4F4]">
                         <input
                           type="checkbox"
                           checked={includePrivateNotes}
                           onChange={(e) => setIncludePrivateNotes(e.target.checked)}
-                          className="accent-[#335C67]"
+                          className="accent-[#B30303]"
                         />
                         Authorize Private Notes in AI Context
                       </label>
@@ -829,15 +829,15 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
 
                     {/* Enrolled Recipients Table */}
                     <div className="space-y-2">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-[#A1ADAA]">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-[#E6D2D2]">
                         Enrolled Recipients ({campaignEnrollments.length})
                       </h4>
                       {campaignEnrollments.length === 0 ? (
-                        <p className="rounded border border-dashed border-slate-200 dark:border-[#344447] p-4 text-center text-xs text-slate-500 dark:text-[#A1ADAA]">
+                        <p className="rounded border border-dashed border-slate-200 dark:border-[#8C2828] p-4 text-center text-xs text-slate-500 dark:text-[#C9A7A7]">
                           No recipients enrolled in this campaign yet.
                         </p>
                       ) : (
-                        <div className="divide-y divide-slate-100 dark:divide-[#344447] rounded-md border border-slate-200 dark:border-[#344447]">
+                        <div className="divide-y divide-slate-100 dark:divide-[#7A1E1E] rounded-md border border-slate-200 dark:border-[#7A1E1E]">
                           {campaignEnrollments.map((enr) => (
                             <div
                               key={enr.id}
@@ -848,23 +848,23 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => onSelectLead?.(enr.leadId)}
-                                    className="font-semibold text-slate-900 dark:text-[#D8DEDC] hover:text-[#335C67] dark:hover:text-[#C49A52] hover:underline"
+                                    className="font-semibold text-slate-900 dark:text-[#FAF4F4] hover:text-[#B30303] dark:hover:text-[#FF9492] hover:underline"
                                   >
                                     {enr.companyName}
                                   </button>
                                   {enr.personName && (
-                                    <span className="text-slate-600 dark:text-[#A1ADAA]">· {enr.personName}</span>
+                                    <span className="text-slate-600 dark:text-[#E6D2D2]">· {enr.personName}</span>
                                   )}
-                                  <span className="rounded border border-slate-200 dark:border-[#344447] bg-slate-50 dark:bg-[#243638] px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-700 dark:text-[#D8DEDC]">
+                                  <span className="rounded border border-slate-200 dark:border-[#7A1E1E] bg-slate-50 dark:bg-[#690303] px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-700 dark:text-[#FAF4F4]">
                                     {enr.status.replace(/_/g, ' ')}
                                   </span>
                                 </div>
-                                <p className="text-[11px] text-slate-500 dark:text-[#A1ADAA] mt-0.5">
+                                <p className="text-[11px] text-slate-500 dark:text-[#C9A7A7] mt-0.5">
                                   {enr.recipientEmail || 'No email'} · Step {enr.currentStepNumber}/{enr.maxSteps} · Sent: {enr.messagesSentCount}
                                   {enr.recipientTimezone ? ` · TZ: ${enr.recipientTimezone}` : ''}
                                 </p>
                                 {enr.exitReason && (
-                                  <p className="text-[11px] text-amber-700 dark:text-[#C49A52] mt-0.5">{enr.exitReason}</p>
+                                  <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">{enr.exitReason}</p>
                                 )}
                               </div>
                               <div className="flex items-center gap-1.5">
@@ -873,9 +873,9 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                                     type="button"
                                     onClick={() => handleGenerateDraft(enr)}
                                     disabled={busy}
-                                    className="inline-flex items-center gap-1 rounded-md bg-[#335C67] px-2.5 py-1.5 text-xs font-medium text-[#D8DEDC] hover:bg-[#3D6C79] disabled:opacity-50"
+                                    className="inline-flex items-center gap-1 rounded-md bg-[#B30303] px-2.5 py-1.5 text-xs font-bold text-white hover:bg-[#CE0404] disabled:opacity-50"
                                   >
-                                    <Sparkles className="h-3.5 w-3.5 text-[#C49A52]" /> Draft Step {enr.currentStepNumber}
+                                    <Sparkles className="h-3.5 w-3.5" /> Draft Step {enr.currentStepNumber}
                                   </button>
                                 )}
                               </div>
@@ -894,17 +894,17 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
 
       {/* TAB 2: SEQUENCES */}
       {activeTab === 'sequences' && (
-        <div className="rounded-lg border border-slate-200 dark:border-[#344447] bg-white dark:bg-[#192629] p-5 space-y-4">
+        <div className="rounded-lg border border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] p-5 space-y-4">
           {!editingSeq ? (
-            <p className="text-xs text-slate-500 dark:text-[#A1ADAA] text-center py-8">
+            <p className="text-xs text-slate-500 dark:text-[#C9A7A7] text-center py-8">
               Select or create a campaign first to configure its outreach sequence steps and follow-up timing.
             </p>
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-[#344447] pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-[#7A1E1E] pb-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-[#D8DEDC]">{editingSeq.name}</h3>
-                  <p className="text-xs text-slate-500 dark:text-[#A1ADAA]">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-[#FAF4F4]">{editingSeq.name}</h3>
+                  <p className="text-xs text-slate-500 dark:text-[#E6D2D2]">
                     Every sequence step generates an owner-reviewable draft; nothing is sent without explicit approval.
                   </p>
                 </div>
@@ -932,7 +932,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                         ],
                       })
                     }
-                    className="inline-flex items-center gap-1 rounded-md border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#243638] px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-[#D8DEDC] hover:bg-slate-50 dark:hover:bg-[#2D4245]"
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-300 dark:border-[#7A1E1E] bg-white dark:bg-[#690303] px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-[#FAF4F4] hover:bg-slate-50 dark:hover:bg-[#910303]"
                   >
                     <Plus className="h-3.5 w-3.5" /> Add Step
                   </button>
@@ -940,20 +940,20 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                     type="button"
                     onClick={handleSaveSequence}
                     disabled={busy}
-                    className="rounded-md bg-[#335C67] px-3.5 py-1.5 text-xs font-semibold text-[#D8DEDC] hover:bg-[#3D6C79] disabled:opacity-50"
+                    className="rounded-md bg-[#B30303] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[#CE0404] disabled:opacity-50"
                   >
                     Save Sequence
                   </button>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-4 text-xs text-slate-700 dark:text-[#D8DEDC]">
+              <div className="flex flex-wrap items-center gap-4 text-xs text-slate-700 dark:text-[#FAF4F4]">
                 <label className="inline-flex items-center gap-1.5">
                   <input
                     type="checkbox"
                     checked={editingSeq.businessDaysOnly}
                     onChange={(e) => setEditingSeq({ ...editingSeq, businessDaysOnly: e.target.checked })}
-                    className="accent-[#335C67]"
+                    className="accent-[#B30303]"
                   />
                   Business Days Only
                 </label>
@@ -962,7 +962,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                     type="checkbox"
                     checked={editingSeq.stopOnReply}
                     onChange={(e) => setEditingSeq({ ...editingSeq, stopOnReply: e.target.checked })}
-                    className="accent-[#335C67]"
+                    className="accent-[#B30303]"
                   />
                   Stop on Reply
                 </label>
@@ -971,7 +971,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                     type="checkbox"
                     checked={editingSeq.stopOnMeetingBooked}
                     onChange={(e) => setEditingSeq({ ...editingSeq, stopOnMeetingBooked: e.target.checked })}
-                    className="accent-[#335C67]"
+                    className="accent-[#B30303]"
                   />
                   Stop on Meeting Booked
                 </label>
@@ -980,7 +980,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                     type="checkbox"
                     checked={editingSeq.stopOnOptOut}
                     onChange={(e) => setEditingSeq({ ...editingSeq, stopOnOptOut: e.target.checked })}
-                    className="accent-[#335C67]"
+                    className="accent-[#B30303]"
                   />
                   Stop Immediately on Opt-Out
                 </label>
@@ -988,9 +988,9 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
 
               <div className="space-y-3">
                 {editingSeq.steps.map((step, idx) => (
-                  <div key={step.id} className="rounded-md border border-slate-200 dark:border-[#344447] bg-slate-50 dark:bg-[#101719] p-3.5 space-y-2.5">
+                  <div key={step.id} className="rounded-md border border-slate-200 dark:border-[#7A1E1E] bg-slate-50 dark:bg-[#240202] p-3.5 space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-slate-900 dark:text-[#D8DEDC]">
+                      <span className="text-xs font-semibold text-slate-900 dark:text-[#FAF4F4]">
                         Step {idx + 1}: {step.name}
                       </span>
                       {editingSeq.steps.length > 1 && (
@@ -1002,7 +1002,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                               steps: editingSeq.steps.filter((_, i) => i !== idx),
                             })
                           }
-                          className="text-slate-400 dark:text-[#A1ADAA] hover:text-[#8F3438] dark:hover:text-[#D08B8E]"
+                          className="text-slate-400 dark:text-[#C9A7A7] hover:text-[#CE0404] dark:hover:text-[#FF8A87]"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -1018,7 +1018,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                           setEditingSeq({ ...editingSeq, steps: next });
                         }}
                         placeholder="Step label"
-                        className="rounded border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#192629] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] focus:border-[#C49A52] focus:outline-none"
+                        className="rounded border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#440303] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] focus:border-[#CE0404] focus:outline-none"
                       />
                       <select
                         value={step.channel}
@@ -1027,7 +1027,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                           next[idx] = { ...step, channel: e.target.value as OutreachChannelV2 };
                           setEditingSeq({ ...editingSeq, steps: next });
                         }}
-                        className="rounded border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#192629] px-2 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] focus:border-[#C49A52] focus:outline-none"
+                        className="rounded border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#440303] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] focus:border-[#CE0404] focus:outline-none"
                       >
                         <option value="email">Email</option>
                         <option value="linkedin">LinkedIn (Manual)</option>
@@ -1044,10 +1044,10 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                           next[idx] = { ...step, delayDays: Number(e.target.value) };
                           setEditingSeq({ ...editingSeq, steps: next });
                         }}
-                        className="rounded border border-slate-300 dark:border-[#344447] bg-white dark:bg-[#192629] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#D8DEDC] tabular-nums focus:border-[#C49A52] focus:outline-none"
+                        className="rounded border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#440303] px-2.5 py-1.5 text-xs text-slate-900 dark:text-[#FAF4F4] tabular-nums focus:border-[#CE0404] focus:outline-none"
                         title="Delay in days"
                       />
-                      <label className="inline-flex items-center gap-1.5 text-xs text-slate-700 dark:text-[#D8DEDC] px-1">
+                      <label className="inline-flex items-center gap-1.5 text-xs text-slate-700 dark:text-[#FAF4F4] px-1">
                         <input
                           type="checkbox"
                           checked={step.aiPersonalizationEnabled}
@@ -1056,7 +1056,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                             next[idx] = { ...step, aiPersonalizationEnabled: e.target.checked };
                             setEditingSeq({ ...editingSeq, steps: next });
                           }}
-                          className="accent-[#335C67]"
+                          className="accent-[#B30303]"
                         />
                         AI Personalization
                       </label>
@@ -1070,7 +1070,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                         setEditingSeq({ ...editingSeq, steps: next });
                       }}
                       placeholder="Subject template (supports {{company_name}}, {{recipient_name}}, {{campaign_objective}})"
-                      className="w-full rounded border border-slate-300 dark:border-[#3E5256] bg-white dark:bg-[#192629] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:border-[#C49A52] focus:outline-none"
+                      className="w-full rounded border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#440303] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#FAF4F4] placeholder:text-slate-500 dark:placeholder:text-[#C9A7A7] focus:border-[#CE0404] focus:outline-none"
                     />
                     <textarea
                       rows={2}
@@ -1081,7 +1081,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                         setEditingSeq({ ...editingSeq, steps: next });
                       }}
                       placeholder="Optional body template (leave blank for AI / grounded structured generation)"
-                      className="w-full rounded border border-slate-300 dark:border-[#3E5256] bg-white dark:bg-[#192629] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#F2F6F5] placeholder:text-slate-500 dark:placeholder:text-[#9FB2AF] focus:border-[#C49A52] focus:outline-none"
+                      className="w-full rounded border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#440303] px-2.5 py-1.5 text-xs font-medium text-slate-950 dark:text-[#FAF4F4] placeholder:text-slate-500 dark:placeholder:text-[#C9A7A7] focus:border-[#CE0404] focus:outline-none"
                     />
                   </div>
                 ))}
@@ -1139,22 +1139,22 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
               { label: 'Meeting Conversion Rate', value: analytics.rates.meetingConversionRatePercent !== null ? `${analytics.rates.meetingConversionRatePercent}%` : 'N/A' },
               { label: 'Opt-Out Rate', value: analytics.rates.optOutRatePercent !== null ? `${analytics.rates.optOutRatePercent}%` : 'N/A' },
             ].map((r) => (
-              <div key={r.label} className="rounded-lg border border-slate-200 dark:border-[#3A4D50] bg-white dark:bg-[#192629] p-4">
-                <p className="text-xs font-semibold text-slate-600 dark:text-[#B8C7C4]">{r.label}</p>
-                <p className="mt-1 text-2xl font-extrabold text-slate-950 dark:text-[#DFB76D] tabular-nums">{r.value}</p>
+              <div key={r.label} className="rounded-lg border border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] p-4">
+                <p className="text-xs font-semibold text-slate-600 dark:text-[#E6D2D2]">{r.label}</p>
+                <p className="mt-1 text-2xl font-extrabold text-slate-950 dark:text-[#FAF4F4] tabular-nums">{r.value}</p>
               </div>
             ))}
           </div>
 
           {/* By Campaign Table */}
-          <div className="rounded-lg border border-slate-200 dark:border-[#3A4D50] bg-white dark:bg-[#192629] p-4 space-y-2.5 overflow-x-auto">
-            <h3 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">Performance by Campaign (Recorded Evidence Only)</h3>
+          <div className="rounded-lg border border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] p-4 space-y-2.5 overflow-x-auto">
+            <h3 className="text-sm font-bold text-slate-950 dark:text-[#FAF4F4]">Performance by Campaign (Recorded Evidence Only)</h3>
             {analytics.byCampaign.length === 0 ? (
-              <p className="text-xs font-medium text-slate-600 dark:text-[#B8C7C4] py-4">No campaigns recorded yet.</p>
+              <p className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] py-4">No campaigns recorded yet.</p>
             ) : (
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="border-b border-slate-200 dark:border-[#3A4D50] text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE]">
+                  <tr className="border-b border-slate-200 dark:border-[#7A1E1E] text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#F4E8E8]">
                     <th className="py-2 pr-3 font-bold">Campaign</th>
                     <th className="py-2 px-2 font-bold">Channel</th>
                     <th className="py-2 px-2 font-bold text-right">Enrolled</th>
@@ -1165,15 +1165,15 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
                     <th className="py-2 pl-2 font-bold text-right">Opt-Outs</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-[#344447] tabular-nums text-slate-700 dark:text-[#D8DEDC]">
+                <tbody className="divide-y divide-slate-100 dark:divide-[#7A1E1E] tabular-nums text-slate-700 dark:text-[#FAF4F4]">
                   {analytics.byCampaign.map((row) => (
-                    <tr key={row.campaignId} className="hover:bg-slate-50 dark:hover:bg-[#243638]/60">
-                      <td className="py-2 pr-3 font-medium text-slate-900 dark:text-[#D8DEDC]">{row.campaignName}</td>
-                      <td className="py-2 px-2 uppercase text-slate-600 dark:text-[#A1ADAA]">{row.channel}</td>
+                    <tr key={row.campaignId} className="hover:bg-slate-50 dark:hover:bg-[#690303]">
+                      <td className="py-2 pr-3 font-medium text-slate-900 dark:text-[#FAF4F4]">{row.campaignName}</td>
+                      <td className="py-2 px-2 uppercase text-slate-600 dark:text-[#C9A7A7]">{row.channel}</td>
                       <td className="py-2 px-2 text-right">{row.enrolled}</td>
                       <td className="py-2 px-2 text-right">{row.drafted}</td>
-                      <td className="py-2 px-2 text-right font-semibold text-emerald-700 dark:text-[#7CB0A6]">{row.sent}</td>
-                      <td className="py-2 px-2 text-right text-rose-700 dark:text-[#D08B8E]">{row.failed}</td>
+                      <td className="py-2 px-2 text-right font-semibold text-emerald-700 dark:text-emerald-300">{row.sent}</td>
+                      <td className="py-2 px-2 text-right text-rose-700 dark:text-[#FF8A87]">{row.failed}</td>
                       <td className="py-2 px-2 text-right">{row.replies}</td>
                       <td className="py-2 pl-2 text-right">{row.optOuts}</td>
                     </tr>
@@ -1184,15 +1184,15 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
           </div>
 
           {/* Honest Unavailable Metrics Disclosure */}
-          <div className="rounded-lg border border-amber-200 dark:border-[#C49A52]/50 bg-amber-50 dark:bg-[#243638] p-4 space-y-2">
-            <div className="flex items-center gap-2 text-xs font-semibold text-amber-900 dark:text-[#D3B073]">
-              <AlertTriangle className="h-4 w-4 text-amber-700 dark:text-[#C49A52]" />
+          <div className="rounded-lg border border-amber-200 dark:border-amber-600/60 bg-amber-50 dark:bg-[#4A2408]/60 p-4 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-amber-900 dark:text-amber-300">
+              <AlertTriangle className="h-4 w-4 text-amber-700 dark:text-amber-400" />
               Untracked & Unavailable Metrics (Zero Fabricated Telemetry)
             </div>
-            <ul className="space-y-1.5 text-xs text-amber-900 dark:text-[#D8DEDC]">
+            <ul className="space-y-1.5 text-xs text-amber-900 dark:text-[#FAF4F4]">
               {analytics.unavailableMetrics.map((m) => (
                 <li key={m.metric}>
-                  <strong className="text-amber-950 dark:text-[#C49A52]">{m.metric}</strong> [{m.status.toUpperCase()}]: {m.reason}
+                  <strong className="text-amber-950 dark:text-amber-300">{m.metric}</strong> [{m.status.toUpperCase()}]: {m.reason}
                 </li>
               ))}
             </ul>
@@ -1206,20 +1206,20 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={() => setComplianceSubTab('suppression')}
-              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors ${
                 complianceSubTab === 'suppression'
-                  ? 'border-[#335C67] bg-[#335C67] text-[#D8DEDC]'
-                  : 'border-slate-200 dark:border-[#344447] bg-white dark:bg-[#192629] text-slate-700 dark:text-[#A1ADAA] hover:dark:bg-[#243638] hover:dark:text-[#D8DEDC]'
+                  ? 'border-[#CE0404] bg-[#910303] text-white'
+                  : 'border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] text-slate-700 dark:text-[#E6D2D2] hover:dark:bg-[#690303] hover:dark:text-[#FAF4F4]'
               }`}
             >
               Suppression List & Compliance Rules
             </button>
             <button
               onClick={() => setComplianceSubTab('providers')}
-              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors ${
                 complianceSubTab === 'providers'
-                  ? 'border-[#335C67] bg-[#335C67] text-[#D8DEDC]'
-                  : 'border-slate-200 dark:border-[#344447] bg-white dark:bg-[#192629] text-slate-700 dark:text-[#A1ADAA] hover:dark:bg-[#243638] hover:dark:text-[#D8DEDC]'
+                  ? 'border-[#CE0404] bg-[#910303] text-white'
+                  : 'border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] text-slate-700 dark:text-[#E6D2D2] hover:dark:bg-[#690303] hover:dark:text-[#FAF4F4]'
               }`}
             >
               Communication Providers & Vault Health

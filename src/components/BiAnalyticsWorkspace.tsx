@@ -309,8 +309,8 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
               onClick={() => setShowFilters((v) => !v)}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
                 showFilters || activeFilterCount > 0
-                  ? 'bg-slate-100 dark:bg-[#243638] border-[#C49A52]/70 text-[#83632E] dark:text-[#C49A52]'
-                  : 'bg-white dark:bg-[#192629] border-slate-200 dark:border-[#344447] text-slate-700 dark:text-[#D8DEDC] hover:bg-slate-50 dark:hover:bg-[#243638]'
+                  ? 'bg-[#910303] border-[#CE0404] text-white'
+                  : 'bg-white dark:bg-[#440303] border-slate-300 dark:border-[#8C2828] text-slate-700 dark:text-[#FAF4F4] hover:bg-slate-50 dark:hover:bg-[#690303]'
               }`}
             >
               <Filter className="w-3.5 h-3.5" />
@@ -426,7 +426,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => setFilters({})}
-                className="px-3 py-1.5 text-xs font-semibold text-[#8F3438] dark:text-[#C66D71] border border-[#8F3438]/40 rounded-lg hover:bg-[#F9EFEF] dark:hover:bg-[#8F3438]/20"
+                className="px-3 py-1.5 text-xs font-semibold text-[#CE0404] dark:text-[#FF9492] border border-[#E52825]/60 rounded-lg hover:bg-[#FFF1F1] dark:hover:bg-[#690303]"
               >
                 Clear
               </button>
@@ -590,7 +590,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-blue-600 dark:bg-blue-500"
+                          className="h-full rounded-full bg-[#E52825]"
                           style={{ width: `${Math.max(q.count > 0 ? 4 : 0, q.percentage)}%` }}
                         />
                       </div>
@@ -706,7 +706,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE]">
+                  <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#F4E8E8]">
                     <th className="py-2 pr-4 font-bold">Stage</th>
                     <th className="py-2 px-3 font-bold text-right">Companies</th>
                     <th className="py-2 px-3 font-bold text-right">Opportunities</th>
@@ -788,7 +788,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE]">
+                    <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#F4E8E8]">
                       <th className="py-2 pr-4 font-bold">Campaign</th>
                       <th className="py-2 px-3 font-bold">Channel · Status</th>
                       <th className="py-2 px-3 font-bold text-right">Enrolled</th>
@@ -979,7 +979,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
                         </div>
                         <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                           <div
-                            className="h-full bg-blue-600 dark:bg-blue-500"
+                            className="h-full bg-[#E52825]"
                             style={{ width: `${Math.round((pt.newCompanies / maxVal) * 100)}%` }}
                           />
                         </div>
@@ -1009,7 +1009,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
                     </div>
                     <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                       <div
-                        className="h-full bg-[#C49A52] dark:bg-[#C49A52]"
+                        className="h-full bg-[#CE0404] dark:bg-[#E52825]"
                         style={{ width: `${Math.max(step.count > 0 ? 4 : 0, step.shareOfTotalPercent ?? 0)}%` }}
                       />
                     </div>
@@ -1120,11 +1120,11 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
-              <h3 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">Country &amp; Regional Performance</h3>
+              <h3 className="text-sm font-bold text-slate-950 dark:text-[#FAF4F4]">Country &amp; Regional Performance</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE]">
+                    <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#F4E8E8]">
                       <th className="py-2 pr-3 font-bold">Country</th>
                       <th className="py-2 px-2 font-bold text-right">Companies</th>
                       <th className="py-2 px-2 font-bold text-right">Verified</th>
@@ -1152,11 +1152,11 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
             </div>
 
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
-              <h3 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">Source Quality Comparison</h3>
+              <h3 className="text-sm font-bold text-slate-950 dark:text-[#FAF4F4]">Source Quality Comparison</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE]">
+                    <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#F4E8E8]">
                       <th className="py-2 pr-3 font-bold">Source</th>
                       <th className="py-2 px-2 font-bold text-right">Leads</th>
                       <th className="py-2 px-2 font-bold text-right">Verified %</th>
@@ -1186,11 +1186,11 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
-              <h3 className="text-sm font-bold text-slate-950 dark:text-[#F2F6F5]">Industry Opportunity Comparison</h3>
+              <h3 className="text-sm font-bold text-slate-950 dark:text-[#FAF4F4]">Industry Opportunity Comparison</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE]">
+                    <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#F4E8E8]">
                       <th className="py-2 pr-3 font-bold">Industry</th>
                       <th className="py-2 px-2 font-bold text-right">Companies</th>
                       <th className="py-2 px-2 font-bold text-right">Open / Won</th>
@@ -1403,7 +1403,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
                   <div className="overflow-x-auto max-h-[460px] overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-lg">
                     <table className="w-full text-left border-collapse text-xs">
                       <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
-                        <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE]">
+                        <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#F4E8E8]">
                           {generatedReport.columns.map((col) => (
                             <th key={col} className="py-2 px-3 font-bold whitespace-nowrap">
                               {col}

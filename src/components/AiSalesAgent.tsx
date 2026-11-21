@@ -315,12 +315,12 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
             onClick={() => setIncludePrivateNotes((prev) => !prev)}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold whitespace-nowrap transition-colors ${
               includePrivateNotes
-                ? 'border-[#C49A52]/70 bg-slate-100 dark:bg-[#243638] text-[#83632E] dark:text-[#C49A52]'
-                : 'border-slate-200 dark:border-[#344447] bg-white dark:bg-[#192629] text-slate-600 dark:text-[#A1ADAA] hover:text-slate-900 dark:hover:text-[#D8DEDC] dark:hover:bg-[#243638]'
+                ? 'border-[#CE0404] bg-[#910303]/10 dark:bg-[#910303] text-[#910303] dark:text-[#FAF4F4]'
+                : 'border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] text-slate-600 dark:text-[#E6D2D2] hover:text-slate-900 dark:hover:text-[#FAF4F4] dark:hover:bg-[#690303]'
             }`}
             title="Private owner notes are excluded from AI context by default. Toggle to explicitly authorize inclusion for requests."
           >
-            {includePrivateNotes ? <Unlock className="w-3.5 h-3.5 text-[#C49A52]" /> : <Lock className="w-3.5 h-3.5" />}
+            {includePrivateNotes ? <Unlock className="w-3.5 h-3.5 text-[#CE0404] dark:text-[#FF9492]" /> : <Lock className="w-3.5 h-3.5" />}
             <span>{includePrivateNotes ? 'Private Notes: Authorized' : 'Private Notes: Excluded'}</span>
           </button>
         }

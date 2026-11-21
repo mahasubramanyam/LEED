@@ -445,8 +445,8 @@ export const PerformanceDiagnosticsPanel: React.FC<PerformanceDiagnosticsPanelPr
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
         <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div>
-            <h3 className="text-xs font-bold text-slate-950 dark:text-[#F2F6F5]">Top API Route Groups by p95 Latency</h3>
-            <p className="text-[11px] font-medium text-slate-600 dark:text-[#B8C7C4]">
+            <h3 className="text-xs font-bold text-slate-950 dark:text-[#FAF4F4]">Top API Route Groups by p95 Latency</h3>
+            <p className="text-[11px] font-medium text-slate-600 dark:text-[#E6D2D2]">
               Dynamic entity IDs are normalized to <code className="font-mono">:id</code> / <code className="font-mono">:uuid</code> to prevent PII leakage and cardinality growth.
             </p>
           </div>
@@ -455,7 +455,7 @@ export const PerformanceDiagnosticsPanel: React.FC<PerformanceDiagnosticsPanelPr
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#D5E0DE] bg-slate-50 dark:bg-slate-950/60">
+              <tr className="border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider text-slate-700 dark:text-[#F4E8E8] bg-slate-50 dark:bg-slate-950/60">
                 <th className="px-5 py-2.5 font-bold">Route</th>
                 <th className="px-3 py-2.5 font-bold text-right">Calls</th>
                 <th className="px-3 py-2.5 font-bold text-right">Avg (ms)</th>

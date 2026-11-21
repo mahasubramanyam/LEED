@@ -2,267 +2,269 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ============================================================================
- * LEED Midnight Teal & Burnished Gold Design System
- * Typography: Inter (Bold, High-Contrast Enterprise Hierarchy)
+ * LEED Dark Red & Maroon Design System
+ * Typography: Inter (Bold, High-Contrast Enterprise Hierarchy — Preserved)
  *
- * Approved Palette (preserved unchanged):
- *   Obsidian Teal:  #101719  (Main application background)
- *   Midnight Black: #0B1113  (Sidebar, navigation background, deepest surfaces)
- *   Deep Slate:     #192629  (Cards, panels, tables, standard surfaces)
- *   Elevated Slate: #243638  (Elevated cards, hover surfaces, modal sections, dropdowns)
- *   Signature Teal: #335C67  (Primary buttons, branded components, active controls)
- *   Burnished Gold: #C49A52  (Active nav indicators, premium accents, selected tabs, highlights)
- *   Muted Crimson:  #8F3438  (Errors, destructive actions, overdue items, warnings)
- *   Muted Plum:     #6F565F  (Secondary accents)
- *   High-Contrast Dark Text: #F0F4F3 primary, #B6C6C3 secondary/muted
- *   High-Contrast Light Text: #0D1517 primary, #3A4D51 / #485B5F secondary/muted
+ * Approved Colour Palette & Roles:
+ *   Black Bean:       #240202  (Main application background & deepest wells)
+ *   Dark Maroon:      #440303  (Sidebar, navigation & primary dark surfaces/cards)
+ *   Blood Red:        #690303  (Secondary panels, elevated surfaces & hovers)
+ *   Dark Red:         #910303  (Selected navigation & active states/tabs)
+ *   Crimson:          #B30303  (Primary buttons & important actions)
+ *   Candy Apple Red:  #CE0404  (Highlights, focus rings & interactive accents)
+ *   Coral Red:        #E52825  (Notifications, charts & emphasis)
+ *   Pure Red:         #FA0502  (Very limited use for critical indicators)
  * ============================================================================ */
 
 @theme {
-  /* Typography: Inter across the entire application */
+  /* Typography: Inter across the entire application (preserved unchanged) */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
-  /* Named Midnight Teal & Burnished Gold Brand Tokens */
-  --color-mt-obsidian: #101719;
-  --color-mt-midnight: #0B1113;
-  --color-mt-slate: #192629;
-  --color-mt-elevated: #243638;
-  --color-mt-teal: #335C67;
-  --color-mt-teal-hover: #3D6C79;
-  --color-mt-teal-deep: #25464F;
-  --color-mt-gold: #C49A52;
-  --color-mt-gold-soft: #DFB76D;
-  --color-mt-crimson: #8F3438;
-  --color-mt-crimson-soft: #DF8589;
-  --color-mt-plum: #6F565F;
-  --color-mt-plum-soft: #BAA2AC;
-  --color-mt-silver: #F0F4F3;
-  --color-mt-muted: #B6C6C3;
-  --color-mt-border: #3A4D50;
+  /* Named Dark Red & Maroon Brand Tokens */
+  --color-dr-black-bean: #240202;
+  --color-dr-maroon: #440303;
+  --color-dr-blood: #690303;
+  --color-dr-dark-red: #910303;
+  --color-dr-crimson: #B30303;
+  --color-dr-candy: #CE0404;
+  --color-dr-coral: #E52825;
+  --color-dr-pure: #FA0502;
+  --color-dr-text: #FAF4F4;
+  --color-dr-text-secondary: #E6D2D2;
+  --color-dr-text-muted: #C9A7A7;
+  --color-dr-accent-text: #FF9492;
+  --color-dr-border: #7A1E1E;
+  --color-dr-border-strong: #8C2828;
 
-  /* High-Contrast Neutral Surface & Ink Scale (Light Mode Defaults) */
-  --color-slate-50: #F4F7F6;
-  --color-slate-100: #E8EEED;
-  --color-slate-200: #CFD9D7;
-  --color-slate-300: #B4C2C0;
-  --color-slate-400: #596D71;
-  --color-slate-500: #485B5F;
-  --color-slate-600: #3A4D51;
-  --color-slate-700: #2C3D41;
-  --color-slate-800: #1D2C30;
-  --color-slate-900: #101719;
-  --color-slate-950: #0B1113;
+  /* High-Contrast Warm Neutral Scale (Light Mode Defaults) */
+  --color-slate-50: #FAF6F6;
+  --color-slate-100: #F3EBEB;
+  --color-slate-200: #E2D2D2;
+  --color-slate-300: #CCB6B6;
+  --color-slate-400: #6E5252;
+  --color-slate-500: #5A3E3E;
+  --color-slate-600: #482E2E;
+  --color-slate-700: #381F1F;
+  --color-slate-800: #2E1010;
+  --color-slate-900: #240202;
+  --color-slate-950: #180101;
 
-  /* Signature Teal Ramp (#335C67) — replaces generic blue/indigo/cyan/sky */
-  --color-blue-50: #EEF4F5;
-  --color-blue-100: #D6E4E7;
-  --color-blue-200: #B0CBD1;
-  --color-blue-300: #93BDC7;
-  --color-blue-400: #7EB0BE;
-  --color-blue-500: #3E6E7B;
-  --color-blue-600: #335C67;
-  --color-blue-700: #2A4D56;
-  --color-blue-800: #213D45;
-  --color-blue-900: #182D33;
-  --color-blue-950: #101E22;
+  /* Primary Brand Ramp — Crimson (#B30303) / Dark Red (#910303) / Candy Apple (#CE0404)
+     Harmonizes legacy blue/indigo primary CTAs and brand accents seamlessly */
+  --color-blue-50: #FDF3F3;
+  --color-blue-100: #FCE3E3;
+  --color-blue-200: #F8C5C4;
+  --color-blue-300: #FFA8A6;
+  --color-blue-400: #FF8A87;
+  --color-blue-500: #CE0404;
+  --color-blue-600: #B30303;
+  --color-blue-700: #910303;
+  --color-blue-800: #690303;
+  --color-blue-900: #440303;
+  --color-blue-950: #240202;
 
-  --color-indigo-50: #EEF4F5;
-  --color-indigo-100: #D6E4E7;
-  --color-indigo-200: #B0CBD1;
-  --color-indigo-300: #93BDC7;
-  --color-indigo-400: #7EB0BE;
-  --color-indigo-500: #3E6E7B;
-  --color-indigo-600: #335C67;
-  --color-indigo-700: #2A4D56;
-  --color-indigo-800: #213D45;
-  --color-indigo-900: #182D33;
-  --color-indigo-950: #101E22;
+  --color-indigo-50: #FDF3F3;
+  --color-indigo-100: #FCE3E3;
+  --color-indigo-200: #F8C5C4;
+  --color-indigo-300: #FFA8A6;
+  --color-indigo-400: #FF8A87;
+  --color-indigo-500: #CE0404;
+  --color-indigo-600: #B30303;
+  --color-indigo-700: #910303;
+  --color-indigo-800: #690303;
+  --color-indigo-900: #440303;
+  --color-indigo-950: #240202;
 
-  --color-cyan-50: #EEF4F5;
-  --color-cyan-100: #D6E4E7;
-  --color-cyan-200: #B0CBD1;
-  --color-cyan-300: #93BDC7;
-  --color-cyan-400: #7EB0BE;
-  --color-cyan-500: #3E6E7B;
-  --color-cyan-600: #335C67;
-  --color-cyan-700: #2A4D56;
-  --color-cyan-800: #213D45;
-  --color-cyan-900: #182D33;
-  --color-cyan-950: #101E22;
+  /* Distinct Semantic Info Ramp (Cool Steel Blue — clearly distinct from Red brand & errors) */
+  --color-sky-50: #F0F6FC;
+  --color-sky-100: #DCEBFA;
+  --color-sky-200: #B8D8F5;
+  --color-sky-300: #93C5FD;
+  --color-sky-400: #7DD3FC;
+  --color-sky-500: #2B7CB8;
+  --color-sky-600: #1D6396;
+  --color-sky-700: #174E78;
+  --color-sky-800: #143D5E;
+  --color-sky-900: #102D47;
+  --color-sky-950: #0C1F31;
 
-  --color-sky-50: #EEF4F5;
-  --color-sky-100: #D6E4E7;
-  --color-sky-200: #B0CBD1;
-  --color-sky-300: #93BDC7;
-  --color-sky-400: #7EB0BE;
-  --color-sky-500: #3E6E7B;
-  --color-sky-600: #335C67;
-  --color-sky-700: #2A4D56;
-  --color-sky-800: #213D45;
-  --color-sky-900: #182D33;
-  --color-sky-950: #101E22;
+  --color-cyan-50: #F0F6FC;
+  --color-cyan-100: #DCEBFA;
+  --color-cyan-200: #B8D8F5;
+  --color-cyan-300: #93C5FD;
+  --color-cyan-400: #7DD3FC;
+  --color-cyan-500: #2B7CB8;
+  --color-cyan-600: #1D6396;
+  --color-cyan-700: #174E78;
+  --color-cyan-800: #143D5E;
+  --color-cyan-900: #102D47;
+  --color-cyan-950: #0C1F31;
 
-  /* Burnished Gold Ramp (#C49A52) */
-  --color-amber-50: #F8F3E8;
-  --color-amber-100: #EFE4CC;
-  --color-amber-200: #E5D1A8;
-  --color-amber-300: #E2C07E;
-  --color-amber-400: #DFB76D;
-  --color-amber-500: #C49A52;
-  --color-amber-600: #997435;
-  --color-amber-700: #7A5924;
-  --color-amber-800: #5C431B;
-  --color-amber-900: #423117;
-  --color-amber-950: #261C0D;
+  /* Distinct Semantic Warning Ramp (Warm Amber Gold — clearly distinct from Red) */
+  --color-amber-50: #FFFBEB;
+  --color-amber-100: #FEF3C7;
+  --color-amber-200: #FDE68A;
+  --color-amber-300: #FCD34D;
+  --color-amber-400: #FBBF24;
+  --color-amber-500: #D97706;
+  --color-amber-600: #B45309;
+  --color-amber-700: #92400E;
+  --color-amber-800: #78350F;
+  --color-amber-900: #4A2408;
+  --color-amber-950: #321805;
 
-  --color-yellow-50: #F8F3E8;
-  --color-yellow-100: #EFE4CC;
-  --color-yellow-200: #E5D1A8;
-  --color-yellow-300: #E2C07E;
-  --color-yellow-400: #DFB76D;
-  --color-yellow-500: #C49A52;
-  --color-yellow-600: #997435;
-  --color-yellow-700: #7A5924;
-  --color-yellow-800: #5C431B;
-  --color-yellow-900: #423117;
-  --color-yellow-950: #261C0D;
+  --color-yellow-50: #FFFBEB;
+  --color-yellow-100: #FEF3C7;
+  --color-yellow-200: #FDE68A;
+  --color-yellow-300: #FCD34D;
+  --color-yellow-400: #FBBF24;
+  --color-yellow-500: #D97706;
+  --color-yellow-600: #B45309;
+  --color-yellow-700: #92400E;
+  --color-yellow-800: #78350F;
+  --color-yellow-900: #4A2408;
+  --color-yellow-950: #321805;
 
-  /* Muted Crimson Ramp (#8F3438) — errors, overdue, destructive */
-  --color-red-50: #F9EFEF;
-  --color-red-100: #F1DCDC;
-  --color-red-200: #E8C3C5;
-  --color-red-300: #E8A3A6;
-  --color-red-400: #E58E92;
-  --color-red-500: #A64448;
-  --color-red-600: #8F3438;
-  --color-red-700: #73282C;
-  --color-red-800: #591E21;
-  --color-red-900: #401518;
-  --color-red-950: #280D0F;
+  /* Alert / Error / Critical Ramp — Coral Red (#E52825) & Candy Apple (#CE0404) */
+  --color-red-50: #FFF1F1;
+  --color-red-100: #FFE0DF;
+  --color-red-200: #FFC2C0;
+  --color-red-300: #FF9F9C;
+  --color-red-400: #FF7875;
+  --color-red-500: #E52825;
+  --color-red-600: #CE0404;
+  --color-red-700: #910303;
+  --color-red-800: #690303;
+  --color-red-900: #440303;
+  --color-red-950: #2A0303;
 
-  --color-rose-50: #F9EFEF;
-  --color-rose-100: #F1DCDC;
-  --color-rose-200: #E8C3C5;
-  --color-rose-300: #E8A3A6;
-  --color-rose-400: #E58E92;
-  --color-rose-500: #A64448;
-  --color-rose-600: #8F3438;
-  --color-rose-700: #73282C;
-  --color-rose-800: #591E21;
-  --color-rose-900: #401518;
-  --color-rose-950: #280D0F;
+  --color-rose-50: #FFF1F1;
+  --color-rose-100: #FFE0DF;
+  --color-rose-200: #FFC2C0;
+  --color-rose-300: #FF9F9C;
+  --color-rose-400: #FF7875;
+  --color-rose-500: #E52825;
+  --color-rose-600: #CE0404;
+  --color-rose-700: #910303;
+  --color-rose-800: #690303;
+  --color-rose-900: #440303;
+  --color-rose-950: #2A0303;
 
-  /* Muted Plum Ramp (#6F565F) — refined secondary accents & tertiary series */
-  --color-violet-50: #F5F1F3;
-  --color-violet-100: #E8DFE3;
-  --color-violet-200: #D8C9CE;
-  --color-violet-300: #C8B2BA;
-  --color-violet-400: #BAA2AC;
-  --color-violet-500: #856A74;
-  --color-violet-600: #6F565F;
-  --color-violet-700: #59444C;
-  --color-violet-800: #45343A;
-  --color-violet-900: #312529;
-  --color-violet-950: #20181B;
+  /* Refined Burgundy-Wine Secondary Accent Ramp (harmonized with Dark Maroon) */
+  --color-violet-50: #FBF4F6;
+  --color-violet-100: #F4E4E9;
+  --color-violet-200: #E8C7D1;
+  --color-violet-300: #E3B0BF;
+  --color-violet-400: #D894A8;
+  --color-violet-500: #A34E67;
+  --color-violet-600: #85354D;
+  --color-violet-700: #6B253A;
+  --color-violet-800: #541A2C;
+  --color-violet-900: #3D101E;
+  --color-violet-950: #280913;
 
-  --color-purple-50: #F5F1F3;
-  --color-purple-100: #E8DFE3;
-  --color-purple-200: #D8C9CE;
-  --color-purple-300: #C8B2BA;
-  --color-purple-400: #BAA2AC;
-  --color-purple-500: #856A74;
-  --color-purple-600: #6F565F;
-  --color-purple-700: #59444C;
-  --color-purple-800: #45343A;
-  --color-purple-900: #312529;
-  --color-purple-950: #20181B;
+  --color-purple-50: #FBF4F6;
+  --color-purple-100: #F4E4E9;
+  --color-purple-200: #E8C7D1;
+  --color-purple-300: #E3B0BF;
+  --color-purple-400: #D894A8;
+  --color-purple-500: #A34E67;
+  --color-purple-600: #85354D;
+  --color-purple-700: #6B253A;
+  --color-purple-800: #541A2C;
+  --color-purple-900: #3D101E;
+  --color-purple-950: #280913;
 
-  /* Restrained Deep Teal-Sage (harmonized positive states, zero neon) */
-  --color-emerald-50: #EDF4F2;
-  --color-emerald-100: #D5E5E2;
-  --color-emerald-200: #B4D2CC;
-  --color-emerald-300: #93C2B9;
-  --color-emerald-400: #7BB0A7;
-  --color-emerald-500: #3F796F;
-  --color-emerald-600: #2E6058;
-  --color-emerald-700: #244D46;
-  --color-emerald-800: #1C3B36;
-  --color-emerald-900: #162E2A;
-  --color-emerald-950: #0E1D1B;
+  /* Distinct Semantic Success Ramp (Crisp Emerald Green — unmistakable against Maroon/Red) */
+  --color-emerald-50: #ECFDF5;
+  --color-emerald-100: #D1FAE5;
+  --color-emerald-200: #A7F3D0;
+  --color-emerald-300: #6EE7B7;
+  --color-emerald-400: #4ADE80;
+  --color-emerald-500: #1E9E63;
+  --color-emerald-600: #167C4D;
+  --color-emerald-700: #12613D;
+  --color-emerald-800: #0F4B30;
+  --color-emerald-900: #0C3824;
+  --color-emerald-950: #092619;
 
-  --color-green-50: #EDF4F2;
-  --color-green-100: #D5E5E2;
-  --color-green-200: #B4D2CC;
-  --color-green-300: #93C2B9;
-  --color-green-400: #7BB0A7;
-  --color-green-500: #3F796F;
-  --color-green-600: #2E6058;
-  --color-green-700: #244D46;
-  --color-green-800: #1C3B36;
-  --color-green-900: #162E2A;
-  --color-green-950: #0E1D1B;
+  --color-green-50: #ECFDF5;
+  --color-green-100: #D1FAE5;
+  --color-green-200: #A7F3D0;
+  --color-green-300: #6EE7B7;
+  --color-green-400: #4ADE80;
+  --color-green-500: #1E9E63;
+  --color-green-600: #167C4D;
+  --color-green-700: #12613D;
+  --color-green-800: #0F4B30;
+  --color-green-900: #0C3824;
+  --color-green-950: #092619;
 }
 
 @layer base {
-  /* High-Contrast Light Mode */
+  /* Light Mode — Warm Alabaster Canvas with Black Bean Ink & Crimson/Maroon Brand */
   :root {
     color-scheme: light;
-    --mt-bg: #F4F7F6;
-    --mt-sidebar: #0B1113;
-    --mt-surface: #FFFFFF;
-    --mt-elevated: #EAF0EE;
-    --mt-border: #C8D3D1;
-    --mt-text: #0D1517;
-    --mt-text-secondary: #34474A;
-    --mt-text-muted: #485B5F;
-    --mt-accent: #335C67;
-    --mt-gold: #C49A52;
-    --mt-crimson: #8F3438;
-    --mt-plum: #6F565F;
+    --leed-bg: #FAF6F6;
+    --leed-sidebar: #440303;
+    --leed-surface: #FFFFFF;
+    --leed-elevated: #F3EBEB;
+    --leed-active: #910303;
+    --leed-primary: #B30303;
+    --leed-highlight: #CE0404;
+    --leed-coral: #E52825;
+    --leed-critical: #FA0502;
+    --leed-border: #DFCECE;
+    --leed-border-strong: #C7B1B1;
+    --leed-text: #240202;
+    --leed-text-secondary: #482E2E;
+    --leed-text-muted: #5A3E3E;
   }
 
-  /* Default Dark Mode — Midnight Teal & Burnished Gold with Elevated Text & Border Contrast */
+  /* Default Dark Mode — Black Bean, Dark Maroon & Blood Red Foundation */
   :root.dark {
     color-scheme: dark;
-    --mt-bg: #101719;
-    --mt-sidebar: #0B1113;
-    --mt-surface: #192629;
-    --mt-elevated: #243638;
-    --mt-border: #3A4D50;
-    --mt-text: #F0F4F3;
-    --mt-text-secondary: #D4DFDD;
-    --mt-text-muted: #B6C6C3;
-    --mt-accent: #335C67;
-    --mt-gold: #C49A52;
-    --mt-crimson: #8F3438;
-    --mt-plum: #6F565F;
+    --leed-bg: #240202;
+    --leed-sidebar: #440303;
+    --leed-surface: #440303;
+    --leed-elevated: #690303;
+    --leed-active: #910303;
+    --leed-primary: #B30303;
+    --leed-highlight: #CE0404;
+    --leed-coral: #E52825;
+    --leed-critical: #FA0502;
+    --leed-border: #7A1E1E;
+    --leed-border-strong: #8C2828;
+    --leed-text: #FAF4F4;
+    --leed-text-secondary: #E6D2D2;
+    --leed-text-muted: #C9A7A7;
 
-    /* Dark-mode neutral scale calibration: crisp off-white primary text, AA+ muted text, preserved dark surfaces */
-    --color-slate-50: #F6F9F8;
-    --color-slate-100: #F0F4F3;
-    --color-slate-200: #E5ECEA;
-    --color-slate-300: #CFDAD8;
-    --color-slate-400: #B6C6C3;
-    --color-slate-500: #9FB2AF;
-    --color-slate-600: #56696C;
-    --color-slate-700: #3A4D50;
-    --color-slate-800: #243638;
-    --color-slate-900: #192629;
-    --color-slate-950: #101719;
+    /* Dark-mode neutral scale calibration mapped directly to the Dark Red & Maroon palette */
+    --color-slate-50: #FDF9F9;
+    --color-slate-100: #FAF4F4;
+    --color-slate-200: #F4E8E8;
+    --color-slate-300: #E6D2D2;
+    --color-slate-400: #D8BABA;
+    --color-slate-500: #C9A7A7;
+    --color-slate-600: #963636;
+    --color-slate-700: #7A1E1E;
+    --color-slate-800: #690303;
+    --color-slate-900: #440303;
+    --color-slate-950: #240202;
   }
 
   html {
     font-size: 16px;
     font-family: var(--font-sans);
-    background-color: var(--mt-bg);
+    background-color: var(--leed-bg);
   }
 
   body {
-    background-color: var(--mt-bg);
-    color: var(--mt-text);
+    background-color: var(--leed-bg);
+    color: var(--leed-text);
     font-family: var(--font-sans);
     font-weight: 500;
     font-feature-settings: "cv02" 1, "cv03" 1, "cv04" 1, "cv11" 1, "tnum" 1;
@@ -272,7 +274,7 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Bold & Readable Inter Typographic Hierarchy */
+  /* Bold & Readable Inter Typographic Hierarchy (Preserved Unchanged) */
   h1 {
     font-family: var(--font-sans);
     font-weight: 800;
@@ -318,14 +320,14 @@
   /* High-Contrast Placeholders (Light & Dark Modes) */
   input::placeholder,
   textarea::placeholder {
-    color: #54686C;
+    color: #6B4D4D;
     opacity: 1;
     font-weight: 400;
   }
 
   .dark input::placeholder,
   .dark textarea::placeholder {
-    color: #9FB2AF;
+    color: #C9A7A7;
     opacity: 1;
     font-weight: 400;
   }
@@ -360,14 +362,14 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Accessible Burnished Gold Focus Rings */
+  /* Accessible Candy Apple Red Focus Rings */
   :focus-visible {
-    outline: 2px solid #C49A52;
+    outline: 2px solid #CE0404;
     outline-offset: 2px;
   }
 }
 
-/* Custom scrollbars harmonized with Midnight Teal */
+/* Custom scrollbars harmonized with Dark Maroon & Blood Red */
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -376,18 +378,18 @@
   background: transparent;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #A9B8B6;
+  background: #C7B1B1;
   border-radius: 3px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #6D7F7D;
+  background: #910303;
 }
 
 .dark .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #3A4D50;
+  background: #7A1E1E;
 }
 .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #52676B;
+  background: #B30303;
 }
 
 .scrollbar-none::-webkit-scrollbar {
