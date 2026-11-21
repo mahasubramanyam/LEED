@@ -38,7 +38,7 @@ import {
 } from '../../shared/biWorkflowSpecs.ts';
 import type { CanonicalLead, PipelineStage } from '../types.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
-import { ActionMenu, SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
+import { FeatureBanner, SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 type WorkflowSubTab = 'workflows' | 'history' | 'approvals';
 
@@ -380,26 +380,31 @@ export const WorkflowAutomationWorkspace: React.FC<WorkflowAutomationWorkspacePr
 
   return (
     <div className="space-y-5">
-      <WorkspaceToolbar
+      <FeatureBanner
+        tone="maroon"
+        eyebrow="Rule-Based Automation"
+        title="Workflow Automation & Guardrails"
+        description="Build trigger-condition-action rules across CRM events. Sensitive updates pause for owner approval, and automatic external sending is blocked."
+        highlights={
+          workspace
+            ? [
+                {
+                  label: 'Active Rules',
+                  value: `${workspace.stats.enabledWorkflows}/${workspace.stats.totalWorkflows}`,
+                },
+                {
+                  label: 'Executions',
+                  value: workspace.stats.totalExecutions,
+                },
+                {
+                  label: 'Approvals',
+                  value: pendingApprovals.length,
+                },
+              ]
+            : undefined
+        }
         actions={
           <>
-            <ActionMenu
-              label="Actions"
-              items={[
-                {
-                  label: 'Run Timer Sweep',
-                  icon: <Clock className="w-3.5 h-3.5 text-slate-400" />,
-                  onClick: handleEvaluateTimers,
-                  disabled: busy,
-                },
-                {
-                  label: 'Refresh',
-                  icon: <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${loading ? 'animate-spin' : ''}`} />,
-                  onClick: fetchWorkspace,
-                  disabled: loading,
-                },
-              ]}
-            />
             <button
               type="button"
               onClick={() => {
@@ -407,14 +412,34 @@ export const WorkflowAutomationWorkspace: React.FC<WorkflowAutomationWorkspacePr
                 setShowBuilder(true);
                 setSubTab('workflows');
               }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-[#B30303] hover:bg-[#CE0404] rounded-lg transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-[#440303] bg-white hover:bg-[#FAF4F4] rounded-lg shadow-sm transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Workflow</span>
             </button>
+            <button
+              type="button"
+              onClick={handleEvaluateTimers}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-white/12 hover:bg-white/22 border border-white/25 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Run Timer Sweep</span>
+            </button>
+            <button
+              type="button"
+              onClick={fetchWorkspace}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-white/12 hover:bg-white/22 border border-white/25 rounded-lg transition-colors"
+              title="Refresh workflows"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </>
         }
-      >
+      />
+
+      <WorkspaceToolbar>
         <SegmentedTabs
           variant="segmented"
           activeId={subTab}
@@ -432,8 +457,8 @@ export const WorkflowAutomationWorkspace: React.FC<WorkflowAutomationWorkspacePr
       </WorkspaceToolbar>
 
       {/* Concise Safety Disclosure */}
-      <div className="flex flex-wrap items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-[#7A1E1E] bg-slate-50/80 dark:bg-[#440303] text-xs text-slate-600 dark:text-[#E6D2D2]">
-        <ShieldAlert className="w-3.5 h-3.5 text-[#B30303] dark:text-[#E52825] shrink-0" />
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 rounded-xl border border-[#E4DADA] dark:border-[#7A1E1E] bg-white dark:bg-[#440303] text-xs font-medium text-[#422F2F] dark:text-[#E6D2D2] shadow-[0_1px_2px_rgba(36,2,2,0.04)]">
+        <ShieldAlert className="w-4 h-4 text-[#B30303] dark:text-[#E52825] shrink-0" />
         <span>
           Owner approval required for sensitive updates; automatic external sending and destructive deletes are blocked.
           {workspace?.schedulingDisclosure ? ` ${workspace.schedulingDisclosure}` : ''}

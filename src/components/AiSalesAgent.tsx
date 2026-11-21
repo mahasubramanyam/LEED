@@ -34,7 +34,7 @@ import { apiFetch } from '../utils/apiFetch.ts';
 import { IcpAndGoalsPanel } from './ai/IcpAndGoalsPanel.tsx';
 import { ActionProposalsPanel } from './ai/ActionProposalsPanel.tsx';
 import { IntelligenceModulesPanel } from './ai/IntelligenceModulesPanel.tsx';
-import { SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
+import { FeatureBanner, SegmentedTabs } from './ui/SunsetUI.tsx';
 
 type AgentTab =
   | 'chat'
@@ -301,28 +301,45 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
 
   return (
     <div className="space-y-5">
-      <WorkspaceToolbar
-        meta={
+      <FeatureBanner
+        tone="maroon"
+        eyebrow="Personal AI Sales Copilot"
+        title="AI Sales Agent & Action Approvals"
+        description={
           providerStatus
             ? providerStatus.configured
-              ? `Gemini Ready · ${providerStatus.model}`
-              : 'Deterministic Fallback Mode (No GEMINI_API_KEY)'
-            : undefined
+              ? `Connected to ${providerStatus.model}. Grounded strictly in your live CRM accounts, decision-makers, and deal history.`
+              : 'Running in Deterministic Fallback Mode (no GEMINI_API_KEY configured). Safe CRM summaries and proposals remain available.'
+            : 'Grounded in your live CRM portfolio with explicit owner approval required for every proposed mutation.'
         }
+        highlights={[
+          { label: 'Accounts in Scope', value: leads.length },
+          { label: 'Pending Approvals', value: pendingProposalsCount },
+        ]}
         actions={
-          <button
-            type="button"
-            onClick={() => setIncludePrivateNotes((prev) => !prev)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold whitespace-nowrap transition-colors ${
-              includePrivateNotes
-                ? 'border-[#CE0404] bg-[#910303]/10 dark:bg-[#910303] text-[#910303] dark:text-[#FAF4F4]'
-                : 'border-slate-200 dark:border-[#7A1E1E] bg-white dark:bg-[#440303] text-slate-600 dark:text-[#E6D2D2] hover:text-slate-900 dark:hover:text-[#FAF4F4] dark:hover:bg-[#690303]'
-            }`}
-            title="Private owner notes are excluded from AI context by default. Toggle to explicitly authorize inclusion for requests."
-          >
-            {includePrivateNotes ? <Unlock className="w-3.5 h-3.5 text-[#CE0404] dark:text-[#FF9492]" /> : <Lock className="w-3.5 h-3.5" />}
-            <span>{includePrivateNotes ? 'Private Notes: Authorized' : 'Private Notes: Excluded'}</span>
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={handleStartNewConversation}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white text-[#440303] hover:bg-[#FAF4F4] text-xs font-bold shadow-sm transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Session</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIncludePrivateNotes((prev) => !prev)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border text-xs font-semibold whitespace-nowrap transition-colors ${
+                includePrivateNotes
+                  ? 'border-white bg-white/25 text-white'
+                  : 'border-white/25 bg-white/12 text-white hover:bg-white/22'
+              }`}
+              title="Private owner notes are excluded from AI context by default. Toggle to explicitly authorize inclusion for requests."
+            >
+              {includePrivateNotes ? <Unlock className="w-3.5 h-3.5 text-amber-300" /> : <Lock className="w-3.5 h-3.5" />}
+              <span>{includePrivateNotes ? 'Private Notes: Authorized' : 'Private Notes: Excluded'}</span>
+            </button>
+          </>
         }
       />
 
@@ -346,29 +363,29 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Left Rail: Sessions & Context Selector */}
           <div className="lg:col-span-4 space-y-4">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#440303] dark:text-[#F4E8E8]">
                   Active CRM Context
                 </h3>
                 <button
                   onClick={handleStartNewConversation}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[#B30303] dark:text-[#FF9492] hover:underline"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   New Session
                 </button>
               </div>
 
-              <div className="grid grid-cols-3 gap-1 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 text-xs">
+              <div className="grid grid-cols-3 gap-1 border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#F8F5F5] dark:bg-[#240202] rounded-lg p-0.5 text-xs">
                 {(['portfolio', 'company', 'person'] as const).map((sc) => (
                   <button
                     key={sc}
                     onClick={() => setScopeType(sc)}
-                    className={`py-1 rounded-md font-medium capitalize ${
+                    className={`py-1.5 rounded-md font-semibold capitalize transition-colors ${
                       scopeType === sc
-                        ? 'bg-slate-900 dark:bg-blue-600 text-white'
-                        : 'text-slate-600 dark:text-slate-400'
+                        ? 'bg-[#910303] text-white shadow-xs'
+                        : 'text-[#543F3F] dark:text-[#DEC2C2] hover:text-[#240202] dark:hover:text-white'
                     }`}
                   >
                     {sc}
@@ -380,7 +397,7 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
                 <select
                   value={selectedLeadId}
                   onChange={(e) => setSelectedLeadId(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                  className="w-full px-2.5 py-1.5 text-xs font-medium rounded-lg border border-[#D4C2C2] dark:border-[#8C2828] bg-white dark:bg-[#240202] text-[#240202] dark:text-[#FAF4F4]"
                 >
                   <option value="">Select company...</option>
                   {leads.map((l) => (
@@ -395,7 +412,7 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
                 <select
                   value={selectedPersonId}
                   onChange={(e) => setSelectedPersonId(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                  className="w-full px-2.5 py-1.5 text-xs font-medium rounded-lg border border-[#D4C2C2] dark:border-[#8C2828] bg-white dark:bg-[#240202] text-[#240202] dark:text-[#FAF4F4]"
                 >
                   <option value="">Select decision-maker...</option>
                   {persons.map((p) => (
@@ -406,7 +423,7 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
                 </select>
               )}
 
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] font-medium text-[#543F3F] dark:text-[#D1B0B0]">
                 {includePrivateNotes
                   ? 'Owner private notes are explicitly authorized for this turn.'
                   : 'Owner private notes are withheld unless toggled on above.'}
@@ -414,8 +431,8 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
             </div>
 
             {/* Persisted Conversations */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-2 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#440303] dark:text-[#F4E8E8]">
                 Conversation History ({conversations.length})
               </h3>
               {conversations.length === 0 ? (

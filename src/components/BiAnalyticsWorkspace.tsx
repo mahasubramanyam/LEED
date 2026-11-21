@@ -33,7 +33,7 @@ import {
 } from '../../shared/biWorkflowSpecs.ts';
 import type { CanonicalLead, PipelineStage } from '../types.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
-import { NoticeBanner, SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
+import { FeatureBanner, NoticeBanner, SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 type BiSubTab = 'dashboard' | 'advanced' | 'reports' | 'ai_insights';
 
@@ -300,17 +300,42 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
 
   return (
     <div className="space-y-5">
-      <WorkspaceToolbar
-        meta={dashboard ? `Updated ${new Date(dashboard.generatedAt).toLocaleTimeString()}` : undefined}
+      <FeatureBanner
+        tone="maroon"
+        eyebrow="Business Intelligence & Reporting"
+        title="Executive Analytics & Pipeline Intelligence"
+        description={
+          dashboard
+            ? `Live CRM metrics across ${dashboard.leadIntelligence.totalCompanies.toLocaleString()} companies and ${dashboard.salesPipeline.openOpportunities} open deals. Updated ${new Date(dashboard.generatedAt).toLocaleTimeString()}.`
+            : 'Real-time analytics, stage velocity, outreach attribution, and exportable operational reports.'
+        }
+        highlights={
+          dashboard
+            ? [
+                {
+                  label: 'Companies',
+                  value: dashboard.leadIntelligence.totalCompanies.toLocaleString(),
+                },
+                {
+                  label: 'Open Deals',
+                  value: dashboard.salesPipeline.openOpportunities,
+                },
+                {
+                  label: 'Active Rules',
+                  value: `${dashboard.workflowSummary.enabledWorkflows}/${dashboard.workflowSummary.totalWorkflows}`,
+                },
+              ]
+            : undefined
+        }
         actions={
           <>
             <button
               type="button"
               onClick={() => setShowFilters((v) => !v)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-colors shadow-sm ${
                 showFilters || activeFilterCount > 0
-                  ? 'bg-[#910303] border-[#CE0404] text-white'
-                  : 'bg-white dark:bg-[#440303] border-slate-300 dark:border-[#8C2828] text-slate-700 dark:text-[#FAF4F4] hover:bg-slate-50 dark:hover:bg-[#690303]'
+                  ? 'bg-white text-[#910303] hover:bg-[#FAF4F4]'
+                  : 'bg-white text-[#440303] hover:bg-[#FAF4F4]'
               }`}
             >
               <Filter className="w-3.5 h-3.5" />
@@ -321,14 +346,16 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
               type="button"
               onClick={() => fetchAnalytics(filters)}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-white/12 hover:bg-white/22 border border-white/25 rounded-lg transition-colors"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
             </button>
           </>
         }
-      >
+      />
+
+      <WorkspaceToolbar>
         <SegmentedTabs
           variant="segmented"
           activeId={subTab}
@@ -344,7 +371,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
 
       {/* Collapsible Global Analytics Filter Bar */}
       {(showFilters || hasActiveFilters) && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+        <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">From Date</label>
@@ -463,75 +490,75 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
         <div className="space-y-6">
           {/* Top KPI Strip */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+              <div className="flex items-center justify-between text-xs font-semibold text-[#543F3F] dark:text-[#DEC2C2]">
                 <span>Companies &amp; Decision-Makers</span>
-                <Building2 className="w-4 h-4 text-slate-400" />
+                <Building2 className="w-4 h-4 text-[#910303] dark:text-[#E52825]" />
               </div>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                <span className="text-2xl font-extrabold font-mono tabular-nums text-[#240202] dark:text-white">
                   {dashboard.leadIntelligence.totalCompanies.toLocaleString()}
                 </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                <span className="text-xs font-medium text-[#543F3F] dark:text-[#DEC2C2] font-mono tabular-nums">
                   · {dashboard.leadIntelligence.totalDecisionMakers.toLocaleString()} DMs
                 </span>
               </div>
-              <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+              <p className="mt-1.5 text-[11px] font-medium text-[#543F3F] dark:text-[#D1B0B0]">
                 {dashboard.leadIntelligence.verifiedLeads} verified · {dashboard.leadIntelligence.unverifiedLeads} unverified · +{dashboard.leadIntelligence.newlyDiscoveredLeads} recent
               </p>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-gradient-to-br from-[#440303] via-[#690303] to-[#7D0303] border border-[#910303] rounded-xl p-4 shadow-[0_6px_18px_rgba(68,3,3,0.18)] text-white">
+              <div className="flex items-center justify-between text-xs font-semibold text-[#F5DADA]">
                 <span>Sales Pipeline</span>
-                <Target className="w-4 h-4 text-slate-400" />
+                <Target className="w-4 h-4 text-white/90" />
               </div>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                <span className="text-2xl font-extrabold font-mono tabular-nums text-white">
                   {dashboard.salesPipeline.openOpportunities}
                 </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-medium text-[#F5DADA]">
                   open · {dashboard.salesPipeline.wonOpportunities} won · {dashboard.salesPipeline.lostOpportunities} lost
                 </span>
               </div>
-              <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums truncate">
+              <p className="mt-1.5 text-[11px] font-medium text-[#F5DADA]/90 font-mono tabular-nums truncate">
                 {formatCurrencyTotals(dashboard.salesPipeline.openValuesByCurrency)}
                 {dashboard.salesPipeline.winRatePercent !== null ? ` · ${dashboard.salesPipeline.winRatePercent}% win` : ''}
               </p>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+              <div className="flex items-center justify-between text-xs font-semibold text-[#543F3F] dark:text-[#DEC2C2]">
                 <span>Outreach Execution</span>
-                <Globe2 className="w-4 h-4 text-slate-400" />
+                <Globe2 className="w-4 h-4 text-[#1D6396] dark:text-sky-400" />
               </div>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                <span className="text-2xl font-extrabold font-mono tabular-nums text-[#240202] dark:text-white">
                   {dashboard.outreachAnalytics.totals.messagesSentViaProvider}
                 </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-medium text-[#543F3F] dark:text-[#DEC2C2]">
                   provider-confirmed · {dashboard.outreachAnalytics.totals.messagesManualSent} manual
                 </span>
               </div>
-              <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+              <p className="mt-1.5 text-[11px] font-medium text-[#543F3F] dark:text-[#D1B0B0]">
                 {dashboard.outreachAnalytics.totals.repliesReceived} replies (manual) · {dashboard.outreachAnalytics.totals.meetingsScheduled} meetings
               </p>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+              <div className="flex items-center justify-between text-xs font-semibold text-[#543F3F] dark:text-[#DEC2C2]">
                 <span>Activity &amp; Workflows</span>
-                <Activity className="w-4 h-4 text-slate-400" />
+                <Activity className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               </div>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
+                <span className="text-2xl font-extrabold font-mono tabular-nums text-[#240202] dark:text-white">
                   {dashboard.activityAnalytics.tasksCompleted}
                 </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-medium text-[#543F3F] dark:text-[#DEC2C2]">
                   tasks done · {dashboard.activityAnalytics.tasksOverdue} overdue
                 </span>
               </div>
-              <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+              <div className="mt-1.5 flex items-center justify-between text-[11px] font-medium text-[#543F3F] dark:text-[#D1B0B0]">
                 <span>
                   {dashboard.workflowSummary.enabledWorkflows}/{dashboard.workflowSummary.totalWorkflows} workflows active
                 </span>
@@ -539,7 +566,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
                   <button
                     type="button"
                     onClick={onNavigateToWorkflows}
-                    className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                    className="text-[#B30303] dark:text-[#FF9492] hover:underline font-bold"
                   >
                     Manage
                   </button>
@@ -549,19 +576,19 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
           </div>
 
           {/* Section A: Lead Intelligence */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-5 space-y-5 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#EFE8E8] dark:border-[#690303]">
               <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Lead Intelligence</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
+                <h3 className="text-sm font-bold text-[#440303] dark:text-white">Lead Intelligence</h3>
+                <p className="text-xs text-[#543F3F] dark:text-[#DEC2C2]">
                   Avg Quality Score:{' '}
-                  <span className="font-mono tabular-nums font-medium text-slate-800 dark:text-slate-200">
+                  <span className="font-mono tabular-nums font-semibold text-[#240202] dark:text-white">
                     {dashboard.leadIntelligence.averageQualityScore !== null
                       ? `${dashboard.leadIntelligence.averageQualityScore}/100`
                       : 'N/A'}
                   </span>{' '}
                   · Verification Rate:{' '}
-                  <span className="font-mono tabular-nums font-medium text-slate-800 dark:text-slate-200">
+                  <span className="font-mono tabular-nums font-semibold text-[#240202] dark:text-white">
                     {dashboard.leadIntelligence.verificationRatePercent !== null
                       ? `${dashboard.leadIntelligence.verificationRatePercent}%`
                       : 'N/A'}
@@ -572,30 +599,42 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
                   </span>
                 </p>
               </div>
-              <span className="text-[11px] text-slate-400">System Calculated · Live CRM</span>
+              <span className="text-[11px] font-semibold text-[#543F3F] dark:text-[#D1B0B0]">System Calculated · Live CRM</span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
               {/* Quality Grade Distribution */}
               <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300">Quality Grade Distribution</h4>
+                <h4 className="text-xs font-bold text-[#440303] dark:text-[#FAF4F4]">Quality Grade Distribution</h4>
                 <div className="space-y-2">
-                  {dashboard.leadIntelligence.qualityDistribution.map((q) => (
-                    <div key={q.grade} className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-slate-600 dark:text-slate-300 font-medium">Grade {q.grade}</span>
-                        <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                          {q.count} ({q.percentage}%)
-                        </span>
+                  {dashboard.leadIntelligence.qualityDistribution.map((q) => {
+                    const gradeBarColor =
+                      q.grade === 'A'
+                        ? 'bg-emerald-600'
+                        : q.grade === 'B'
+                          ? 'bg-[#1D6396]'
+                          : q.grade === 'C'
+                            ? 'bg-amber-500'
+                            : q.grade === 'D'
+                              ? 'bg-[#E52825]'
+                              : 'bg-[#910303]';
+                    return (
+                      <div key={q.grade} className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-[#240202] dark:text-[#F4E8E8] font-semibold">Grade {q.grade}</span>
+                          <span className="font-mono tabular-nums text-[#543F3F] dark:text-[#DEC2C2]">
+                            {q.count} ({q.percentage}%)
+                          </span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-[#F1EAEA] dark:bg-[#240202] overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${gradeBarColor}`}
+                            style={{ width: `${Math.max(q.count > 0 ? 4 : 0, q.percentage)}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-[#E52825]"
-                          style={{ width: `${Math.max(q.count > 0 ? 4 : 0, q.percentage)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -667,10 +706,10 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
           </div>
 
           {/* Section B: Sales Pipeline & Velocity */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-5 space-y-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#EFE8E8] dark:border-[#690303]">
               <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Sales Pipeline &amp; Stage Aging</h3>
+                <h3 className="text-sm font-bold text-[#440303] dark:text-white">Sales Pipeline &amp; Stage Aging</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Data Source: <span className="font-mono">{dashboard.salesPipeline.dataSource}</span> · Open Value:{' '}
                   <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200">
@@ -743,10 +782,10 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
           </div>
 
           {/* Section C: Outreach Analytics (Strict Provenance Separation) */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-5 space-y-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#EFE8E8] dark:border-[#690303]">
               <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                <h3 className="text-sm font-bold text-[#440303] dark:text-white">
                   Outreach Analytics &amp; Measurement Provenance
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -953,15 +992,15 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
       {dashboard && subTab === 'advanced' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-5 space-y-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                <h3 className="text-sm font-bold text-[#440303] dark:text-white">
                   Lead Acquisition Trends (Monthly)
                 </h3>
-                <span className="text-[11px] text-slate-400">Companies · Verified · Opportunities</span>
+                <span className="text-[11px] font-medium text-[#543F3F] dark:text-[#D1B0B0]">Companies · Verified · Opportunities</span>
               </div>
               {dashboard.advancedAnalytics.leadAcquisitionTrends.length === 0 ? (
-                <p className="text-xs text-slate-400 py-6 text-center">No acquisition data in current filter.</p>
+                <p className="text-xs text-[#543F3F] dark:text-[#D1B0B0] py-6 text-center">No acquisition data in current filter.</p>
               ) : (
                 <div className="space-y-2.5">
                   {(() => {
@@ -972,14 +1011,14 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
                     return dashboard.advancedAnalytics.leadAcquisitionTrends.slice(-8).map((pt) => (
                       <div key={pt.period} className="space-y-1">
                         <div className="flex justify-between text-xs">
-                          <span className="font-mono text-slate-600 dark:text-slate-300">{pt.period}</span>
-                          <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                          <span className="font-mono font-semibold text-[#240202] dark:text-[#FAF4F4]">{pt.period}</span>
+                          <span className="font-mono tabular-nums text-[#543F3F] dark:text-[#DEC2C2]">
                             {pt.newCompanies} added · {pt.verifiedCompanies} verified · {pt.newOpportunities} opps
                           </span>
                         </div>
-                        <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                        <div className="h-2 w-full rounded-full bg-[#F1EAEA] dark:bg-[#240202] overflow-hidden">
                           <div
-                            className="h-full bg-[#E52825]"
+                            className="h-full rounded-full bg-[#1D6396] dark:bg-sky-500"
                             style={{ width: `${Math.round((pt.newCompanies / maxVal) * 100)}%` }}
                           />
                         </div>
@@ -990,31 +1029,41 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
               )}
             </div>
 
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-5 space-y-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                <h3 className="text-sm font-bold text-[#440303] dark:text-white">
                   Pipeline Conversion Funnel
                 </h3>
-                <span className="text-[11px] text-slate-400">Stage Distribution &amp; Step Conversion</span>
+                <span className="text-[11px] font-medium text-[#543F3F] dark:text-[#D1B0B0]">Stage Distribution &amp; Step Conversion</span>
               </div>
               <div className="space-y-2.5">
-                {dashboard.advancedAnalytics.pipelineConversionFunnel.map((step) => (
-                  <div key={step.stageId} className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="font-medium text-slate-700 dark:text-slate-200">{step.stageName}</span>
-                      <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                        {step.count} leads · {step.shareOfTotalPercent ?? 0}% share
-                        {step.stepConversionPercent !== null ? ` · ${step.stepConversionPercent}% step` : ''}
-                      </span>
+                {dashboard.advancedAnalytics.pipelineConversionFunnel.map((step, idx) => {
+                  const funnelPalette = [
+                    'bg-[#440303]',
+                    'bg-[#910303]',
+                    'bg-[#B30303]',
+                    'bg-[#1D6396]',
+                    'bg-emerald-600',
+                    'bg-amber-600',
+                  ];
+                  return (
+                    <div key={step.stageId} className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="font-semibold text-[#240202] dark:text-[#FAF4F4]">{step.stageName}</span>
+                        <span className="font-mono tabular-nums text-[#543F3F] dark:text-[#DEC2C2]">
+                          {step.count} leads · {step.shareOfTotalPercent ?? 0}% share
+                          {step.stepConversionPercent !== null ? ` · ${step.stepConversionPercent}% step` : ''}
+                        </span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-[#F1EAEA] dark:bg-[#240202] overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${funnelPalette[idx % funnelPalette.length]}`}
+                          style={{ width: `${Math.max(step.count > 0 ? 4 : 0, step.shareOfTotalPercent ?? 0)}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <div
-                        className="h-full bg-[#CE0404] dark:bg-[#E52825]"
-                        style={{ width: `${Math.max(step.count > 0 ? 4 : 0, step.shareOfTotalPercent ?? 0)}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>

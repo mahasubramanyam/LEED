@@ -55,10 +55,10 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
   });
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#240202]/80 backdrop-blur-xs flex justify-end">
-      <div className="w-full max-w-lg bg-white dark:bg-[#440303] border-l border-slate-200 dark:border-[#7A1E1E] h-full flex flex-col shadow-2xl">
-        <div className="px-5 py-4 border-b border-slate-200 dark:border-[#7A1E1E] flex items-center justify-between gap-3">
-          <h2 className="text-lg font-bold tracking-tight text-slate-950 dark:text-[#FAF4F4]">
+    <div className="fixed inset-0 z-50 bg-[#240202]/75 backdrop-blur-xs flex justify-end">
+      <div className="w-full max-w-lg bg-white dark:bg-[#440303] border-l border-[#E4DADA] dark:border-[#7A1E1E] h-full flex flex-col shadow-2xl">
+        <div className="px-5 py-4 bg-gradient-to-r from-[#440303] via-[#690303] to-[#910303] text-white border-b border-[#7A1E1E] flex items-center justify-between gap-3">
+          <h2 className="text-lg font-extrabold tracking-tight text-white">
             Reminders
           </h2>
           <div className="flex items-center gap-1.5">
@@ -66,9 +66,9 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenAiAgent({ tab: 'briefing' })}
-                className="px-3 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#CE0404] text-white text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap"
+                className="px-3 py-1.5 rounded-lg bg-white hover:bg-[#FAF4F4] text-[#440303] text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap shadow-xs transition-colors"
               >
-                <Bot className="w-3.5 h-3.5 text-white" />
+                <Bot className="w-3.5 h-3.5 text-[#910303]" />
                 Briefing
               </button>
             )}
@@ -76,7 +76,7 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
               type="button"
               onClick={load}
               aria-label="Refresh reminders"
-              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-950 dark:text-[#E6D2D2] dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#690303]"
+              className="p-1.5 rounded-lg text-[#F5DADA] hover:text-white hover:bg-white/15 transition-colors"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -84,7 +84,7 @@ export const ReminderCenterDrawer: React.FC<ReminderCenterDrawerProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Close reminders"
-              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-950 dark:text-[#E6D2D2] dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#690303]"
+              className="p-1.5 rounded-lg text-[#F5DADA] hover:text-white hover:bg-white/15 transition-colors"
             >
               <X className="w-4 h-4" />
             </button>

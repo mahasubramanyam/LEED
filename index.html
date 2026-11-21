@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,10 +12,10 @@
     <script>
       (function () {
         try {
-          if (localStorage.getItem('leed_theme_v2') === 'light') {
-            document.documentElement.classList.remove('dark');
-          } else {
+          if (localStorage.getItem('leed_theme_v3') === 'dark') {
             document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
           }
         } catch (e) {}
       })();

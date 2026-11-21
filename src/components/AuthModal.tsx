@@ -114,21 +114,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#240202]/85 backdrop-blur-xs">
-      <div className="w-full max-w-md bg-white dark:bg-[#440303] border border-slate-300 dark:border-[#8C2828] rounded-xl shadow-2xl p-6 sm:p-8 relative">
-        {mode === 'change_password' && onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close modal"
-            className="absolute top-4 right-4 p-1 rounded-lg text-slate-500 dark:text-[#E6D2D2] hover:text-slate-950 dark:hover:text-white transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#240202]/75 backdrop-blur-xs">
+      <div className="w-full max-w-md bg-white dark:bg-[#440303] border border-[#DFCECE] dark:border-[#8C2828] rounded-2xl shadow-2xl overflow-hidden relative">
+        {/* Rich Maroon Top Banner Header */}
+        <div className="relative overflow-hidden bg-gradient-to-r from-[#440303] via-[#690303] to-[#910303] px-6 py-6 sm:px-8 text-center text-white">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-[#CE0404]/30 blur-xl"
+          />
+          {mode === 'change_password' && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close modal"
+              className="absolute top-4 right-4 p-1 rounded-lg text-[#F2DADA] hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
 
-        <div className="text-center mb-6">
-          <div className="w-11 h-11 mx-auto rounded-xl bg-[#B30303] border border-[#CE0404] flex items-center justify-center mb-3 shadow-xs">
+          <div className="relative z-10 w-11 h-11 mx-auto rounded-xl bg-white/15 border border-white/25 flex items-center justify-center mb-3 shadow-xs">
             {mode === 'setup' ? (
               <ShieldCheck className="w-5 h-5 text-white" />
             ) : mode === 'change_password' ? (
@@ -138,14 +143,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
             )}
           </div>
 
-          <h2 className="text-2xl font-extrabold text-slate-950 dark:text-[#FAF4F4] tracking-tight">
+          <h2 className="relative z-10 text-2xl font-extrabold text-white tracking-tight">
             {mode === 'setup'
               ? 'Create Owner Account'
               : mode === 'change_password'
               ? 'Change Password'
               : 'Sign In to LEED'}
           </h2>
-          <p className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] mt-1">
+          <p className="relative z-10 text-xs font-medium text-[#FAF0F0] mt-1">
             {mode === 'setup'
               ? 'Set your private credentials to lock this single-owner workspace.'
               : mode === 'change_password'
@@ -154,6 +159,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           </p>
         </div>
 
+        <div className="p-6 sm:p-8">
         {error && (
           <div className="mb-4 p-3 rounded-lg bg-[#FFF1F1] dark:bg-[#2A0303] border border-[#E52825] text-[#910303] dark:text-[#FFE0DF] text-xs font-medium flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-[#FA0502] shrink-0 mt-0.5" />
@@ -270,7 +276,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 px-4 bg-[#B30303] hover:bg-[#CE0404] disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center justify-center gap-2 mt-2"
+            className="w-full py-2.5 px-4 bg-[#B30303] hover:bg-[#910303] disabled:opacity-60 text-white text-sm font-bold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 mt-2"
           >
             {isLoading ? (
               <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -283,6 +289,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
             )}
           </button>
         </form>
+        </div>
       </div>
     </div>
   );

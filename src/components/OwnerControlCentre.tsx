@@ -32,7 +32,7 @@ import {
 } from '../types.ts';
 import { EnrichmentProvidersSection } from './EnrichmentProvidersSection.tsx';
 import { PerformanceDiagnosticsPanel } from './PerformanceDiagnosticsPanel.tsx';
-import { SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
+import { FeatureBanner, SegmentedTabs } from './ui/SunsetUI.tsx';
 
 interface OwnerProfile {
   id: string;
@@ -755,8 +755,16 @@ export function OwnerControlCentre({
 
   return (
     <div className="space-y-5">
-      <WorkspaceToolbar
-        meta={`Administrator: ${owner?.fullName || 'Owner'} (${owner?.email || ''}) · Neon PostgreSQL`}
+      <FeatureBanner
+        tone="maroon"
+        eyebrow="Owner Control Centre"
+        title="Platform Security, Database & Credentials"
+        description={`Administrator: ${owner?.fullName || 'Owner'} (${owner?.email || ''}) · Single-owner governance across Neon PostgreSQL, encrypted connector secrets, and immutable audit logs.`}
+        highlights={[
+          { label: 'Active Sessions', value: sessions.filter((s) => s.isActive).length },
+          { label: 'Audit Events', value: auditLog.length },
+          { label: 'Storage', value: diagData?.diagnostics?.databaseSize || 'Neon PG' },
+        ]}
         actions={
           <button
             type="button"
@@ -765,10 +773,10 @@ export function OwnerControlCentre({
               fetchSessions();
               fetchAuditLog();
             }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors"
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-[#440303] bg-white hover:bg-[#FAF4F4] rounded-lg shadow-sm transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loadingDiag ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
+            <span>Refresh Diagnostics</span>
           </button>
         }
       />
@@ -798,44 +806,44 @@ export function OwnerControlCentre({
         <div className="space-y-6">
           {/* Neon Connection Status Card */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Database Engine</span>
-              <div className="flex items-center gap-2 mt-1">
-                <Database className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <span className="text-base font-semibold text-slate-900 dark:text-white">Neon PostgreSQL</span>
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+              <span className="text-xs font-semibold text-[#543F3F] dark:text-[#DEC2C2]">Database Engine</span>
+              <div className="flex items-center gap-2 mt-1.5">
+                <Database className="w-5 h-5 text-[#1D6396] dark:text-sky-400" />
+                <span className="text-base font-bold text-[#240202] dark:text-white">Neon PostgreSQL</span>
               </div>
-              <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 block">Version 18.6 (Serverless)</span>
+              <span className="text-xs font-medium text-[#543F3F] dark:text-[#D1B0B0] mt-1 block">Version 18.6 (Serverless)</span>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Connection Pool</span>
-              <div className="flex items-center gap-2 mt-1">
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+              <span className="text-xs font-semibold text-[#543F3F] dark:text-[#DEC2C2]">Connection Pool</span>
+              <div className="flex items-center gap-2 mt-1.5">
                 <Radio className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                <span className="text-base font-semibold text-slate-900 dark:text-white">
+                <span className="text-base font-bold text-[#240202] dark:text-white">
                   {diagData?.diagnostics?.pool ? `${diagData.diagnostics.pool.idle} Idle / ${diagData.diagnostics.pool.total} Total` : 'Active'}
                 </span>
               </div>
-              <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 block">Zero waiting queries</span>
+              <span className="text-xs font-medium text-[#543F3F] dark:text-[#D1B0B0] mt-1 block">Zero waiting queries</span>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Storage Size</span>
-              <div className="flex items-center gap-2 mt-1">
-                <Server className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                <span className="text-base font-semibold text-slate-900 dark:text-white">
+            <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+              <span className="text-xs font-semibold text-[#543F3F] dark:text-[#DEC2C2]">Storage Size</span>
+              <div className="flex items-center gap-2 mt-1.5">
+                <Server className="w-5 h-5 text-[#910303] dark:text-[#FF9492]" />
+                <span className="text-base font-bold text-[#240202] dark:text-white">
                   {diagData?.diagnostics?.databaseSize || '8.2 MB'}
                 </span>
               </div>
-              <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 block">Neon Cloud Storage</span>
+              <span className="text-xs font-medium text-[#543F3F] dark:text-[#D1B0B0] mt-1 block">Neon Cloud Storage</span>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Architecture Security</span>
-              <div className="flex items-center gap-2 mt-1">
-                <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                <span className="text-base font-semibold text-slate-900 dark:text-white">Single-Owner Locked</span>
+            <div className="bg-gradient-to-br from-[#440303] via-[#690303] to-[#7D0303] border border-[#910303] rounded-xl p-4 shadow-[0_6px_18px_rgba(68,3,3,0.18)] text-white">
+              <span className="text-xs font-semibold text-[#F5DADA]">Architecture Security</span>
+              <div className="flex items-center gap-2 mt-1.5">
+                <CheckCircle className="w-5 h-5 text-emerald-400" />
+                <span className="text-base font-bold text-white">Single-Owner Locked</span>
               </div>
-              <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 block">Singleton DB constraint</span>
+              <span className="text-xs font-medium text-[#F5DADA]/90 mt-1 block">Singleton DB constraint</span>
             </div>
           </div>
 

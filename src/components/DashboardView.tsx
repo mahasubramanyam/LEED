@@ -25,7 +25,7 @@ import {
   getRelationshipStatusLabel,
 } from '../../shared/crmSpecs.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
-import { KpiMetric, SurfaceCard } from './ui/SunsetUI.tsx';
+import { FeatureBanner, KpiMetric, SurfaceCard } from './ui/SunsetUI.tsx';
 
 interface DashboardViewProps {
   leads: CanonicalLead[];
@@ -133,36 +133,61 @@ export function DashboardView({
 
   return (
     <div className="space-y-6">
-      {/* Compact Action Strip */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm font-medium text-slate-600 dark:text-[#E6D2D2]">
-          {formatNumberLocale(activeRelationships)} active relationships · {activeConnectorsCount}/{connectors.length} connectors healthy
-        </p>
-        <div className="flex items-center gap-2">
-          {onOpenAiAgent && (
+      {/* Executive Feature Banner — Rich Blood Red, Dark Red & Crimson */}
+      <FeatureBanner
+        tone="blood"
+        eyebrow="Executive Overview"
+        title="Global Lead Intelligence & Sales Command"
+        description={`${formatNumberLocale(activeRelationships)} active relationships across ${formatNumberLocale(
+          totalCompanies
+        )} tracked companies, backed by ${activeConnectorsCount} of ${connectors.length} healthy registry connectors.`}
+        highlights={[
+          {
+            label: 'Active Relationships',
+            value: formatNumberLocale(activeRelationships),
+            sub: `${newRelationships30d} new (30d)`,
+          },
+          {
+            label: 'Healthy Connectors',
+            value: `${activeConnectorsCount}/${connectors.length}`,
+            sub: `${upcomingMeetings7d} meetings (7d)`,
+          },
+        ]}
+        actions={
+          <>
+            {onOpenAiAgent && (
+              <button
+                type="button"
+                onClick={() => onOpenAiAgent({ tab: 'briefing' })}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white hover:bg-[#FAF0F0] text-[#910303] text-xs font-bold shadow-xs transition-colors whitespace-nowrap"
+              >
+                <Bot className="w-3.5 h-3.5 text-[#B30303]" />
+                <span>Daily Briefing</span>
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => onOpenAiAgent({ tab: 'briefing' })}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#CE0404] text-white text-xs font-bold transition-colors whitespace-nowrap"
+              onClick={() => onNavigateTab('discovery')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/12 hover:bg-white/22 text-white border border-white/25 text-xs font-semibold transition-colors whitespace-nowrap"
             >
-              <Bot className="w-3.5 h-3.5 text-white" />
-              <span>Daily Briefing</span>
+              <span>Discover Leads</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={fetchCrmDashboard}
-            disabled={loadingSummary}
-            className="p-2 rounded-lg border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#440303] text-slate-700 dark:text-[#E6D2D2] hover:bg-slate-50 dark:hover:bg-[#690303] dark:hover:text-white transition-colors"
-            title="Refresh metrics"
-            aria-label="Refresh metrics"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loadingSummary ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </div>
+            <button
+              type="button"
+              onClick={fetchCrmDashboard}
+              disabled={loadingSummary}
+              className="p-2 rounded-lg bg-white/12 hover:bg-white/22 text-white border border-white/25 transition-colors disabled:opacity-60"
+              title="Refresh metrics"
+              aria-label="Refresh metrics"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingSummary ? 'animate-spin' : ''}`} />
+            </button>
+          </>
+        }
+      />
 
-      {/* Primary KPI Row */}
+      {/* Primary KPI Row — Contrasting White Cards + Selected Dark-Red Feature Card */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiMetric
           label="Companies & Contacts"
@@ -190,7 +215,7 @@ export function DashboardView({
               ? `${activeOpportunities} open · Weighted ${weightedValueDisplay}`
               : `${activeOpportunities} open deals`
           }
-          tone="burgundy"
+          variant="maroon"
           onClick={() => onNavigateTab('pipeline')}
         />
         <KpiMetric
@@ -204,13 +229,13 @@ export function DashboardView({
       {isEmpty ? (
         <SurfaceCard padding="lg">
           <div className="max-w-xl mx-auto text-center">
-            <div className="w-11 h-11 rounded-xl bg-[#B30303] border border-[#CE0404] text-white flex items-center justify-center mx-auto mb-3">
+            <div className="w-11 h-11 rounded-xl bg-[#440303] border border-[#910303] text-white flex items-center justify-center mx-auto mb-3 shadow-xs">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <h2 className="text-xl font-bold text-slate-950 dark:text-[#FAF4F4]">
+            <h2 className="text-xl font-bold text-[#440303] dark:text-[#FAF4F4]">
               Welcome to LEED
             </h2>
-            <p className="text-sm font-medium text-slate-600 dark:text-[#E6D2D2] mt-1">
+            <p className="text-sm font-medium text-[#543F3F] dark:text-[#E6D2D2] mt-1">
               Discover verified companies, import existing records, or schedule follow-ups.
             </p>
           </div>
@@ -218,10 +243,10 @@ export function DashboardView({
             <button
               type="button"
               onClick={() => onNavigateTab('discovery')}
-              className="p-4 rounded-xl border border-slate-200 dark:border-[#7A1E1E] dark:bg-[#240202] hover:border-[#CE0404] dark:hover:bg-[#690303] text-left transition-colors"
+              className="p-4 rounded-xl border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#240202] hover:border-[#B30303] hover:bg-white dark:hover:bg-[#690303] text-left transition-all shadow-[0_1px_2px_rgba(36,2,2,0.04)]"
             >
-              <div className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">Discover Leads</div>
-              <p className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] mt-1">
+              <div className="text-base font-bold text-[#240202] dark:text-[#FAF4F4]">Discover Leads</div>
+              <p className="text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2] mt-1">
                 Search official registries and directories worldwide.
               </p>
               <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[#B30303] dark:text-[#FF9492]">
@@ -231,10 +256,10 @@ export function DashboardView({
             <button
               type="button"
               onClick={onOpenImport}
-              className="p-4 rounded-xl border border-slate-200 dark:border-[#7A1E1E] dark:bg-[#240202] hover:border-[#CE0404] dark:hover:bg-[#690303] text-left transition-colors"
+              className="p-4 rounded-xl border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#240202] hover:border-[#B30303] hover:bg-white dark:hover:bg-[#690303] text-left transition-all shadow-[0_1px_2px_rgba(36,2,2,0.04)]"
             >
-              <div className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">Import Records</div>
-              <p className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] mt-1">
+              <div className="text-base font-bold text-[#240202] dark:text-[#FAF4F4]">Import Records</div>
+              <p className="text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2] mt-1">
                 Upload CSV or Excel files with deduplication preview.
               </p>
               <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[#B30303] dark:text-[#FF9492]">
@@ -244,10 +269,10 @@ export function DashboardView({
             <button
               type="button"
               onClick={() => onNavigateTab('tasks')}
-              className="p-4 rounded-xl border border-slate-200 dark:border-[#7A1E1E] dark:bg-[#240202] hover:border-[#CE0404] dark:hover:bg-[#690303] text-left transition-colors"
+              className="p-4 rounded-xl border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#240202] hover:border-[#B30303] hover:bg-white dark:hover:bg-[#690303] text-left transition-all shadow-[0_1px_2px_rgba(36,2,2,0.04)]"
             >
-              <div className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">Schedule Follow-Ups</div>
-              <p className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] mt-1">
+              <div className="text-base font-bold text-[#240202] dark:text-[#FAF4F4]">Schedule Follow-Ups</div>
+              <p className="text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2] mt-1">
                 Manage tasks, meetings, and opportunities.
               </p>
               <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[#B30303] dark:text-[#FF9492]">
@@ -261,13 +286,13 @@ export function DashboardView({
           {/* Pipeline Stage Overview */}
           <SurfaceCard>
             <div className="flex items-center justify-between gap-3 mb-4">
-              <h2 className="text-lg font-bold text-slate-950 dark:text-[#FAF4F4]">
+              <h2 className="text-lg font-bold text-[#440303] dark:text-[#FAF4F4]">
                 Pipeline by Stage
               </h2>
               <button
                 type="button"
                 onClick={() => onNavigateTab('pipeline')}
-                className="inline-flex items-center gap-1 text-xs font-bold text-[#B30303] dark:text-[#FF9492] hover:underline"
+                className="inline-flex items-center gap-1 text-xs font-bold text-[#B30303] hover:text-[#CE0404] dark:text-[#FF9492] hover:underline"
               >
                 Open Pipeline <ArrowRight className="w-3.5 h-3.5" />
               </button>
@@ -277,16 +302,16 @@ export function DashboardView({
               {stageRows.map((row) => (
                 <div
                   key={row.stageId}
-                  className="p-3 rounded-lg border border-slate-200 dark:border-[#7A1E1E] bg-slate-50 dark:bg-[#240202]"
+                  className="p-3 rounded-lg border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#240202] hover:border-[#B30303]/45 transition-colors"
                 >
-                  <div className="text-xs font-semibold text-slate-700 dark:text-[#E6D2D2] truncate">
+                  <div className="text-xs font-semibold text-[#4E3737] dark:text-[#E6D2D2] truncate">
                     {row.stageName}
                   </div>
-                  <div className="mt-1 text-xl font-extrabold font-mono tabular-nums text-slate-950 dark:text-[#FAF4F4]">
+                  <div className="mt-1 text-xl font-extrabold font-mono tabular-nums text-[#240202] dark:text-[#FAF4F4]">
                     {formatNumberLocale(row.count)}
                   </div>
                   <span
-                    className="text-xs font-semibold text-slate-600 dark:text-[#FF9492] font-mono tabular-nums block truncate"
+                    className="text-xs font-semibold text-[#910303] dark:text-[#FF9492] font-mono tabular-nums block truncate"
                     title={row.currencySummary}
                   >
                     {row.currencySummary}
@@ -300,21 +325,21 @@ export function DashboardView({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Follow-Ups */}
             <SurfaceCard padding="none" className="overflow-hidden flex flex-col">
-              <div className="px-5 py-3.5 border-b border-slate-200 dark:border-[#7A1E1E] flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">
+              <div className="px-5 py-3.5 bg-[#FAF7F7] dark:bg-[#3A0202] border-b border-[#E4DADA] dark:border-[#7A1E1E] flex items-center justify-between">
+                <h3 className="text-base font-bold text-[#440303] dark:text-[#FAF4F4]">
                   Follow-Ups
                 </h3>
                 <button
                   type="button"
                   onClick={() => onNavigateTab('tasks')}
-                  className="text-xs font-bold text-[#B30303] dark:text-[#FF9492] hover:underline"
+                  className="text-xs font-bold text-[#B30303] hover:text-[#CE0404] dark:text-[#FF9492] hover:underline"
                 >
                   All Tasks
                 </button>
               </div>
-              <div className="divide-y divide-slate-200/80 dark:divide-[#7A1E1E] flex-1">
+              <div className="divide-y divide-[#ECE3E3] dark:divide-[#7A1E1E] flex-1">
                 {combinedFollowUps.length === 0 ? (
-                  <div className="p-6 text-center text-xs font-medium text-slate-600 dark:text-[#E6D2D2]">
+                  <div className="p-6 text-center text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2]">
                     No overdue or due-today tasks.
                   </div>
                 ) : (
@@ -325,25 +350,19 @@ export function DashboardView({
                     return (
                       <div
                         key={task.id}
-                        className="px-5 py-3 hover:bg-slate-100/80 dark:hover:bg-[#690303] transition-colors"
+                        className="px-5 py-3 hover:bg-[#FAF6F6] dark:hover:bg-[#690303] transition-colors"
                       >
-                        <div className="text-sm font-semibold text-slate-950 dark:text-[#FAF4F4] truncate">
+                        <div className="text-sm font-semibold text-[#240202] dark:text-[#FAF4F4] truncate">
                           {task.title}
                         </div>
-                        <div className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] mt-0.5 flex items-center gap-1.5 flex-wrap">
+                        <div className="text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2] mt-0.5 flex items-center gap-1.5 flex-wrap">
                           <span
                             className={
                               isOverdue
-                                ? 'inline-flex items-center gap-1 text-[#CE0404] dark:text-[#FF8A87] font-bold'
+                                ? 'text-[#CE0404] dark:text-[#FF8A87] font-bold'
                                 : 'text-[#B45309] dark:text-[#FCD34D] font-bold'
                             }
                           >
-                            {isOverdue && (
-                              <span
-                                aria-hidden="true"
-                                className="w-1.5 h-1.5 rounded-full bg-[#FA0502] shrink-0"
-                              />
-                            )}
                             {isOverdue ? 'Overdue' : 'Today'}
                           </span>
                           <span>·</span>
@@ -372,29 +391,29 @@ export function DashboardView({
 
             {/* Recent Activity */}
             <SurfaceCard padding="none" className="overflow-hidden flex flex-col">
-              <div className="px-5 py-3.5 border-b border-slate-200 dark:border-[#7A1E1E] flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">
+              <div className="px-5 py-3.5 bg-[#FAF7F7] dark:bg-[#3A0202] border-b border-[#E4DADA] dark:border-[#7A1E1E] flex items-center justify-between">
+                <h3 className="text-base font-bold text-[#240202] dark:text-[#FAF4F4]">
                   Recent Activity
                 </h3>
-                <span className="text-xs font-semibold text-slate-600 dark:text-[#E6D2D2] tabular-nums">
+                <span className="text-xs font-semibold text-[#543F3F] dark:text-[#E6D2D2] tabular-nums">
                   {upcomingMeetings7d} upcoming
                 </span>
               </div>
-              <div className="divide-y divide-slate-200/80 dark:divide-[#7A1E1E] flex-1">
+              <div className="divide-y divide-[#ECE3E3] dark:divide-[#7A1E1E] flex-1">
                 {(crmSummary?.recentInteractions?.length || 0) === 0 ? (
-                  <div className="p-6 text-center text-xs font-medium text-slate-600 dark:text-[#E6D2D2]">
+                  <div className="p-6 text-center text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2]">
                     No interactions logged yet.
                   </div>
                 ) : (
                   (crmSummary?.recentInteractions || []).slice(0, 6).map((item) => (
                     <div
                       key={item.id}
-                      className="px-5 py-3 hover:bg-slate-100/80 dark:hover:bg-[#690303] transition-colors"
+                      className="px-5 py-3 hover:bg-[#FAF6F6] dark:hover:bg-[#690303] transition-colors"
                     >
-                      <div className="text-sm font-semibold text-slate-950 dark:text-[#FAF4F4] truncate">
+                      <div className="text-sm font-semibold text-[#240202] dark:text-[#FAF4F4] truncate">
                         {item.summary}
                       </div>
-                      <div className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] mt-0.5 truncate">
+                      <div className="text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2] mt-0.5 truncate">
                         <span className="text-[#910303] dark:text-[#FF9492] font-semibold">
                           {getInteractionTypeLabel(item.type)}
                         </span>
@@ -411,17 +430,17 @@ export function DashboardView({
 
             {/* Needs Attention */}
             <SurfaceCard padding="none" className="overflow-hidden flex flex-col">
-              <div className="px-5 py-3.5 border-b border-slate-200 dark:border-[#7A1E1E] flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">
+              <div className="px-5 py-3.5 bg-[#FAF7F7] dark:bg-[#3A0202] border-b border-[#E4DADA] dark:border-[#7A1E1E] flex items-center justify-between">
+                <h3 className="text-base font-bold text-[#240202] dark:text-[#FAF4F4]">
                   Needs Attention
                 </h3>
-                <span className="text-xs font-semibold text-slate-600 dark:text-[#E6D2D2] tabular-nums">
+                <span className="text-xs font-semibold text-[#B45309] dark:text-[#FCD34D] tabular-nums">
                   {crmSummary?.relationshipsNeedingAttention?.length || 0} flagged
                 </span>
               </div>
-              <div className="divide-y divide-slate-200/80 dark:divide-[#7A1E1E] flex-1">
+              <div className="divide-y divide-[#ECE3E3] dark:divide-[#7A1E1E] flex-1">
                 {(crmSummary?.relationshipsNeedingAttention?.length || 0) === 0 ? (
-                  <div className="p-6 text-center text-xs font-medium text-slate-600 dark:text-[#E6D2D2]">
+                  <div className="p-6 text-center text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2]">
                     All tracked relationships are on schedule.
                   </div>
                 ) : (
@@ -434,17 +453,17 @@ export function DashboardView({
                           ? handleOpenLeadById(item.id)
                           : onOpenPersonProfile?.(item.id)
                       }
-                      className="w-full text-left px-5 py-3 hover:bg-slate-100/80 dark:hover:bg-[#690303] flex items-center justify-between gap-2 transition-colors"
+                      className="w-full text-left px-5 py-3 hover:bg-[#FAF6F6] dark:hover:bg-[#690303] flex items-center justify-between gap-2 transition-colors"
                     >
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-slate-950 dark:text-[#FAF4F4] truncate">
+                        <div className="text-sm font-semibold text-[#240202] dark:text-[#FAF4F4] truncate">
                           {item.name}
                         </div>
-                        <div className="text-xs font-medium text-[#B45309] dark:text-[#FCD34D] truncate mt-0.5">
+                        <div className="text-xs font-semibold text-[#B45309] dark:text-[#FCD34D] truncate mt-0.5">
                           {item.reason}
                         </div>
                       </div>
-                      <ChevronRight className="w-4 h-4 text-slate-500 dark:text-[#E6D2D2] shrink-0" />
+                      <ChevronRight className="w-4 h-4 text-[#6B5555] dark:text-[#E6D2D2] shrink-0" />
                     </button>
                   ))
                 )}
@@ -455,19 +474,19 @@ export function DashboardView({
           {/* Bottom Row: Companies & Contacts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <SurfaceCard padding="none" className="overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-slate-200 dark:border-[#7A1E1E] flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">
+              <div className="px-5 py-3.5 bg-[#FAF7F7] dark:bg-[#3A0202] border-b border-[#E4DADA] dark:border-[#7A1E1E] flex items-center justify-between">
+                <h3 className="text-base font-bold text-[#440303] dark:text-[#FAF4F4]">
                   Recent Companies
                 </h3>
                 <button
                   type="button"
                   onClick={() => onNavigateTab('leads')}
-                  className="inline-flex items-center gap-1 text-xs font-bold text-[#B30303] dark:text-[#FF9492] hover:underline"
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[#B30303] hover:text-[#CE0404] dark:text-[#FF9492] hover:underline"
                 >
                   View All <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <div className="divide-y divide-slate-200/80 dark:divide-[#7A1E1E]">
+              <div className="divide-y divide-[#ECE3E3] dark:divide-[#7A1E1E]">
                 {(crmSummary?.recentlyUpdatedCompanies || []).slice(0, 5).map((co) => {
                   const fullLead = leads.find((l) => l.id === co.id);
                   return (
@@ -475,13 +494,13 @@ export function DashboardView({
                       key={co.id}
                       type="button"
                       onClick={() => fullLead && onSelectLead(fullLead)}
-                      className="w-full text-left px-5 py-3 flex items-center justify-between hover:bg-slate-100/80 dark:hover:bg-[#690303] transition-colors"
+                      className="w-full text-left px-5 py-3 flex items-center justify-between hover:bg-[#FAF6F6] dark:hover:bg-[#690303] transition-colors"
                     >
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-slate-950 dark:text-[#FAF4F4] truncate">
+                        <div className="text-sm font-semibold text-[#240202] dark:text-[#FAF4F4] truncate">
                           {co.companyName}
                         </div>
-                        <div className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] truncate mt-0.5">
+                        <div className="text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2] truncate mt-0.5">
                           {[co.industry, co.country, getRelationshipStatusLabel(co.relationshipStatus)]
                             .filter(Boolean)
                             .join(' · ')}
@@ -497,7 +516,7 @@ export function DashboardView({
                             )}
                           </span>
                         )}
-                        <ChevronRight className="w-4 h-4 text-slate-500 dark:text-[#E6D2D2]" />
+                        <ChevronRight className="w-4 h-4 text-[#6B5555] dark:text-[#E6D2D2]" />
                       </div>
                     </button>
                   );
@@ -506,21 +525,21 @@ export function DashboardView({
             </SurfaceCard>
 
             <SurfaceCard padding="none" className="overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-slate-200 dark:border-[#7A1E1E] flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">
+              <div className="px-5 py-3.5 bg-[#FAF7F7] dark:bg-[#3A0202] border-b border-[#E4DADA] dark:border-[#7A1E1E] flex items-center justify-between">
+                <h3 className="text-base font-bold text-[#240202] dark:text-[#FAF4F4]">
                   Recent Contacts
                 </h3>
                 <button
                   type="button"
                   onClick={() => onNavigateTab('import')}
-                  className="inline-flex items-center gap-1 text-xs font-bold text-[#B30303] dark:text-[#FF9492] hover:underline"
+                  className="inline-flex items-center gap-1 text-xs font-bold text-[#B30303] hover:text-[#CE0404] dark:text-[#FF9492] hover:underline"
                 >
                   Directory <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <div className="divide-y divide-slate-200/80 dark:divide-[#7A1E1E]">
+              <div className="divide-y divide-[#ECE3E3] dark:divide-[#7A1E1E]">
                 {(crmSummary?.recentlyContactedPeople?.length || 0) === 0 ? (
-                  <div className="p-6 text-center text-xs font-medium text-slate-600 dark:text-[#E6D2D2]">
+                  <div className="p-6 text-center text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2]">
                     No contact interactions recorded yet.
                   </div>
                 ) : (
@@ -529,23 +548,23 @@ export function DashboardView({
                       key={person.id}
                       type="button"
                       onClick={() => onOpenPersonProfile?.(person.id)}
-                      className="w-full text-left px-5 py-3 flex items-center justify-between hover:bg-slate-100/80 dark:hover:bg-[#690303] transition-colors"
+                      className="w-full text-left px-5 py-3 flex items-center justify-between hover:bg-[#FAF6F6] dark:hover:bg-[#690303] transition-colors"
                     >
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-slate-950 dark:text-[#FAF4F4] truncate">
+                        <div className="text-sm font-semibold text-[#240202] dark:text-[#FAF4F4] truncate">
                           {person.fullName}
                         </div>
-                        <div className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] truncate mt-0.5">
+                        <div className="text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2] truncate mt-0.5">
                           {[person.jobTitle, person.companyName].filter(Boolean).join(' · ') ||
                             'Contact'}
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="text-xs font-semibold font-mono tabular-nums text-slate-700 dark:text-[#FAF4F4]">
+                        <div className="text-xs font-semibold font-mono tabular-nums text-[#240202] dark:text-[#FAF4F4]">
                           {new Date(person.lastContactDate).toLocaleDateString()}
                         </div>
                         {person.lastInteractionType && (
-                          <div className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2]">
+                          <div className="text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2]">
                             {getInteractionTypeLabel(person.lastInteractionType)}
                           </div>
                         )}

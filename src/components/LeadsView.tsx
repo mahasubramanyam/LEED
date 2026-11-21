@@ -601,7 +601,7 @@ export function LeadsView({
   return (
     <div className="space-y-4">
       {/* Search and Primary Controls */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
+      <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="relative flex-1 min-w-[220px]">
             <input
@@ -668,8 +668,8 @@ export function LeadsView({
             onClick={() => setShowMoreFilters((v) => !v)}
             className={`px-3 py-2 text-xs font-semibold rounded-lg border flex items-center gap-1.5 transition ${
               showMoreFilters || activeExtraFilters > 0
-                ? 'bg-[#910303] border-[#CE0404] text-white'
-                : 'bg-white dark:bg-[#440303] border-slate-300 dark:border-[#8C2828] text-slate-800 dark:text-[#FAF4F4] hover:bg-slate-50 dark:hover:bg-[#690303]'
+                ? 'bg-[#910303] border-[#CE0404] text-white shadow-xs'
+                : 'bg-white dark:bg-[#440303] border-[#D4C2C2] dark:border-[#8C2828] text-[#440303] dark:text-[#FAF4F4] hover:border-[#910303] hover:bg-[#FDF6F6] dark:hover:bg-[#690303]'
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -682,10 +682,10 @@ export function LeadsView({
           <button
             type="button"
             onClick={() => setShowNotesSearch(true)}
-            className="px-3 py-2 bg-white dark:bg-[#440303] border border-slate-300 dark:border-[#8C2828] hover:bg-slate-50 dark:hover:bg-[#690303] text-slate-800 dark:text-[#FAF4F4] font-semibold rounded-lg flex items-center gap-1.5 text-xs transition"
+            className="px-3 py-2 bg-white dark:bg-[#440303] border border-[#D4C2C2] dark:border-[#8C2828] hover:border-[#910303] hover:bg-[#FDF6F6] dark:hover:bg-[#690303] text-[#440303] dark:text-[#FAF4F4] font-semibold rounded-lg flex items-center gap-1.5 text-xs transition"
             title="Search owner-only private CRM notes"
           >
-            <Lock className="w-3.5 h-3.5 text-[#CE0404] dark:text-[#FF9492]" />
+            <Lock className="w-3.5 h-3.5 text-[#B30303] dark:text-[#FF9492]" />
             <span className="hidden sm:inline">Notes</span>
           </button>
 
@@ -693,7 +693,7 @@ export function LeadsView({
             <button
               type="button"
               onClick={() => setIsCreateOpen(true)}
-              className="px-3.5 py-2 bg-[#B30303] hover:bg-[#CE0404] text-white font-bold rounded-lg flex items-center gap-1.5 text-xs transition"
+              className="px-3.5 py-2 bg-[#B30303] hover:bg-[#910303] text-white font-bold rounded-lg flex items-center gap-1.5 text-xs shadow-xs transition"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Company</span>
@@ -1097,17 +1097,17 @@ export function LeadsView({
       )}
 
       {/* Leads Table */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs">
+      <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl overflow-hidden shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-[#7A1E1E] text-slate-700 dark:text-[#F4E8E8] font-bold uppercase tracking-wider text-[11px]">
+            <thead className="bg-[#FAF6F6] dark:bg-[#240202] border-b border-[#E4DADA] dark:border-[#7A1E1E] text-[#440303] dark:text-[#F4E8E8] font-bold uppercase tracking-wider text-[11px]">
               <tr>
                 <th className="p-3.5 w-10">
                   <input
                     type="checkbox"
                     checked={selectedIds.size > 0 && selectedIds.size === filtered.length}
                     onChange={(e) => handleSelectAll(e.target.checked)}
-                    className="rounded border-slate-300 dark:border-slate-700 text-blue-600"
+                    className="rounded border-[#D4C2C2] dark:border-[#8C2828] accent-[#B30303]"
                   />
                 </th>
                 <th className="p-3.5">Company & Registration</th>
@@ -1120,11 +1120,11 @@ export function LeadsView({
                 <th className="p-3.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+            <tbody className="divide-y divide-[#EFE8E8] dark:divide-[#690303]">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-12 text-center text-slate-400">
-                    <Building2 className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                  <td colSpan={9} className="p-12 text-center text-[#543F3F] dark:text-[#D1B0B0] font-medium">
+                    <Building2 className="w-8 h-8 text-[#C9B3B3] dark:text-[#8C2828] mx-auto mb-2" />
                     No leads found matching your filters.
                   </td>
                 </tr>
@@ -1136,8 +1136,8 @@ export function LeadsView({
                   return (
                     <tr
                       key={lead.id}
-                      className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition cursor-pointer ${
-                        isSelected ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
+                      className={`hover:bg-[#FDF8F8] dark:hover:bg-[#690303]/70 transition cursor-pointer ${
+                        isSelected ? 'bg-[#FDF2F2] dark:bg-[#690303]' : ''
                       }`}
                       onClick={() => onSelectLead(lead)}
                     >
@@ -1146,7 +1146,7 @@ export function LeadsView({
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => handleToggleSelect(lead.id)}
-                          className="rounded border-slate-300 dark:border-slate-700 text-blue-600"
+                          className="rounded border-[#D4C2C2] dark:border-[#8C2828] accent-[#B30303]"
                         />
                       </td>
 

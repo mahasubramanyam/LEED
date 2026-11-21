@@ -40,7 +40,7 @@ import { apiFetch } from '../utils/apiFetch.ts';
 import { ApprovalQueuePanel } from './outreach/ApprovalQueuePanel.tsx';
 import { FollowUpsAndRepliesPanel } from './outreach/FollowUpsAndRepliesPanel.tsx';
 import { SuppressionAndProvidersPanel } from './outreach/SuppressionAndProvidersPanel.tsx';
-import { ActionMenu, KpiMetric, NoticeBanner, SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
+import { FeatureBanner, KpiMetric, NoticeBanner, SegmentedTabs } from './ui/SunsetUI.tsx';
 
 type OutreachTab =
   | 'campaigns'
@@ -407,44 +407,53 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Toolbar */}
-      <WorkspaceToolbar
-        meta={
+      <FeatureBanner
+        tone="crimson"
+        eyebrow="Human-in-the-Loop Outreach"
+        title="Outreach Campaigns & Approval Queue"
+        description={
           configuredProviderCount > 0
-            ? `Email Provider: ${configuredProviderCount} configured`
-            : 'Email Provider: Draft & Manual Mode'
+            ? `${configuredProviderCount} verified email provider configured. Every outbound draft requires explicit owner approval before dispatch.`
+            : 'Draft & Manual Mode active. Compose personalised sequences, review every message, and track replies with full compliance.'
+        }
+        highlights={
+          analytics
+            ? [
+                { label: 'Pending Approval', value: analytics.totals.messagesPendingApproval },
+                { label: 'Active Campaigns', value: analytics.totals.campaignsActive },
+                { label: 'Dispatched', value: analytics.totals.messagesTotalDispatched },
+              ]
+            : undefined
         }
         actions={
           <>
-            <ActionMenu
-              label="Tools"
-              items={[
-                ...(onOpenAiAgent
-                    ? [
-                        {
-                          label: 'AI Sales Agent',
-                          icon: <Bot className="h-3.5 w-3.5 text-slate-400 dark:text-[#C9A7A7]" />,
-                          onClick: () => onOpenAiAgent(enrollLeadIds[0]),
-                        },
-                      ]
-                    : []),
-                  {
-                    label: 'Refresh',
-                    icon: <RefreshCw className="h-3.5 w-3.5 text-slate-400 dark:text-[#C9A7A7]" />,
-                    onClick: handleRefreshAll,
-                  },
-                ]}
-              />
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('campaigns');
+                setShowCreateForm(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-xs font-bold text-[#910303] hover:bg-[#FAF4F4] transition-colors shadow-sm"
+            >
+              <Plus className="h-3.5 w-3.5" /> New Campaign
+            </button>
+            {onOpenAiAgent && (
               <button
                 type="button"
-                onClick={() => {
-                  setActiveTab('campaigns');
-                  setShowCreateForm(true);
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#B30303] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[#CE0404] transition-colors"
+                onClick={() => onOpenAiAgent(enrollLeadIds[0])}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/12 px-3.5 py-2 text-xs font-semibold text-white hover:bg-white/22 transition-colors"
               >
-                <Plus className="h-3.5 w-3.5" /> New Campaign
+                <Bot className="h-3.5 w-3.5" /> AI Sales Agent
               </button>
+            )}
+            <button
+              type="button"
+              onClick={handleRefreshAll}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/25 bg-white/12 px-3 py-2 text-xs font-semibold text-white hover:bg-white/22 transition-colors"
+              title="Refresh outreach workspace"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
           </>
         }
       />
@@ -456,7 +465,7 @@ export const OutreachCampaigns: React.FC<OutreachCampaignsProps> = ({
             label="Active Campaigns"
             value={analytics.totals.campaignsActive}
             detail={`${analytics.totals.campaignsTotal} total`}
-            tone="teal"
+            variant="maroon"
           />
           <KpiMetric
             label="Enrollments"

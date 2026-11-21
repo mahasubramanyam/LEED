@@ -933,19 +933,19 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 bg-[#240202]/75 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+      <div className="bg-slate-900 border border-[#7A1E1E] rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Drawer Header */}
-        <div className="px-5 py-4 border-b border-slate-800 bg-slate-950/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="px-5 py-4 border-b border-[#7A1E1E] bg-gradient-to-r from-[#240202] via-[#440303] to-[#690303] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-lg shrink-0" title={lead.address?.country || lead.address?.countryCode}>
                 {getCountryFlag(lead.address?.countryCode)}
               </span>
-              <h2 className="text-xl font-bold text-white tracking-tight truncate">{lead.companyName}</h2>
+              <h2 className="text-xl font-extrabold text-white tracking-tight truncate">{lead.companyName}</h2>
             </div>
 
-            <p className="text-xs text-slate-400 truncate">
+            <p className="text-xs font-medium text-[#F5DADA] truncate">
               {[
                 lead.address?.countryCode,
                 lead.registrationNumber ? `${lead.registrationType || 'ID'} ${lead.registrationNumber}` : null,

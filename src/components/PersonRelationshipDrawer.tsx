@@ -260,19 +260,19 @@ export const PersonRelationshipDrawer: React.FC<PersonRelationshipDrawerProps> =
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex justify-end">
-      <div className="w-full max-w-3xl bg-slate-900 border-l border-slate-800 h-full flex flex-col overflow-hidden shadow-2xl">
+    <div className="fixed inset-0 z-50 bg-[#240202]/75 backdrop-blur-xs flex justify-end">
+      <div className="w-full max-w-3xl bg-slate-900 border-l border-[#7A1E1E] h-full flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-start justify-between gap-4">
+        <div className="px-6 py-4 border-b border-[#7A1E1E] bg-gradient-to-r from-[#240202] via-[#440303] to-[#690303] flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <User className="w-4 h-4 text-indigo-400 shrink-0" />
-              <h2 className="text-base font-bold text-white truncate">
+              <User className="w-4 h-4 text-[#FF9492] shrink-0" />
+              <h2 className="text-base font-extrabold text-white truncate">
                 {profile?.person.fullName || 'Person Relationship Profile'}
               </h2>
             </div>
             {profile && (
-              <div className="text-xs text-slate-400 mt-1 truncate">
+              <div className="text-xs font-medium text-[#F5DADA] mt-1 truncate">
                 {[
                   profile.currentCompanies[0]?.relationship.jobTitle ||
                     profile.currentCompanies[0]?.relationship.designation ||

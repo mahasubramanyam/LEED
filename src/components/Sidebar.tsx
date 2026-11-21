@@ -100,22 +100,22 @@ export function Sidebar({
   return (
     <aside
       aria-label="Primary navigation"
-      className={`relative flex flex-col bg-[#440303] border-r border-[#7A1E1E] text-[#FAF4F4] transition-[width] duration-200 z-30 shrink-0 ${
+      className={`relative flex flex-col bg-[#440303] border-r border-[#690303] text-white transition-[width] duration-200 z-30 shrink-0 shadow-[2px_0_12px_rgba(36,2,2,0.12)] ${
         collapsed ? 'w-16' : 'w-60'
       }`}
     >
-      {/* Brand Header */}
-      <div className="h-16 flex items-center justify-between px-4 border-b border-[#7A1E1E]/85">
+      {/* Brand Header — Black Bean Anchor */}
+      <div className="h-16 flex items-center justify-between px-4 bg-[#240202] border-b border-[#690303]/80">
         {!collapsed ? (
           <button
             type="button"
             onClick={() => onSelectTab('dashboard')}
             className="flex items-center gap-2.5 text-left focus-visible:outline-none group"
           >
-            <span className="w-8 h-8 rounded-lg bg-[#240202] border border-[#CE0404]/80 flex items-center justify-center text-[#FAF4F4] font-extrabold text-base tracking-tight shrink-0">
+            <span className="w-8 h-8 rounded-lg bg-[#B30303] group-hover:bg-[#CE0404] border border-[#CE0404]/70 flex items-center justify-center text-white font-extrabold text-base tracking-tight shrink-0 shadow-xs transition-colors">
               L
             </span>
-            <span className="text-lg font-extrabold tracking-tight text-[#FAF4F4] whitespace-nowrap">
+            <span className="text-lg font-extrabold tracking-tight text-white whitespace-nowrap">
               LEED
             </span>
           </button>
@@ -124,7 +124,7 @@ export function Sidebar({
             type="button"
             onClick={() => onSelectTab('dashboard')}
             title="LEED Dashboard"
-            className="mx-auto w-8 h-8 rounded-lg bg-[#240202] border border-[#CE0404]/80 flex items-center justify-center text-[#FAF4F4] font-extrabold text-base"
+            className="mx-auto w-8 h-8 rounded-lg bg-[#B30303] hover:bg-[#CE0404] border border-[#CE0404]/70 flex items-center justify-center text-white font-extrabold text-base shadow-xs transition-colors"
           >
             L
           </button>
@@ -135,9 +135,9 @@ export function Sidebar({
           onClick={onToggleCollapsed}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className={`p-1.5 rounded-lg text-[#E6D2D2] hover:text-white hover:bg-[#690303] transition-colors ${
+          className={`p-1.5 rounded-lg text-[#F0DADA] hover:text-white hover:bg-[#690303] transition-colors ${
             collapsed
-              ? 'hidden sm:flex items-center justify-center absolute -right-3 top-5 bg-[#440303] border border-[#8C2828] shadow-sm'
+              ? 'hidden sm:flex items-center justify-center absolute -right-3 top-5 bg-[#240202] border border-[#910303] shadow-sm'
               : ''
           }`}
         >
@@ -150,7 +150,7 @@ export function Sidebar({
         {navGroups.map((group) => (
           <div key={group.heading} className="space-y-0.5">
             {!collapsed && (
-              <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-[#C9A7A7]">
+              <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-[#E2C6C6]">
                 {group.heading}
               </div>
             )}
@@ -166,19 +166,13 @@ export function Sidebar({
                   title={collapsed ? item.label : undefined}
                   className={`relative w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors whitespace-nowrap ${
                     isActive
-                      ? 'bg-[#910303] text-white font-bold shadow-xs'
-                      : 'text-[#E6D2D2] font-semibold hover:text-white hover:bg-[#690303]'
+                      ? 'bg-[#B30303] text-white font-bold shadow-sm ring-1 ring-[#CE0404]/60'
+                      : 'text-[#F5E7E7] font-semibold hover:text-white hover:bg-[#690303]'
                   } ${collapsed ? 'justify-center px-0' : ''}`}
                 >
-                  {isActive && !collapsed && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r bg-[#CE0404]"
-                    />
-                  )}
                   <Icon
                     className={`w-4 h-4 shrink-0 ${
-                      isActive ? 'text-white' : 'text-[#D8BABA]'
+                      isActive ? 'text-white' : 'text-[#E8CECE]'
                     }`}
                   />
                   {!collapsed && (
@@ -190,8 +184,8 @@ export function Sidebar({
                             item.id === 'outreach'
                               ? 'px-1.5 py-0.5 rounded bg-[#E52825] text-white'
                               : isActive
-                              ? 'text-[#FAF4F4]'
-                              : 'text-[#D8BABA]'
+                              ? 'text-white'
+                              : 'text-[#E8CECE]'
                           }`}
                         >
                           {item.count}
@@ -206,19 +200,19 @@ export function Sidebar({
         ))}
       </nav>
 
-      {/* Owner Footer */}
-      <div className="p-3 border-t border-[#7A1E1E]/85 bg-[#240202]/70">
+      {/* Owner Footer — Black Bean Anchor */}
+      <div className="p-3 border-t border-[#690303]/80 bg-[#240202]">
         {!collapsed ? (
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-[#690303] border border-[#CE0404]/70 text-white flex items-center justify-center font-bold text-sm shrink-0">
+              <div className="w-8 h-8 rounded-full bg-[#910303] border border-[#CE0404]/70 text-white flex items-center justify-center font-bold text-sm shrink-0">
                 {ownerName ? ownerName.charAt(0).toUpperCase() : 'O'}
               </div>
               <div className="min-w-0">
-                <span className="text-sm font-bold text-[#FAF4F4] block truncate leading-tight">
+                <span className="text-sm font-bold text-white block truncate leading-tight">
                   {ownerName || 'Owner'}
                 </span>
-                <span className="text-[11px] font-medium text-[#C9A7A7] block truncate">
+                <span className="text-[11px] font-medium text-[#DFC4C4] block truncate">
                   {ownerEmail}
                 </span>
               </div>
@@ -226,7 +220,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={onLogout}
-              className="p-1.5 text-[#E6D2D2] hover:text-white hover:bg-[#690303] rounded-lg transition-colors shrink-0"
+              className="p-1.5 text-[#F0DADA] hover:text-white hover:bg-[#690303] rounded-lg transition-colors shrink-0"
               title="Sign out"
               aria-label="Sign out"
             >
@@ -237,14 +231,14 @@ export function Sidebar({
           <div className="flex flex-col items-center gap-2">
             <div
               title={ownerName || 'Owner'}
-              className="w-8 h-8 rounded-full bg-[#690303] border border-[#CE0404]/70 text-white flex items-center justify-center font-bold text-sm"
+              className="w-8 h-8 rounded-full bg-[#910303] border border-[#CE0404]/70 text-white flex items-center justify-center font-bold text-sm"
             >
               {ownerName ? ownerName.charAt(0).toUpperCase() : 'O'}
             </div>
             <button
               type="button"
               onClick={onLogout}
-              className="p-1.5 text-[#E6D2D2] hover:text-white hover:bg-[#690303] rounded-lg transition-colors"
+              className="p-1.5 text-[#F0DADA] hover:text-white hover:bg-[#690303] rounded-lg transition-colors"
               title="Sign out"
               aria-label="Sign out"
             >

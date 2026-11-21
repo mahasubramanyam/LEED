@@ -206,7 +206,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenAiAgent({ tab: 'briefing' })}
-                className="px-3 py-1.5 border border-slate-300 dark:border-[#8C2828] bg-white dark:bg-[#440303] text-slate-800 dark:text-[#FAF4F4] hover:bg-slate-50 dark:hover:bg-[#690303] text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap"
+                className="px-3 py-1.5 border border-[#D4C2C2] dark:border-[#8C2828] bg-white dark:bg-[#440303] text-[#440303] dark:text-[#FAF4F4] hover:border-[#910303] hover:bg-[#FDF6F6] dark:hover:bg-[#690303] text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap transition-colors"
               >
                 <Bot className="w-3.5 h-3.5 text-[#B30303] dark:text-[#FF9492]" />
                 <span>AI Briefing</span>
@@ -215,7 +215,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             <button
               type="button"
               onClick={() => setIsCreating((v) => !v)}
-              className="px-3.5 py-1.5 bg-[#B30303] hover:bg-[#CE0404] text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              className="px-3.5 py-1.5 bg-[#B30303] hover:bg-[#910303] text-white text-xs font-bold rounded-lg shadow-xs inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Task</span>
@@ -244,7 +244,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
       {isCreating && (
         <SurfaceCard>
           <form onSubmit={handleCreate} className="space-y-4">
-            <h3 className="text-base font-bold text-slate-950 dark:text-[#FAF4F4]">
+            <h3 className="text-base font-bold text-[#440303] dark:text-[#FAF4F4]">
               New Task
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3">

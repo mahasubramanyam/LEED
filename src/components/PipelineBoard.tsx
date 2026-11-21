@@ -380,14 +380,14 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
             return (
               <div
                 key={stage.id}
-                className="shrink-0 w-76 bg-slate-100/80 dark:bg-[#440303] border border-slate-200 dark:border-[#7A1E1E] rounded-xl flex flex-col max-h-[740px]"
+                className="shrink-0 w-76 bg-[#EFEBEB]/85 dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl flex flex-col max-h-[740px]"
               >
-                <div className="px-3.5 py-3 border-b border-slate-200 dark:border-[#7A1E1E] flex items-center justify-between gap-2">
+                <div className="px-3.5 py-3 border-b border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#3A0303] rounded-t-xl flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <h3 className="text-sm font-bold text-slate-950 dark:text-[#FAF4F4] truncate">
+                    <h3 className="text-sm font-bold text-[#440303] dark:text-[#FAF4F4] truncate">
                       {stage.name}
                     </h3>
-                    <span className="text-xs font-bold text-slate-600 dark:text-[#E6D2D2] font-mono tabular-nums">
+                    <span className="text-xs font-bold text-[#543F3F] dark:text-[#E6D2D2] font-mono tabular-nums">
                       {stageLeads.length}
                     </span>
                   </div>
@@ -398,7 +398,7 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
 
                 <div className="p-2.5 space-y-2.5 overflow-y-auto flex-1 scrollbar-thin">
                   {stageLeads.length === 0 ? (
-                    <div className="p-5 text-center text-slate-500 dark:text-[#E6D2D2] text-xs font-medium border border-dashed border-slate-300 dark:border-[#8C2828] rounded-lg">
+                    <div className="p-5 text-center text-[#543F3F] dark:text-[#E6D2D2] text-xs font-medium border border-dashed border-[#D4C2C2] dark:border-[#8C2828] rounded-lg">
                       Empty stage
                     </div>
                   ) : (
@@ -410,14 +410,14 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                         <div
                           key={lead.id}
                           onClick={() => onSelectLead(lead)}
-                          className="bg-white dark:bg-[#240202] border border-slate-200 dark:border-[#7A1E1E] hover:border-[#CE0404] dark:hover:bg-[#690303] p-3.5 rounded-lg cursor-pointer group transition-colors space-y-2"
+                          className="bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] hover:border-[#910303] dark:hover:bg-[#690303] p-3.5 rounded-lg cursor-pointer group transition-all shadow-[0_1px_2px_rgba(36,2,2,0.05)] hover:shadow-[0_4px_12px_rgba(68,3,3,0.1)] space-y-2"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <h4 className="text-sm font-bold text-slate-950 dark:text-[#FAF4F4] group-hover:text-[#B30303] dark:group-hover:text-[#FF9492] transition-colors truncate">
+                              <h4 className="text-sm font-bold text-[#240202] dark:text-[#FAF4F4] group-hover:text-[#910303] dark:group-hover:text-[#FF9492] transition-colors truncate">
                                 {lead.companyName}
                               </h4>
-                              <p className="text-xs font-medium text-slate-600 dark:text-[#E6D2D2] truncate mt-0.5">
+                              <p className="text-xs font-medium text-[#543F3F] dark:text-[#E6D2D2] truncate mt-0.5">
                                 {[lead.address?.city || lead.address?.country, lead.industry]
                                   .filter(Boolean)
                                   .join(' · ')}

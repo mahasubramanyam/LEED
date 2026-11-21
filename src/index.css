@@ -2,17 +2,17 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ============================================================================
- * LEED Dark Red & Maroon Design System
+ * LEED Red & Maroon Enterprise Design System (Balanced Distribution)
  * Typography: Inter (Bold, High-Contrast Enterprise Hierarchy — Preserved)
  *
- * Approved Colour Palette & Roles:
- *   Black Bean:       #240202  (Main application background & deepest wells)
- *   Dark Maroon:      #440303  (Sidebar, navigation & primary dark surfaces/cards)
- *   Blood Red:        #690303  (Secondary panels, elevated surfaces & hovers)
- *   Dark Red:         #910303  (Selected navigation & active states/tabs)
- *   Crimson:          #B30303  (Primary buttons & important actions)
- *   Candy Apple Red:  #CE0404  (Highlights, focus rings & interactive accents)
- *   Coral Red:        #E52825  (Notifications, charts & emphasis)
+ * Approved Colour Palette & Strategic Placement:
+ *   Black Bean:       #240202  (Deepest sidebar anchors, primary dark ink)
+ *   Dark Maroon:      #440303  (Sidebar navigation, primary headings on light, spotlight cards)
+ *   Blood Red:        #690303  (Feature banners, hover states on dark nav, elevated maroon accents)
+ *   Dark Red:         #910303  (Selected navigation, active tabs, banner highlights)
+ *   Crimson:          #B30303  (Primary CTA buttons & key interactive actions)
+ *   Candy Apple Red:  #CE0404  (Button hovers, focus rings & crisp highlights)
+ *   Coral Red:        #E52825  (Selective chart accents, badges & notifications)
  *   Pure Red:         #FA0502  (Very limited use for critical indicators)
  * ============================================================================ */
 
@@ -23,7 +23,7 @@
   --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
-  /* Named Dark Red & Maroon Brand Tokens */
+  /* Named Red & Maroon Brand Tokens */
   --color-dr-black-bean: #240202;
   --color-dr-maroon: #440303;
   --color-dr-blood: #690303;
@@ -39,21 +39,20 @@
   --color-dr-border: #7A1E1E;
   --color-dr-border-strong: #8C2828;
 
-  /* High-Contrast Warm Neutral Scale (Light Mode Defaults) */
-  --color-slate-50: #FAF6F6;
-  --color-slate-100: #F3EBEB;
-  --color-slate-200: #E2D2D2;
-  --color-slate-300: #CCB6B6;
-  --color-slate-400: #6E5252;
-  --color-slate-500: #5A3E3E;
-  --color-slate-600: #482E2E;
-  --color-slate-700: #381F1F;
-  --color-slate-800: #2E1010;
+  /* Crisp Balanced Neutral Scale (Clean Architectural Contrast on Light Canvas) */
+  --color-slate-50: #F8F6F6;
+  --color-slate-100: #F1ECEC;
+  --color-slate-200: #E4DADA;
+  --color-slate-300: #D2C3C3;
+  --color-slate-400: #6B5555;
+  --color-slate-500: #543F3F;
+  --color-slate-600: #422F2F;
+  --color-slate-700: #331F1F;
+  --color-slate-800: #291212;
   --color-slate-900: #240202;
   --color-slate-950: #180101;
 
-  /* Primary Brand Ramp — Crimson (#B30303) / Dark Red (#910303) / Candy Apple (#CE0404)
-     Harmonizes legacy blue/indigo primary CTAs and brand accents seamlessly */
+  /* Primary Brand Ramp — Crimson (#B30303) / Dark Red (#910303) / Candy Apple (#CE0404) */
   --color-blue-50: #FDF3F3;
   --color-blue-100: #FCE3E3;
   --color-blue-200: #F8C5C4;
@@ -205,23 +204,23 @@
 }
 
 @layer base {
-  /* Light Mode — Warm Alabaster Canvas with Black Bean Ink & Crimson/Maroon Brand */
+  /* Default Balanced Mode — Crisp Neutral Canvas, White Cards, Deep Maroon Sidebar & Rich Red Banners */
   :root {
     color-scheme: light;
-    --leed-bg: #FAF6F6;
+    --leed-bg: #F6F3F3;
     --leed-sidebar: #440303;
     --leed-surface: #FFFFFF;
-    --leed-elevated: #F3EBEB;
+    --leed-elevated: #F1ECEC;
     --leed-active: #910303;
     --leed-primary: #B30303;
     --leed-highlight: #CE0404;
     --leed-coral: #E52825;
     --leed-critical: #FA0502;
-    --leed-border: #DFCECE;
-    --leed-border-strong: #C7B1B1;
+    --leed-border: #E4DADA;
+    --leed-border-strong: #D2C3C3;
     --leed-text: #240202;
-    --leed-text-secondary: #482E2E;
-    --leed-text-muted: #5A3E3E;
+    --leed-text-secondary: #422F2F;
+    --leed-text-muted: #543F3F;
   }
 
   /* Default Dark Mode — Black Bean, Dark Maroon & Blood Red Foundation */

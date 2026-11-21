@@ -54,7 +54,7 @@ import {
   EXPANDED_RELATIONSHIP_TYPES,
   ROLE_TAXONOMY_SPECS,
 } from '../../shared/decisionMakerRoles.ts';
-import { ActionMenu, SegmentedTabs } from './ui/SunsetUI.tsx';
+import { ActionMenu, FeatureBanner, SegmentedTabs } from './ui/SunsetUI.tsx';
 
 interface DiscoveryEngineProps {
   onAddLeadToCrm: (lead: CanonicalLead) => void;
@@ -957,9 +957,49 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
 
   return (
     <div className="space-y-5">
+      <FeatureBanner
+        tone="blood"
+        eyebrow="Global Business Discovery"
+        title="Registry & Directory Lead Discovery"
+        description="Search official government business registries, public directories, and verified websites across 195 jurisdictions with full field-level provenance."
+        highlights={[
+          { label: 'Jurisdictions', value: countries.length || 195 },
+          { label: 'Active Scope', value: currentCountryObj?.code || selectedCountry },
+          { label: 'Loaded', value: results.length },
+        ]}
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowUrlInspector((v) => !v)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-white text-[#440303] hover:bg-[#FAF4F4] shadow-sm transition-colors"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-[#910303]" />
+              <span>{showUrlInspector ? 'Hide URL Inspector' : 'Inspect Website URL'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={loadProvidersMatrix}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-white/12 hover:bg-white/22 border border-white/25 text-white transition-colors"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>Directory Matrix</span>
+            </button>
+            <button
+              type="button"
+              onClick={loadHistory}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-white/12 hover:bg-white/22 border border-white/25 text-white transition-colors"
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>History</span>
+            </button>
+          </>
+        }
+      />
+
       {/* Control Workspace Card */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-200 dark:border-slate-800">
+      <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-5 shadow-[0_1px_3px_rgba(36,2,2,0.05)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-4 border-b border-[#EFE8E8] dark:border-[#690303]">
           <SegmentedTabs
             variant="segmented"
             activeId={searchMode}
@@ -1087,8 +1127,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                     onClick={() => toggleMultiCountry(c.code)}
                     className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border font-medium transition ${
                       active
-                        ? 'bg-blue-600 border-blue-600 text-white'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                        ? 'bg-[#910303] border-[#CE0404] text-white'
+                        : 'bg-white dark:bg-[#240202] border-[#E4DADA] dark:border-[#7A1E1E] text-[#422F2F] dark:text-[#E6D2D2] hover:border-[#910303]'
                     }`}
                   >
                     <span>{c.flag}</span>

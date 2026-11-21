@@ -93,12 +93,12 @@ export default function App() {
     suppressionDomains: [],
   });
 
-  // Theme Management (Dark Red & Maroon Dark Mode default; optional Light Mode toggle preserved)
+  // Theme Management (Balanced Red & Maroon Enterprise default: deep maroon sidebar + crisp neutral canvas + red banners)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try {
-      return localStorage.getItem('leed_theme_v2') === 'light' ? 'light' : 'dark';
+      return localStorage.getItem('leed_theme_v3') === 'dark' ? 'dark' : 'light';
     } catch {
-      return 'dark';
+      return 'light';
     }
   });
 
@@ -151,7 +151,7 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
     try {
-      localStorage.setItem('leed_theme_v2', theme);
+      localStorage.setItem('leed_theme_v3', theme);
     } catch {
       // Ignore storage quota / privacy mode errors
     }
@@ -643,7 +643,7 @@ export default function App() {
   );
 
   return (
-    <div className={`min-h-screen flex ${theme === 'dark' ? 'dark' : ''} bg-slate-50 dark:bg-[#240202] text-slate-950 dark:text-[#FAF4F4] font-sans selection:bg-[#B30303] selection:text-white`}>
+    <div className={`min-h-screen flex ${theme === 'dark' ? 'dark' : ''} bg-[#F6F3F3] dark:bg-[#240202] text-[#240202] dark:text-[#FAF4F4] font-sans selection:bg-[#B30303] selection:text-white`}>
       {/* Desktop & Collapsible Sidebar */}
       <div className="hidden lg:flex shrink-0">
         <Sidebar
