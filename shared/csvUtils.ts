@@ -107,7 +107,15 @@ export function parseCsvRfc4180(rawText: string): CsvParseResult {
 export function escapeCsvCell(value: unknown): string {
   if (value === null || value === undefined) return '';
   let str = String(value);
-  if (/^[=@\t\r]/.test(str) || (/^[+-]/.test(str) && !/^[+-]\d[\d\s().-]*$/.test(str))) {
+  const trimmedStart = str.replace(/^[ \t\r\n]+/, '');
+  const startsWithControlFormula = /^[\t\r\n]/.test(str);
+  const startsWithFormulaTrigger = /^[=@|]/.test(trimmedStart);
+  const startsWithSignFormula =
+    /^[+-]/.test(trimmedStart) &&
+    !/^[+-]?\d+(?:\.\d+)?$/.test(trimmedStart) &&
+    !/^\+\d{1,4}(?:[\s().-]+\d+)+$/.test(trimmedStart);
+
+  if (startsWithControlFormula || startsWithFormulaTrigger || startsWithSignFormula) {
     str = `'${str}`;
   }
   if (/[",\r\n]/.test(str)) {

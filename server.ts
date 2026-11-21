@@ -308,69 +308,18 @@ function checkStorageEngine() {
 // 1. PUBLIC UNRESTRICTED ENDPOINTS
 // ==========================================
 
-// System Health & Observability
-app.get('/api/status', async (req: Request, res: Response) => {
+// System Health & Public Readiness (minimal non-sensitive payload; full diagnostics live behind requireOwnerAuth)
+app.get('/api/status', async (_req: Request, res: Response) => {
   const isDbReady = dbManager.isDbConnected();
-  const dbHealth = dbManager.getHealthStatus();
-  const initialized = await ownerService.isOwnerInitialized();
-
-  let totalLeads = 0;
-  let activeConnectorsCount = 0;
-  let totalConnectorsCount = 6;
-  let migrationStatus: any = lastStartupMigrationResult;
-
-  try {
-    if (isDbReady) {
-      const [leads, connectors, inspection] = await Promise.all([
-        postgresStorage.getLeads(),
-        postgresStorage.getConnectors(),
-        migrator.inspectMigrationStatus(),
-      ]);
-      totalLeads = leads.length;
-      totalConnectorsCount = connectors.length;
-      activeConnectorsCount = connectors.filter(
-        (c) => c.healthState === 'operational' || c.status === 'healthy' || c.status === 'configured'
-      ).length;
-      migrationStatus = {
-        ...lastStartupMigrationResult,
-        latestVersion: inspection.latestVersion,
-        migration003Recorded: inspection.migration003Recorded,
-        migration003SchemaReady: inspection.migration003SchemaReady,
-        migration004Recorded: inspection.migration004Recorded,
-        migration004SchemaReady: inspection.migration004SchemaReady,
-        migration005Recorded: inspection.migration005Recorded,
-        migration005SchemaReady: inspection.migration005SchemaReady,
-      };
-    } else {
-      const leads = storage.getLeads();
-      totalLeads = leads.length;
-      const connectors = await storage.getConnectorsUnified();
-      totalConnectorsCount = connectors.length;
-      activeConnectorsCount = connectors.filter(
-        (c) => c.healthState === 'operational' || c.status === 'healthy' || c.status === 'configured'
-      ).length;
-    }
-  } catch (err) {
-    console.warn('[Status] Warning querying metrics:', err);
-  }
+  const initialized = await ownerService.isOwnerInitialized().catch(() => false);
 
   res.json({
     status: isDbReady ? 'online' : IS_PROD ? 'degraded' : 'online_fallback',
     version: '1.0.0-production',
     mode: 'Single-Owner Private Application',
     uptimeSeconds: Math.floor(process.uptime()),
-    totalLeads,
-    activeConnectors: `${activeConnectorsCount}/${totalConnectorsCount}`,
     storageEngine: isDbReady ? 'postgresql' : 'json_store',
     databaseConnected: isDbReady,
-    databaseHealth: {
-      isConfigured: dbHealth.isConfigured,
-      isConnected: dbHealth.isConnected,
-      engine: dbHealth.engine,
-      error: dbHealth.error,
-      consecutiveFailures: dbHealth.consecutiveFailures,
-    },
-    migrationStatus,
     ownerInitialized: initialized,
     timestamp: new Date().toISOString(),
     aiEngineAvailable: !!process.env.GEMINI_API_KEY,
@@ -402,9 +351,29 @@ app.get('/api/auth/setup-status', async (req: Request, res: Response) => {
   }
 });
 
+function requireSameOriginAuth(req: Request, res: Response, next: NextFunction): void {
+  if (!validateSameOrigin(req)) {
+    recordSecurityEvent({
+      category: 'csrf_blocked',
+      severity: 'high',
+      path: req.originalUrl || req.path,
+      method: req.method,
+      ip: normalizeClientIp(req),
+      summary: 'Blocked cross-origin authentication request (Origin/Referer mismatch)',
+    });
+    res.status(403).json({
+      error: 'Cross-origin request blocked.',
+      code: 'CSRF_CROSS_ORIGIN',
+    });
+    return;
+  }
+  next();
+}
+
 // Owner Setup (One-time, locked forever after)
 app.post(
   '/api/auth/setup',
+  requireSameOriginAuth,
   createRateLimitMiddleware(setupRateLimiter, 'Too many owner setup attempts. Try again later.'),
   async (req: Request, res: Response) => {
     const { fullName, email, password, setupSecret } = req.body || {};
@@ -443,7 +412,7 @@ app.post(
 );
 
 // Owner Login (Sets partitioned cookie and returns token for resilient iframe authorization)
-app.post('/api/auth/login', async (req: Request, res: Response) => {
+app.post('/api/auth/login', requireSameOriginAuth, async (req: Request, res: Response) => {
   const { email, password } = req.body || {};
   const ip = normalizeClientIp(req);
 
@@ -499,7 +468,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 });
 
 // Owner Logout
-app.post('/api/auth/logout', async (req: Request, res: Response) => {
+app.post('/api/auth/logout', requireSameOriginAuth, async (req: Request, res: Response) => {
   const rawToken = req.cookies?.[SESSION_COOKIE_NAME] || req.headers['authorization']?.replace('Bearer ', '');
   const ip = normalizeClientIp(req);
   if (rawToken) {
