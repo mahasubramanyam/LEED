@@ -2136,6 +2136,9 @@ export class PostgresStorage {
     credentialProbeStatus: 'verified' | 'unavailable' | 'error';
     tlsEncrypted: boolean;
     sslSetting: string;
+    tlsVersion: string | null;
+    tlsCipher: string | null;
+    tlsBits: number | null;
     auditUpdateDeleteTrigger: boolean;
     auditTruncateTrigger: boolean;
     activeSessionCount: number | null;
@@ -2154,6 +2157,9 @@ export class PostgresStorage {
         credentialProbeStatus: 'unavailable',
         tlsEncrypted: false,
         sslSetting: 'unavailable',
+        tlsVersion: null,
+        tlsCipher: null,
+        tlsBits: null,
         auditUpdateDeleteTrigger: false,
         auditTruncateTrigger: false,
         activeSessionCount: null,
@@ -2166,29 +2172,44 @@ export class PostgresStorage {
     try {
       client = await pool.connect();
 
-      let tlsProbeStatus: 'verified' | 'error' = 'verified';
-      let sslSetting = 'unknown';
+      let tlsProbeStatus: 'verified' | 'unavailable' | 'error' = 'unavailable';
+      let sslSetting = 'unavailable';
       let tlsEncrypted = false;
+      let tlsVersion: string | null = null;
+      let tlsCipher: string | null = null;
+      let tlsBits: number | null = null;
       try {
-        const [sslSettingSettled, sslUsedSettled] = await Promise.allSettled([
-          client.query(`SHOW ssl`),
-          client.query(`SELECT ssl_is_used() as used`),
-        ]);
-        if (sslSettingSettled.status === 'rejected' && sslUsedSettled.status === 'rejected') {
-          tlsProbeStatus = 'error';
-          sslSetting = 'error';
-          console.warn('[DB Security] TLS probe failed.');
+        const tlsRes = await client.query(
+          `SELECT current_database(), ssl, version, cipher, bits FROM pg_stat_ssl WHERE pid = pg_backend_pid()`
+        );
+        const row = tlsRes.rows?.[0];
+        if (!row || typeof row.ssl !== 'boolean') {
+          tlsProbeStatus = 'unavailable';
+          tlsEncrypted = false;
+          sslSetting = 'unavailable';
         } else {
-          if (sslSettingSettled.status === 'fulfilled') {
-            sslSetting = String(sslSettingSettled.value.rows[0]?.ssl || 'unknown');
-          }
-          const sslUsedVal =
-            sslUsedSettled.status === 'fulfilled' ? sslUsedSettled.value.rows[0]?.used : null;
-          tlsEncrypted = sslUsedVal === true || sslSetting.toLowerCase() === 'on';
+          tlsProbeStatus = 'verified';
+          tlsEncrypted = row.ssl === true;
+          tlsVersion = row.version ? String(row.version) : null;
+          tlsCipher = row.cipher ? String(row.cipher) : null;
+          const parsedBits =
+            typeof row.bits === 'number'
+              ? row.bits
+              : row.bits !== null && row.bits !== undefined
+              ? Number.parseInt(String(row.bits), 10)
+              : NaN;
+          tlsBits = Number.isFinite(parsedBits) ? parsedBits : null;
+          sslSetting = tlsEncrypted
+            ? tlsVersion
+              ? `${tlsVersion}${tlsBits ? ` (${tlsBits}-bit)` : ''}`
+              : 'on'
+            : 'off';
         }
       } catch {
         tlsProbeStatus = 'error';
+        tlsEncrypted = false;
         sslSetting = 'error';
+        console.warn('[DB Security] PostgreSQL pg_stat_ssl TLS probe failed.');
       }
 
       let auditTriggerProbeStatus: 'verified' | 'error' = 'verified';
@@ -2263,6 +2284,9 @@ export class PostgresStorage {
         credentialProbeStatus,
         tlsEncrypted,
         sslSetting,
+        tlsVersion,
+        tlsCipher,
+        tlsBits,
         auditUpdateDeleteTrigger,
         auditTruncateTrigger,
         activeSessionCount,
@@ -2279,6 +2303,9 @@ export class PostgresStorage {
         credentialProbeStatus: 'error',
         tlsEncrypted: false,
         sslSetting: 'error',
+        tlsVersion: null,
+        tlsCipher: null,
+        tlsBits: null,
         auditUpdateDeleteTrigger: false,
         auditTruncateTrigger: false,
         activeSessionCount: null,

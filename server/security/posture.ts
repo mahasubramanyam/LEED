@@ -55,6 +55,9 @@ export interface DatabaseSecurityDiagnosticInput {
   credentialProbeStatus?: DiagnosticProbeState;
   tlsEncrypted: boolean;
   sslSetting: string;
+  tlsVersion?: string | null;
+  tlsCipher?: string | null;
+  tlsBits?: number | null;
   auditUpdateDeleteTrigger: boolean;
   auditTruncateTrigger: boolean;
   activeSessionCount: number | null;
@@ -88,6 +91,9 @@ export interface SecurityPostureReport {
     engine: string;
     tlsEncrypted: boolean | null;
     sslSetting: string;
+    tlsVersion?: string | null;
+    tlsCipher?: string | null;
+    tlsBits?: number | null;
     auditTriggersPresent: boolean | null;
     auditUpdateDeleteTrigger: boolean | null;
     auditTruncateTrigger: boolean | null;
@@ -432,11 +438,13 @@ export async function buildSecurityPostureReport(
       status: dbTlsCheckStatus,
       detail: !isDbReady
         ? 'PostgreSQL not connected in current runtime (NOT_VERIFIED).'
+        : dbSec.tlsProbeStatus === 'unavailable'
+        ? 'PostgreSQL pg_stat_ssl TLS diagnostic row unavailable or inaccessible for current session (NOT_VERIFIED).'
         : dbSec.tlsProbeStatus === 'error'
         ? 'TLS diagnostic probe failed (error).'
         : dbSec.tlsEncrypted
-        ? `Encrypted TLS session verified active (SSL=${dbSec.sslSetting}).`
-        : `Database connected without verified TLS flag (SSL=${dbSec.sslSetting}).`,
+        ? `Encrypted TLS session verified active via pg_stat_ssl (${dbSec.sslSetting}).`
+        : `Database connected without active TLS encryption on current session (SSL=${dbSec.sslSetting}).`,
     },
     {
       id: 'cred_encryption',
@@ -518,6 +526,9 @@ export async function buildSecurityPostureReport(
       engine: isDbReady ? 'Neon PostgreSQL' : 'json_fallback',
       tlsEncrypted: dbSec.tlsProbeStatus === 'verified' ? dbSec.tlsEncrypted : null,
       sslSetting: dbSec.sslSetting,
+      tlsVersion: dbSec.tlsProbeStatus === 'verified' ? (dbSec.tlsVersion ?? null) : null,
+      tlsCipher: dbSec.tlsProbeStatus === 'verified' ? (dbSec.tlsCipher ?? null) : null,
+      tlsBits: dbSec.tlsProbeStatus === 'verified' ? (dbSec.tlsBits ?? null) : null,
       auditTriggersPresent,
       auditUpdateDeleteTrigger:
         dbSec.auditTriggerProbeStatus === 'verified' ? dbSec.auditUpdateDeleteTrigger : null,

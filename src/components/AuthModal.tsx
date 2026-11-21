@@ -9,6 +9,36 @@ interface AuthModalProps {
   onSuccess: (owner: any, token?: string) => void;
 }
 
+export interface OwnerSetupPayloadInput {
+  fullName: string;
+  email: string;
+  password: string;
+  setupSecret?: string;
+}
+
+export interface OwnerSetupPayload {
+  fullName: string;
+  email: string;
+  password: string;
+  setupSecret?: string;
+}
+
+/**
+ * Builds the POST /api/auth/setup payload.
+ * Includes `setupSecret` only when non-empty so deployments without SETUP_SECRET remain compatible.
+ */
+export function buildOwnerSetupPayload(input: OwnerSetupPayloadInput): OwnerSetupPayload {
+  const payload: OwnerSetupPayload = {
+    fullName: input.fullName,
+    email: input.email,
+    password: input.password,
+  };
+  if (typeof input.setupSecret === 'string' && input.setupSecret.length > 0) {
+    payload.setupSecret = input.setupSecret;
+  }
+  return payload;
+}
+
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode, onClose, onSuccess }) => {
   const [mode, setMode] = useState<'setup' | 'login' | 'change_password'>(initialMode);
   const [fullName, setFullName] = useState('');
@@ -16,6 +46,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
+  const [setupSecret, setSetupSecret] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -24,7 +55,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
     setMode(initialMode);
     setError(null);
     setSuccessMsg(null);
+    setSetupSecret('');
   }, [initialMode]);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setSetupSecret('');
+      setPassword('');
+      setConfirmPassword('');
+      setCurrentPassword('');
+      setError(null);
+      setSuccessMsg(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -50,12 +93,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ fullName, email, password }),
+          body: JSON.stringify(
+            buildOwnerSetupPayload({ fullName, email, password, setupSecret })
+          ),
         });
 
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Owner setup failed');
 
+        setSetupSecret('');
+        setPassword('');
+        setConfirmPassword('');
         onSuccess(data.owner, data.token);
       } else if (mode === 'login') {
         if (!email.trim() || !password) {
@@ -267,6 +315,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-[#240202] border border-slate-300 dark:border-[#8C2828] rounded-lg text-sm font-medium text-slate-950 dark:text-[#FAF4F4] placeholder:text-slate-500 dark:placeholder:text-[#C9A7A7] focus:outline-none focus:border-[#CE0404]"
+                />
+              </div>
+            </div>
+          )}
+
+          {mode === 'setup' && (
+            <div>
+              <label
+                htmlFor="owner-setup-secret"
+                className="block text-xs font-semibold text-slate-800 dark:text-[#FAF4F4] mb-1"
+              >
+                Setup Secret <span className="font-normal text-slate-500 dark:text-[#C9A7A7]">(if configured)</span>
+              </label>
+              <div className="relative">
+                <KeyRound className="w-4 h-4 text-slate-500 dark:text-[#C9A7A7] absolute left-3 top-2.5" />
+                <input
+                  id="owner-setup-secret"
+                  name="setupSecret"
+                  type="password"
+                  autoComplete="off"
+                  value={setupSecret}
+                  onChange={(e) => setSetupSecret(e.target.value)}
+                  placeholder="Required if SETUP_SECRET is set on server"
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-[#240202] border border-slate-300 dark:border-[#8C2828] rounded-lg text-sm font-medium text-slate-950 dark:text-[#FAF4F4] placeholder:text-slate-500 dark:placeholder:text-[#C9A7A7] focus:outline-none focus:border-[#CE0404]"
                 />
               </div>

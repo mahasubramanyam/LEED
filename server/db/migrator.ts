@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -6,6 +7,10 @@ import { dbManager } from './pool.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const MIGRATION_LOCK_DIGEST = crypto.createHash('sha256').update('leed_schema_migrations_lock').digest();
+export const MIGRATION_ADVISORY_LOCK_KEY_1 = MIGRATION_LOCK_DIGEST.readInt32BE(0);
+export const MIGRATION_ADVISORY_LOCK_KEY_2 = MIGRATION_LOCK_DIGEST.readInt32BE(4);
 
 export interface MigrationResult {
   success: boolean;
@@ -56,6 +61,13 @@ export class Migrator {
 
     try {
       await client.query('BEGIN');
+
+      // Acquire transaction-scoped advisory lock to serialize concurrent migration runs.
+      // Automatically released by PostgreSQL on COMMIT or ROLLBACK.
+      await client.query('SELECT pg_advisory_xact_lock($1, $2)', [
+        MIGRATION_ADVISORY_LOCK_KEY_1,
+        MIGRATION_ADVISORY_LOCK_KEY_2,
+      ]);
 
       // 1. Ensure migrations tracking table exists
       await client.query(`
@@ -129,10 +141,15 @@ export class Migrator {
       await client.query('COMMIT');
       return { success: true, applied, alreadyApplied };
     } catch (err: unknown) {
-      await client.query('ROLLBACK');
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Ignore secondary rollback error if connection dropped; transaction is aborted by server
+      }
       const rawMsg = err instanceof Error ? err.message : String(err);
       const safeMsg = rawMsg.replace(/:[^:@]+@/, ':***@');
-      return { success: false, applied, alreadyApplied, error: safeMsg };
+      // Never claim rolled-back migrations were applied
+      return { success: false, applied: [], alreadyApplied, error: safeMsg };
     } finally {
       if ('release' in client) {
         try {

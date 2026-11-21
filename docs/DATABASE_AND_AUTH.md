@@ -55,6 +55,7 @@ The application includes a dual-engine architecture:
 - No employee/sub-user accounts.
 - No multi-tenant partitioning.
 - Initial setup endpoint (`POST /api/auth/setup`) locks immediately after first owner registration; subsequent attempts are permanently rejected with HTTP 400/403.
+- Optional `SETUP_SECRET` environment variable protects initial owner setup before first-run registration completes (verified in constant time using `crypto.timingSafeEqual`; never returned in API responses, logs, diagnostics, or frontend defaults). When `SETUP_SECRET` is intentionally unset, initial setup remains compatible with blank input.
 
 ### Security Controls:
 1. **Mathematical Single-Owner Singleton Constraint**:
@@ -102,7 +103,8 @@ The application includes a dual-engine architecture:
 - **Verification API**:
   `GET /api/owner/audit-log/verify` mathematically validates the chain from Genesis to Head, confirming sequence continuity and recalculating SHA-256 digests. If any entry is missing, altered, or spliced, it reports the exact sequence number and discrepancy.
 
-### 3. Documented Limitations & WORM Recommendation:
+### 3. Documented Limitations, Migration 002 Safety Boundary & WORM Recommendation:
+- **Migration 002 Fresh-Database Safety Boundary:** `server/db/migrations/002_owner_singleton_and_audit_integrity.sql` creates the immutability trigger `trg_audit_events_prevent_update_delete` (`BEFORE UPDATE OR DELETE ON audit_events`) prior to running its `UPDATE audit_events` hash-chain backfill loop. This ordering is **safe only on a fresh database with zero existing `audit_events` rows** (where the backfill loop performs 0 iterations). Staging and new environments **must** run Migration `002` only against a fresh, empty database with no pre-existing `audit_events` rows. Migration `002` is preserved unchanged to protect existing schema history.
 - **Schema Owner Privilege Limitation**: The application connects using a database role that owns the relational schema. Therefore, a compromised application or direct database superuser could drop or alter triggers (`ALTER TABLE DISABLE TRIGGER`).
 - **Enterprise WORM Checkpoint Recommendation**: To achieve full Write-Once-Read-Many tamper-proof compliance, the application head hash should be periodically committed to an external immutable ledger or cloud WORM storage bucket (e.g. AWS S3 Object Lock in Compliance Mode, Google Cloud Storage Bucket Lock, or an external transparency log) with independent credentials.
 

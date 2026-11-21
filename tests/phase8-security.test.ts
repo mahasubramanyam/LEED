@@ -531,8 +531,19 @@ test('11. DB Security Diagnostics Use Real Columns (revoked_at/expires_at, encry
     connect: async () => ({
       query: async (sql: string) => {
         executedSql.push(sql);
-        if (sql.includes('SHOW ssl')) return { rows: [{ ssl: 'on' }] };
-        if (sql.includes('ssl_is_used')) return { rows: [{ used: true }] };
+        if (sql.includes('pg_stat_ssl')) {
+          return {
+            rows: [
+              {
+                current_database: 'neondb',
+                ssl: true,
+                version: 'TLSv1.3',
+                cipher: 'TLS_AES_256_GCM_SHA384',
+                bits: 256,
+              },
+            ],
+          };
+        }
         if (sql.includes('pg_trigger')) {
           return {
             rows: [
@@ -576,8 +587,19 @@ test('11. DB Security Diagnostics Use Real Columns (revoked_at/expires_at, encry
         if (sql.includes('FROM connector_credentials')) {
           throw new Error('permission denied for table connector_credentials');
         }
-        if (sql.includes('SHOW ssl')) return { rows: [{ ssl: 'on' }] };
-        if (sql.includes('ssl_is_used')) return { rows: [{ used: true }] };
+        if (sql.includes('pg_stat_ssl')) {
+          return {
+            rows: [
+              {
+                current_database: 'neondb',
+                ssl: true,
+                version: 'TLSv1.3',
+                cipher: 'TLS_AES_256_GCM_SHA384',
+                bits: 256,
+              },
+            ],
+          };
+        }
         return { rows: [] };
       },
       release: () => {},

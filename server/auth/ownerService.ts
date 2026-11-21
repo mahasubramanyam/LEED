@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
@@ -5,6 +6,28 @@ import { dbManager } from '../db/pool.js';
 import { hashPassword, verifyPassword, validatePasswordStrength } from './password.js';
 import { createSession, revokeSession, revokeAllOwnerSessions, OwnerUser, OwnerSession } from './session.js';
 import { loginRateLimiter } from './rateLimit.js';
+
+/**
+ * Constant-time UTF-8 secret comparison backed by crypto.timingSafeEqual.
+ * Safely handles non-strings, empty strings, and unequal buffer lengths without
+ * throwing RangeError or short-circuiting on content bytes.
+ */
+export function constantTimeSecretEquals(supplied: unknown, expected: string): boolean {
+  if (typeof supplied !== 'string' || typeof expected !== 'string') {
+    return false;
+  }
+  const suppliedBuf = Buffer.from(supplied, 'utf8');
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  if (suppliedBuf.length === 0 || expectedBuf.length === 0) {
+    return false;
+  }
+  if (suppliedBuf.length !== expectedBuf.length) {
+    // Perform a dummy constant-time comparison on equal-length buffers before returning false
+    crypto.timingSafeEqual(expectedBuf, expectedBuf);
+    return false;
+  }
+  return crypto.timingSafeEqual(suppliedBuf, expectedBuf);
+}
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const OWNER_FALLBACK_FILE = path.join(DATA_DIR, 'owner_auth.json');
@@ -106,9 +129,9 @@ export class OwnerService {
 
     try {
       // 2. Setup Secret Verification if configured in environment
-      const envSetupSecret = process.env.SETUP_SECRET;
-      if (envSetupSecret && envSetupSecret.trim().length > 0) {
-        if (!suppliedSetupSecret || suppliedSetupSecret !== envSetupSecret) {
+      const envSetupSecret = process.env.SETUP_SECRET?.trim();
+      if (envSetupSecret && envSetupSecret.length > 0) {
+        if (!constantTimeSecretEquals(suppliedSetupSecret, envSetupSecret)) {
           throw new Error('Invalid or missing SETUP_SECRET. Owner initialization is protected against unauthorized setup.');
         }
       }

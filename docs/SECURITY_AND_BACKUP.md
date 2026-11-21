@@ -9,8 +9,16 @@ LEED separates application-layer encryption from Neon cloud infrastructure encry
 | **Application-Layer Secret Encryption** | External connector credentials (`connector_credentials.encrypted_payload`) | Node.js `crypto` **AES-256-GCM** with unique 12-byte random IV and 16-byte authentication tag per entry (`key_version = 1`) | Server-side `CONNECTOR_ENCRYPTION_KEY` environment variable (SHA-256 derived 32-byte key if non-hex/base64, or direct 32-byte hex/base64). Never sent to browser clients. |
 | **Password & Session Cryptography** | Owner authentication (`owner_users`, `owner_sessions`) | **bcrypt** (cost factor 12) password hashes; **SHA-256** digested 256-bit random bearer/cookie tokens | Server-generated CSPRNG (`crypto.randomBytes`). Raw session tokens are never stored in PostgreSQL. |
 | **Audit Chain Integrity** | Tamper detection (`audit_events`) | Sequential **SHA-256** hash chain (`prev_hash` + canonical JSON payload) + PostgreSQL triggers blocking `UPDATE`, `DELETE`, and `TRUNCATE` | Database-enforced triggers (`trg_audit_events_prevent_update_delete`, `trg_audit_events_prevent_truncate`). |
-| **Transport Encryption (TLS)** | App <-> Neon PostgreSQL & Browser <-> Express | PostgreSQL TLS (`ssl_is_used()` / `sslmode=require`) & HTTPS reverse proxy with `Strict-Transport-Security` | Neon-managed TLS certificates & hosting platform TLS termination. |
+| **Transport Encryption (TLS)** | App <-> Neon PostgreSQL & Browser <-> Express | PostgreSQL TLS (`pg_stat_ssl` / `sslmode=require`) & HTTPS reverse proxy with `Strict-Transport-Security` | Neon-managed TLS certificates & hosting platform TLS termination. |
 | **Infrastructure At-Rest Encryption** | Full CRM tables (`leads`, `persons`, `notes`, `activities`, `audit_events`, etc.) | **Neon Cloud Platform Storage Encryption** | Managed by Neon Cloud infrastructure (AWS/GCP storage encryption). Individual CRM rows are not separately client-side encrypted to preserve relational indexing, search, and foreign keys. |
+
+> **PostgreSQL TLS Verification (PostgreSQL-Native — No Optional Extensions):**
+> Verify active per-connection TLS encryption using PostgreSQL's built-in `pg_stat_ssl` view rather than `ssl_is_used()` (which requires the optional `sslinfo` extension) or `SHOW ssl` (which only reflects server configuration, not whether the active client connection is encrypted):
+> ```sql
+> SELECT current_database(), ssl, version, cipher, bits
+> FROM pg_stat_ssl
+> WHERE pid = pg_backend_pid();
+> ```
 
 > **Operational Rule:** Never rotate or delete `CONNECTOR_ENCRYPTION_KEY` without first rotating stored connector credentials, or existing encrypted secrets in `connector_credentials` will fail GCM authentication tag verification.
 

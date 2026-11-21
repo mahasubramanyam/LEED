@@ -406,7 +406,11 @@ app.post(
         message: 'Owner initialized successfully. Platform locked to single-owner mode.',
       });
     } catch (err: unknown) {
-      res.status(400).json({ error: sanitizeApiError(err, 'Owner setup failed.') });
+      const secretsToRedact = [
+        process.env.SETUP_SECRET || '',
+        typeof setupSecret === 'string' ? setupSecret : '',
+      ].filter((s) => s.trim().length > 0);
+      res.status(400).json({ error: sanitizeApiError(err, 'Owner setup failed.', secretsToRedact) });
     }
   }
 );
