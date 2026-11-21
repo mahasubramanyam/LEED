@@ -99,7 +99,7 @@ export const PersonEnrichmentInlinePanel: React.FC<PersonEnrichmentInlinePanelPr
           type="button"
           disabled={loading}
           onClick={handleRunPreview}
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-semibold text-[11px] disabled:opacity-50"
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#B30303] hover:bg-[#910303] text-white font-semibold text-[11px] disabled:opacity-50"
         >
           <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
           {loading ? 'Checking...' : preview ? 'Re-Run Preview' : 'Run Preview'}

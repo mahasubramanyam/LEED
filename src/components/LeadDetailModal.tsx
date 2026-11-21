@@ -87,30 +87,30 @@ function getCountryFlag(code?: string): string {
 function getStatusBadge(status?: string, verified?: boolean) {
   if (status === 'officially_verified' || verified) {
     return (
-      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/35 flex items-center gap-1">
+        <CheckCircle2 className="w-3 h-3 text-emerald-700 dark:text-emerald-300" />
         Officially Verified
       </span>
     );
   }
   if (status === 'syntax_validated') {
     return (
-      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1">
-        <ShieldCheck className="w-3 h-3 text-blue-400" />
+      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-50 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-500/35 flex items-center gap-1">
+        <ShieldCheck className="w-3 h-3 text-sky-700 dark:text-sky-300" />
         Syntax Validated
       </span>
     );
   }
   if (status === 'discovered') {
     return (
-      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-        <AlertCircle className="w-3 h-3 text-amber-400" />
+      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/35 flex items-center gap-1">
+        <AlertCircle className="w-3 h-3 text-amber-700 dark:text-amber-300" />
         Discovered
       </span>
     );
   }
   return (
-    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#F4ECEC] dark:bg-[#690303] text-[#422F2F] dark:text-[#EFE0E0] border border-[#D4C2C2] dark:border-[#8C2828]">
       User Provided
     </span>
   );
@@ -154,49 +154,49 @@ function renderRegistryStateBadge(state?: string) {
   switch (state as RegistryVerificationState) {
     case 'officially_verified':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/40">
           <CheckCircle2 className="w-3 h-3" />
           <span>Officially Verified</span>
         </span>
       );
     case 'probable_match':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/40">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-50 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-500/40">
           <ShieldCheck className="w-3 h-3" />
           <span>Probable Match</span>
         </span>
       );
     case 'conflict_detected':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-[#FFF2F2] dark:bg-[#CE0404]/25 text-[#B30303] dark:text-[#FF9492] border border-[#F0B8B8] dark:border-[#E52825]/45">
           <AlertTriangle className="w-3 h-3" />
           <span>Conflict Detected</span>
         </span>
       );
     case 'offline_reference':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/40">
           <AlertCircle className="w-3 h-3" />
           <span>Offline Reference Only</span>
         </span>
       );
     case 'not_found':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-[#F4ECEC] dark:bg-[#690303] text-[#422F2F] dark:text-[#EFE0E0] border border-[#D4C2C2] dark:border-[#8C2828]">
           <AlertCircle className="w-3 h-3" />
           <span>Not Found in Registry</span>
         </span>
       );
     case 'unavailable':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-[#F4ECEC] dark:bg-[#690303] text-[#543F3F] dark:text-[#DEC2C2] border border-[#D4C2C2] dark:border-[#8C2828]">
           <AlertCircle className="w-3 h-3" />
           <span>Registry Unavailable</span>
         </span>
       );
     default:
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-[#F4ECEC] dark:bg-[#690303] text-[#543F3F] dark:text-[#DEC2C2] border border-[#D4C2C2] dark:border-[#8C2828]">
           <span>Not Verified Yet</span>
         </span>
       );
@@ -207,25 +207,25 @@ function renderLegalCompanyStatusBadge(status?: CanonicalLead['companyStatus']) 
   switch (status) {
     case 'active':
       return (
-        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 uppercase">
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/35 uppercase">
           Active
         </span>
       );
     case 'inactive':
       return (
-        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30 uppercase">
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/35 uppercase">
           Inactive
         </span>
       );
     case 'dissolved':
       return (
-        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/30 uppercase">
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#FFF2F2] dark:bg-[#CE0404]/25 text-[#B30303] dark:text-[#FF9492] border border-[#F0B8B8] dark:border-[#E52825]/40 uppercase">
           Dissolved
         </span>
       );
     default:
       return (
-        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 uppercase">
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#F4ECEC] dark:bg-[#690303] text-[#543F3F] dark:text-[#DEC2C2] border border-[#D4C2C2] dark:border-[#8C2828] uppercase">
           Unknown
         </span>
       );
@@ -934,7 +934,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-[#240202]/75 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-      <div className="bg-slate-900 border border-[#7A1E1E] rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-white dark:bg-[#240202] border border-[#DFD1D1] dark:border-[#7A1E1E] rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Drawer Header */}
         <div className="px-5 py-4 border-b border-[#7A1E1E] bg-gradient-to-r from-[#240202] via-[#440303] to-[#690303] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="space-y-1 min-w-0">
@@ -1008,7 +1008,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Close company details"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              className="p-1.5 rounded-lg text-[#F5DADA] hover:text-white hover:bg-[#910303]/60 transition"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1016,16 +1016,16 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
         </div>
 
         {/* Quick Attributes Strip */}
-        <div className="px-5 py-3 bg-slate-950/40 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="px-5 py-3 bg-[#FAF7F7] dark:bg-[#440303]/80 border-b border-[#E4DADA] dark:border-[#7A1E1E] flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 text-slate-400">
-              <span className="text-slate-500 font-semibold">Stage:</span>
+            <div className="flex items-center gap-1.5 text-[#543F3F] dark:text-[#DEC2C2]">
+              <span className="text-[#7A6262] dark:text-[#C59D9D] font-semibold">Stage:</span>
               <select
                 value={lead.pipelineStageId || ''}
                 onChange={(e) => {
                   if (e.target.value) handleUpdateStage(e.target.value);
                 }}
-                className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-0.5 font-medium"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-0.5 font-medium"
               >
                 {(!lead.pipelineStageId || !stages.some((s) => s.id === lead.pipelineStageId)) && (
                   <option value="">Unassigned</option>
@@ -1038,19 +1038,19 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </select>
             </div>
 
-            <div className="flex items-center gap-1 text-slate-400">
-              <span className="text-slate-500 font-semibold">Value:</span>
+            <div className="flex items-center gap-1 text-[#543F3F] dark:text-[#DEC2C2]">
+              <span className="text-[#7A6262] dark:text-[#C59D9D] font-semibold">Value:</span>
               <input
                 type="number"
                 value={oppValue}
                 onChange={(e) => setOppValue(e.target.value)}
                 onBlur={handleUpdateValue}
                 placeholder="0"
-                className="w-20 bg-slate-900 border border-slate-700 text-white rounded px-2 py-0.5 text-right font-mono"
+                className="w-20 bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-0.5 text-right font-mono"
               />
               <span>{lead.currency}</span>
               {lead.opportunityValue ? (
-                <span className="text-emerald-400 font-mono font-semibold ml-1">
+                <span className="text-emerald-700 dark:text-emerald-300 font-mono font-semibold ml-1">
                   ({formatCurrencyLocale(lead.opportunityValue, lead.currency || 'USD', leadLocale)})
                 </span>
               ) : null}
@@ -1061,12 +1061,12 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
             {lead.tags.map((tag) => (
               <span
                 key={tag}
-                className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-800 text-slate-300 rounded text-[11px] group"
+                className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#F4ECEC] dark:bg-[#690303] text-[#422F2F] dark:text-[#EFE0E0] rounded text-[11px] group"
               >
                 <span>{tag}</span>
                 <button
                   onClick={() => handleRemoveTag(tag)}
-                  className="text-slate-500 hover:text-rose-400 ml-0.5"
+                  className="text-[#7A6262] dark:text-[#C59D9D] hover:text-[#B30303] dark:hover:text-[#FF9492] ml-0.5"
                 >
                   ×
                 </button>
@@ -1078,14 +1078,14 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 value={newTag}
                 onChange={(e) => setNewTag(e.target.value)}
                 placeholder="+ tag"
-                className="w-16 bg-slate-950 border border-slate-800 text-white text-[11px] rounded px-1.5 py-0.5 focus:outline-none focus:border-indigo-500"
+                className="w-16 bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] text-[#240202] dark:text-[#FAF4F4] text-[11px] rounded px-1.5 py-0.5 focus:outline-none focus:border-[#910303]"
               />
             </form>
           </div>
         </div>
 
         {/* Tab Navigation */}
-        <div className="px-5 border-b border-slate-800 flex space-x-4 bg-slate-950/20 text-xs overflow-x-auto">
+        <div className="px-5 border-b border-[#E4DADA] dark:border-[#7A1E1E] flex space-x-4 bg-[#F6F3F3] dark:bg-[#2E0202] text-xs overflow-x-auto">
           {[
             { id: 'overview', label: 'Lead Facts & Profile' },
             { id: 'relationship', label: 'Relationship & CRM' },
@@ -1101,8 +1101,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               onClick={() => setActiveTab(tab.id as any)}
               className={`py-3 font-semibold border-b-2 transition whitespace-nowrap shrink-0 ${
                 activeTab === tab.id
-                  ? 'border-indigo-500 text-white'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
+                  ? 'border-[#CE0404] text-[#910303] dark:text-white'
+                  : 'border-transparent text-[#543F3F] dark:text-[#DEC2C2] hover:text-[#440303] dark:hover:text-white'
               }`}
             >
               {tab.label}
@@ -1138,13 +1138,13 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
           {activeTab === 'overview' && (
             <div className="space-y-4 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">
+                <span className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] font-medium uppercase tracking-wider">
                   Geographic & Contact Profile
                 </span>
                 <button
                   type="button"
                   onClick={() => setIsEditingProfile(!isEditingProfile)}
-                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex items-center gap-1.5 text-[11px] font-medium transition"
+                  className="px-2.5 py-1 bg-[#F4ECEC] dark:bg-[#690303] hover:bg-[#E7D8D8] dark:hover:bg-[#7A1212] text-[#240202] dark:text-[#FAF4F4] rounded border border-[#D4C2C2] dark:border-[#8C2828] flex items-center gap-1.5 text-[11px] font-medium transition"
                 >
                   <Edit3 className="w-3 h-3" />
                   <span>{isEditingProfile ? 'Cancel Edit' : 'Edit Location & Contact'}</span>
@@ -1152,7 +1152,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </div>
 
               {isEditingProfile ? (
-                <form onSubmit={handleSaveProfile} className="bg-slate-950 border border-indigo-500/40 rounded-xl p-4 space-y-3">
+                <form onSubmit={handleSaveProfile} className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#D8B4B4] dark:border-[#CE0404]/50 rounded-xl p-4 space-y-3">
                   <GeoSelector
                     countryCode={editGeo.countryCode}
                     region={editGeo.region}
@@ -1172,41 +1172,41 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     }
                   />
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-800">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-[#E4DADA] dark:border-[#7A1E1E]">
                     <div>
-                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Phone (Auto-normalizes E.164)</label>
+                      <label className="block text-[11px] font-medium text-[#543F3F] dark:text-[#DEC2C2] mb-1">Phone (Auto-normalizes E.164)</label>
                       <input
                         type="text"
                         value={editPhone}
                         onChange={(e) => setEditPhone(e.target.value)}
                         placeholder="+44 20 7946 0912"
-                        className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 font-mono"
+                        className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] text-xs rounded px-2.5 py-1.5 font-mono"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Public Email</label>
+                      <label className="block text-[11px] font-medium text-[#543F3F] dark:text-[#DEC2C2] mb-1">Public Email</label>
                       <input
                         type="email"
                         value={editEmail}
                         onChange={(e) => setEditEmail(e.target.value)}
                         placeholder="contact@company.com"
-                        className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 font-mono"
+                        className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] text-xs rounded px-2.5 py-1.5 font-mono"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Website URL</label>
+                      <label className="block text-[11px] font-medium text-[#543F3F] dark:text-[#DEC2C2] mb-1">Website URL</label>
                       <input
                         type="text"
                         value={editWebsite}
                         onChange={(e) => setEditWebsite(e.target.value)}
                         placeholder="https://company.com"
-                        className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 font-mono"
+                        className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] text-xs rounded px-2.5 py-1.5 font-mono"
                       />
                     </div>
                   </div>
 
                   {editProfileError && (
-                    <div className="p-2 bg-rose-950/50 border border-rose-800 rounded text-rose-300 text-xs">
+                    <div className="p-2 bg-[#FFF2F2] dark:bg-[#690303]/70 border border-[#F0B8B8] dark:border-[#E52825]/50 rounded text-[#B30303] dark:text-[#FF9492] text-xs">
                       {editProfileError}
                     </div>
                   )}
@@ -1215,13 +1215,13 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setIsEditingProfile(false)}
-                      className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded text-xs"
+                      className="px-3 py-1.5 bg-[#F4ECEC] dark:bg-[#690303] text-[#422F2F] dark:text-[#EFE0E0] rounded text-xs"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded text-xs flex items-center gap-1.5"
+                      className="px-3.5 py-1.5 bg-[#B30303] hover:bg-[#910303] text-white font-semibold rounded text-xs flex items-center gap-1.5"
                     >
                       <Save className="w-3.5 h-3.5" />
                       <span>Save Normalized Profile</span>
@@ -1231,40 +1231,40 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Physical Location */}
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-2">
                   <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
-                      <MapPin className="w-3.5 h-3.5 text-indigo-400" />
+                    <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] flex items-center gap-1.5 text-xs">
+                      <MapPin className="w-3.5 h-3.5 text-[#910303] dark:text-[#FF9492]" />
                       Physical & Registered Address
                     </h4>
                     {lead.address?.countryCode && (
-                      <span className="px-2 py-0.5 text-[10px] bg-slate-900 border border-slate-800 rounded text-slate-400 font-mono">
+                      <span className="px-2 py-0.5 text-[10px] bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded text-[#543F3F] dark:text-[#DEC2C2] font-mono">
                         ISO: {lead.address.countryCode}
                       </span>
                     )}
                   </div>
 
-                  <div className="space-y-1.5 text-slate-300">
-                    <div className="font-medium text-white">{lead.address?.formattedAddress || 'No formatted address on file'}</div>
-                    {lead.address?.street && <div className="text-slate-400">{lead.address.street}</div>}
-                    <div className="text-slate-400 flex flex-wrap gap-2 text-[11px]">
+                  <div className="space-y-1.5 text-[#422F2F] dark:text-[#EFE0E0]">
+                    <div className="font-medium text-[#240202] dark:text-[#FAF4F4]">{lead.address?.formattedAddress || 'No formatted address on file'}</div>
+                    {lead.address?.street && <div className="text-[#543F3F] dark:text-[#DEC2C2]">{lead.address.street}</div>}
+                    <div className="text-[#543F3F] dark:text-[#DEC2C2] flex flex-wrap gap-2 text-[11px]">
                       {lead.address?.postalCode && (
-                        <span className="bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                        <span className="bg-white dark:bg-[#240202] px-1.5 py-0.5 rounded border border-[#E4DADA] dark:border-[#7A1E1E]">
                           Postal: {lead.address.postalCode}
                         </span>
                       )}
                       {lead.address?.city && (
-                        <span className="bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                        <span className="bg-white dark:bg-[#240202] px-1.5 py-0.5 rounded border border-[#E4DADA] dark:border-[#7A1E1E]">
                           City: {lead.address.city}
                         </span>
                       )}
                       {lead.address?.region && (
-                        <span className="bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                        <span className="bg-white dark:bg-[#240202] px-1.5 py-0.5 rounded border border-[#E4DADA] dark:border-[#7A1E1E]">
                           Region: {lead.address.region}
                         </span>
                       )}
                       {lead.address?.country && (
-                        <span className="bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                        <span className="bg-white dark:bg-[#240202] px-1.5 py-0.5 rounded border border-[#E4DADA] dark:border-[#7A1E1E]">
                           Country: {lead.address.country}
                         </span>
                       )}
@@ -1272,12 +1272,12 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
                     <div className="flex items-center gap-2 pt-1">
                       {lead.currency && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-indigo-950/50 text-indigo-300 border border-indigo-900/60 rounded font-mono">
+                        <span className="text-[10px] px-1.5 py-0.5 bg-[#FDF4F4] dark:bg-[#690303]/70 text-[#910303] dark:text-[#FF9492] border border-[#D8B4B4] dark:border-[#CE0404]/50 rounded font-mono">
                           Currency: {lead.currency}
                         </span>
                       )}
                       {lead.coordinates && (
-                        <span className="font-mono text-cyan-400 text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                        <span className="font-mono text-sky-700 dark:text-sky-300 text-[10px] bg-white dark:bg-[#240202] px-1.5 py-0.5 rounded border border-[#E4DADA] dark:border-[#7A1E1E]">
                           GPS: {lead.coordinates.lat.toFixed(4)}, {lead.coordinates.lon.toFixed(4)}
                         </span>
                       )}
@@ -1286,60 +1286,60 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 </div>
 
                 {/* Digital Contact Channels */}
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                  <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
-                    <Globe2 className="w-3.5 h-3.5 text-indigo-400" />
+                <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-2">
+                  <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] flex items-center gap-1.5 text-xs">
+                    <Globe2 className="w-3.5 h-3.5 text-[#910303] dark:text-[#FF9492]" />
                     Verified Contact Channels
                   </h4>
-                  <div className="space-y-2 text-slate-300">
+                  <div className="space-y-2 text-[#422F2F] dark:text-[#EFE0E0]">
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Website:</span>
+                      <span className="text-[#7A6262] dark:text-[#C59D9D]">Website:</span>
                       {sanitizeExternalUrl(lead.website) ? (
                         <a
                           href={sanitizeExternalUrl(lead.website)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-indigo-400 hover:underline flex items-center gap-1 font-mono"
+                          className="text-[#910303] dark:text-[#FF9492] hover:underline flex items-center gap-1 font-mono"
                         >
                           <span>{lead.domain || lead.website}</span>
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       ) : (
-                        <span className="text-slate-500">None detected</span>
+                        <span className="text-[#7A6262] dark:text-[#C59D9D]">None detected</span>
                       )}
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Public Email:</span>
+                      <span className="text-[#7A6262] dark:text-[#C59D9D]">Public Email:</span>
                       {lead.email ? (
-                        <span className="text-cyan-400 font-mono">{lead.email}</span>
+                        <span className="text-sky-700 dark:text-sky-300 font-mono">{lead.email}</span>
                       ) : (
-                        <span className="text-slate-500">None on record</span>
+                        <span className="text-[#7A6262] dark:text-[#C59D9D]">None on record</span>
                       )}
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Telephone:</span>
+                      <span className="text-[#7A6262] dark:text-[#C59D9D]">Telephone:</span>
                       {lead.phone || lead.phoneNormalized ? (
                         <div className="text-right">
                           <a
                             href={`tel:${lead.phoneNormalized || lead.phone}`}
-                            className="text-emerald-400 hover:underline font-mono block font-semibold"
+                            className="text-emerald-700 dark:text-emerald-300 hover:underline font-mono block font-semibold"
                           >
                             {lead.phone || lead.phoneNormalized}
                           </a>
                           {lead.phoneNormalized && lead.phoneNormalized !== lead.phone ? (
-                            <span className="text-[10px] text-cyan-400 font-mono block">
+                            <span className="text-[10px] text-sky-700 dark:text-sky-300 font-mono block">
                               E.164: {lead.phoneNormalized}
                             </span>
                           ) : (
-                            <span className="text-[10px] text-slate-500 font-mono">
+                            <span className="text-[10px] text-[#7A6262] dark:text-[#C59D9D] font-mono">
                               {lead.phoneNormalized ? 'E.164 Normalized' : 'Raw Input'}
                             </span>
                           )}
                         </div>
                       ) : (
-                        <span className="text-slate-500">None on record</span>
+                        <span className="text-[#7A6262] dark:text-[#C59D9D]">None on record</span>
                       )}
                     </div>
                   </div>
@@ -1348,14 +1348,14 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               )}
 
               {/* Official Government Registry Verification & Legal Identity */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                   <div>
-                    <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
-                      <Scale className="w-3.5 h-3.5 text-cyan-400" />
+                    <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] flex items-center gap-1.5 text-xs">
+                      <Scale className="w-3.5 h-3.5 text-sky-700 dark:text-sky-300" />
                       <span>Official Government Registry &amp; Legal Identity</span>
                     </h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">
                       Higher-trust registry verification preserves CRM pipeline stages, notes, and deal history while detecting legal identity conflicts.
                     </p>
                   </div>
@@ -1364,7 +1364,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     type="button"
                     onClick={handleVerifyWithOfficialRegistry}
                     disabled={isVerifyingRegistry}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded text-xs transition shrink-0"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#B30303] hover:bg-[#910303] disabled:opacity-50 text-white font-semibold rounded text-xs transition shrink-0"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingRegistry ? 'animate-spin' : ''}`} />
                     <span>{isVerifyingRegistry ? 'Verifying Registry...' : 'Verify with Official Registry'}</span>
@@ -1372,32 +1372,32 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 </div>
 
                 {verificationError && (
-                  <div className="p-2.5 bg-rose-950/40 border border-rose-800 rounded text-rose-300 text-xs">
+                  <div className="p-2.5 bg-[#FFF2F2] dark:bg-[#690303]/65 border border-[#F0B8B8] dark:border-[#E52825]/50 rounded text-[#B30303] dark:text-[#FF9492] text-xs">
                     {verificationError}
                   </div>
                 )}
 
                 {verificationReport && (
-                  <div className="p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-[11px] text-slate-200 space-y-1.5">
+                  <div className="p-2.5 bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg text-[11px] text-[#240202] dark:text-[#FAF4F4] space-y-1.5">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="font-semibold text-white">Latest Verification Run</span>
+                      <span className="font-semibold text-[#240202] dark:text-[#FAF4F4]">Latest Verification Run</span>
                       <div className="flex items-center gap-1.5">
                         {verificationReport.authRequired && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/35">
                             Credentials Required
                           </span>
                         )}
                         {renderRegistryStateBadge(verificationReport.state)}
                       </div>
                     </div>
-                    <p className="text-slate-300">{verificationReport.summary}</p>
+                    <p className="text-[#422F2F] dark:text-[#EFE0E0]">{verificationReport.summary}</p>
                     {verificationReport.attemptedConnectors && verificationReport.attemptedConnectors.length > 0 && (
-                      <div className="text-[10px] text-slate-400 font-mono">
+                      <div className="text-[10px] text-[#543F3F] dark:text-[#DEC2C2] font-mono">
                         Attempted connectors: {verificationReport.attemptedConnectors.join(' -> ')}
                       </div>
                     )}
                     {verificationReport.notes && verificationReport.notes.length > 0 && (
-                      <ul className="list-disc list-inside text-[10px] text-slate-400 space-y-0.5">
+                      <ul className="list-disc list-inside text-[10px] text-[#543F3F] dark:text-[#DEC2C2] space-y-0.5">
                         {verificationReport.notes.map((n, idx) => (
                           <li key={idx}>{n}</li>
                         ))}
@@ -1407,35 +1407,35 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
-                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Legal Business Name</div>
-                    <div className="text-xs font-semibold text-white mt-0.5 truncate" title={lead.legalName || lead.companyName}>
+                  <div className="p-2.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg">
+                    <div className="text-[10px] text-[#7A6262] dark:text-[#C59D9D] uppercase font-semibold">Legal Business Name</div>
+                    <div className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4] mt-0.5 truncate" title={lead.legalName || lead.companyName}>
                       {lead.legalName || lead.companyName}
                     </div>
                   </div>
 
-                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
-                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Official Registration No.</div>
-                    <div className="text-xs font-mono text-cyan-300 mt-0.5">
+                  <div className="p-2.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg">
+                    <div className="text-[10px] text-[#7A6262] dark:text-[#C59D9D] uppercase font-semibold">Official Registration No.</div>
+                    <div className="text-xs font-mono text-sky-700 dark:text-sky-300 mt-0.5">
                       {lead.registrationNumber
                         ? `${lead.registrationType || 'REG'}: ${lead.registrationNumber}`
                         : 'Not registered'}
                     </div>
                   </div>
 
-                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
-                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Jurisdiction &amp; Legal Status</div>
+                  <div className="p-2.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg">
+                    <div className="text-[10px] text-[#7A6262] dark:text-[#C59D9D] uppercase font-semibold">Jurisdiction &amp; Legal Status</div>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <span className="text-xs text-slate-200 font-mono">
+                      <span className="text-xs text-[#240202] dark:text-[#FAF4F4] font-mono">
                         {lead.address?.countryCode || '—'} · {lead.address?.country || 'Unknown'}
                       </span>
                       {renderLegalCompanyStatusBadge(lead.companyStatus)}
                     </div>
                   </div>
 
-                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
-                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Official Registry Source</div>
-                    <div className="text-xs text-slate-200 mt-0.5 flex items-center gap-1.5">
+                  <div className="p-2.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg">
+                    <div className="text-[10px] text-[#7A6262] dark:text-[#C59D9D] uppercase font-semibold">Official Registry Source</div>
+                    <div className="text-xs text-[#240202] dark:text-[#FAF4F4] mt-0.5 flex items-center gap-1.5">
                       <span className="truncate">
                         {lastVerificationSource || lead.sources[0]?.sourceName || 'Not verified with registry'}
                       </span>
@@ -1444,7 +1444,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           href={sanitizeExternalUrl(lastVerificationSourceUrl || lead.sources[0]?.url)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-indigo-400 hover:text-indigo-300 shrink-0"
+                          className="text-[#910303] dark:text-[#FF9492] hover:text-[#B30303] dark:hover:text-[#FFE2E1] shrink-0"
                           title="Open Official Registry Record"
                         >
                           <ExternalLink className="w-3 h-3" />
@@ -1453,21 +1453,21 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
-                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Verification Status</div>
+                  <div className="p-2.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg">
+                    <div className="text-[10px] text-[#7A6262] dark:text-[#C59D9D] uppercase font-semibold">Verification Status</div>
                     <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                       {renderRegistryStateBadge(lastRegistryState)}
                       {lastVerificationMatchType && lastVerificationMatchType !== 'none' && (
-                        <span className="text-[10px] font-mono text-slate-400">
+                        <span className="text-[10px] font-mono text-[#543F3F] dark:text-[#DEC2C2]">
                           ({lastVerificationMatchType.replace(/_/g, ' ')})
                         </span>
                       )}
                     </div>
                   </div>
 
-                  <div className="p-2.5 bg-slate-900 border border-slate-800/80 rounded-lg">
-                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Last Verified Timestamp</div>
-                    <div className="text-xs font-mono tabular-nums text-slate-200 mt-0.5">
+                  <div className="p-2.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg">
+                    <div className="text-[10px] text-[#7A6262] dark:text-[#C59D9D] uppercase font-semibold">Last Verified Timestamp</div>
+                    <div className="text-xs font-mono tabular-nums text-[#240202] dark:text-[#FAF4F4] mt-0.5">
                       {lastVerifiedAt
                         ? formatDateLocale(lastVerifiedAt, leadLocale, leadTimezone)
                         : 'Not verified yet'}
@@ -1476,18 +1476,18 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 </div>
 
                 {Object.keys(activeAttributeSources).length > 0 && (
-                  <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
-                    <div className="text-[10px] text-slate-500 uppercase font-semibold">
+                  <div className="pt-2 border-t border-[#E4DADA] dark:border-[#7A1E1E] space-y-1.5">
+                    <div className="text-[10px] text-[#7A6262] dark:text-[#C59D9D] uppercase font-semibold">
                       Field-Level Official Provenance
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                       {Object.entries(activeAttributeSources).map(([field, meta]) => (
                         <div
                           key={field}
-                          className="p-2 bg-slate-900/80 border border-slate-800 rounded text-[10px] flex items-center justify-between gap-2"
+                          className="p-2 bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded text-[10px] flex items-center justify-between gap-2"
                         >
-                          <span className="font-mono text-slate-300">{field}</span>
-                          <span className="text-slate-400 truncate" title={meta.sourceName}>
+                          <span className="font-mono text-[#422F2F] dark:text-[#EFE0E0]">{field}</span>
+                          <span className="text-[#543F3F] dark:text-[#DEC2C2] truncate" title={meta.sourceName}>
                             {meta.sourceName}
                           </span>
                         </div>
@@ -1498,9 +1498,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
                 {/* Conflicts / Outdated Information Alert Panel */}
                 {activeConflicts.length > 0 && (
-                  <div className="p-3 bg-rose-950/35 border border-rose-800/70 rounded-lg space-y-2">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-rose-300">
-                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                  <div className="p-3 bg-[#FFF2F2] dark:bg-[#690303]/60 border border-[#F0B8B8] dark:border-[#E52825]/50 rounded-lg space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-[#B30303] dark:text-[#FF9492]">
+                      <AlertTriangle className="w-4 h-4 text-[#B30303] dark:text-[#FF9492]" />
                       <span>
                         Conflicting or Outdated Information Detected ({activeConflicts.length})
                       </span>
@@ -1509,30 +1509,30 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       {activeConflicts.map((conflict, idx) => (
                         <div
                           key={idx}
-                          className="p-2 bg-slate-950/80 border border-rose-900/60 rounded text-[11px] space-y-1"
+                          className="p-2 bg-[#FAF7F7] dark:bg-[#440303] border border-[#F0B8B8] dark:border-[#E52825]/50 rounded text-[11px] space-y-1"
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono font-semibold text-rose-200 uppercase">
+                            <span className="font-mono font-semibold text-[#910303] dark:text-[#FFE2E1] uppercase">
                               {conflict.field}
                             </span>
                             <span
                               className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
                                 conflict.severity === 'high'
-                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                                  ? 'bg-[#FFF2F2] dark:bg-[#CE0404]/25 text-[#B30303] dark:text-[#FF9492] border border-[#F0B8B8] dark:border-[#E52825]/45'
                                   : conflict.severity === 'medium'
-                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                  : 'bg-slate-800 text-slate-300 border border-slate-700'
+                                  ? 'bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/40'
+                                  : 'bg-[#F4ECEC] dark:bg-[#690303] text-[#422F2F] dark:text-[#EFE0E0] border border-[#D4C2C2] dark:border-[#8C2828]'
                               }`}
                             >
                               {conflict.severity}
                             </span>
                           </div>
-                          <p className="text-slate-300">{conflict.message}</p>
+                          <p className="text-[#422F2F] dark:text-[#EFE0E0]">{conflict.message}</p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-[10px] pt-0.5">
-                            <div className="text-slate-400">
-                              CRM: <span className="text-slate-200">{conflict.crmValue}</span>
+                            <div className="text-[#543F3F] dark:text-[#DEC2C2]">
+                              CRM: <span className="text-[#240202] dark:text-[#FAF4F4]">{conflict.crmValue}</span>
                             </div>
-                            <div className="text-emerald-300">
+                            <div className="text-emerald-700 dark:text-emerald-300">
                               Official: <span>{conflict.officialValue}</span>
                             </div>
                           </div>
@@ -1544,18 +1544,18 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </div>
 
               {/* Confidence Signals Audit */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-2">
+                <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] flex items-center gap-1.5 text-xs">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" />
                   Data Verification Signals & Proof
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   {lead.confidenceSignals.map((signal, i) => (
                     <div
                       key={i}
-                      className="p-2 bg-slate-900 border border-slate-800/80 rounded flex items-center gap-2 text-slate-300"
+                      className="p-2 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded flex items-center gap-2 text-[#422F2F] dark:text-[#EFE0E0]"
                     >
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300 flex-shrink-0" />
                       <span>{signal}</span>
                     </div>
                   ))}
@@ -1563,21 +1563,21 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </div>
 
               {/* International Business Identifiers Registry */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
-                      <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] text-xs flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-sky-700 dark:text-sky-300" />
                       International Business Identifiers ({lead.identifiers?.length || 0})
                     </h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">
                       Country-specific registration numbers, tax identifiers, LEI, and VAT with provenance tracking.
                     </p>
                   </div>
 
                   <button
                     onClick={() => setIsAddingIdent(!isAddingIdent)}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded border border-slate-700 flex items-center gap-1 transition"
+                    className="px-2.5 py-1 bg-[#F4ECEC] dark:bg-[#690303] hover:bg-[#E7D8D8] dark:hover:bg-[#7A1212] text-[#240202] dark:text-[#FAF4F4] text-xs rounded border border-[#D4C2C2] dark:border-[#8C2828] flex items-center gap-1 transition"
                   >
                     <Plus className="w-3 h-3" />
                     <span>Add Identifier</span>
@@ -1586,15 +1586,15 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
                 {/* Inline Add Identifier Form */}
                 {isAddingIdent && (
-                  <form onSubmit={handleSaveIdentifier} className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-2.5">
-                    <div className="font-semibold text-white text-xs">Register Organization Identifier</div>
+                  <form onSubmit={handleSaveIdentifier} className="p-3 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg space-y-2.5">
+                    <div className="font-semibold text-[#240202] dark:text-[#FAF4F4] text-xs">Register Organization Identifier</div>
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Type</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Type</label>
                         <select
                           value={newIdentType}
                           onChange={(e) => setNewIdentType(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs"
                         >
                           {uiIdentifierOptions.map((opt) => (
                             <option key={opt.code} value={opt.code}>
@@ -1605,7 +1605,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       </div>
 
                       <div className="sm:col-span-2">
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Identifier Value</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Identifier Value</label>
                         <input
                           type="text"
                           value={newIdentValue}
@@ -1614,19 +1614,19 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                             setIdentValidationFeedback(null);
                           }}
                           placeholder="e.g. 998877665 or 01234567"
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2 py-1 text-xs font-mono"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs font-mono"
                           required
                         />
                       </div>
 
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Jurisdiction (ISO)</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Jurisdiction (ISO)</label>
                         <input
                           type="text"
                           maxLength={2}
                           value={newIdentCountry}
                           onChange={(e) => setNewIdentCountry(e.target.value.toUpperCase())}
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2 py-1 text-xs font-mono uppercase"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs font-mono uppercase"
                           placeholder="GB"
                         />
                       </div>
@@ -1634,13 +1634,13 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Issuing Authority (Optional)</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Issuing Authority (Optional)</label>
                         <input
                           type="text"
                           value={newIdentAuthority}
                           onChange={(e) => setNewIdentAuthority(e.target.value)}
                           placeholder="e.g. Companies House, Brønnøysundregistrene"
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs"
                         />
                       </div>
 
@@ -1648,13 +1648,13 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                         <button
                           type="button"
                           onClick={handleValidateIdentifier}
-                          className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs border border-slate-700"
+                          className="px-3 py-1 bg-[#F4ECEC] dark:bg-[#690303] hover:bg-[#E7D8D8] dark:hover:bg-[#7A1212] text-[#422F2F] dark:text-[#EFE0E0] rounded text-xs border border-[#D4C2C2] dark:border-[#8C2828]"
                         >
                           Check Syntax
                         </button>
                         <button
                           type="submit"
-                          className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded text-xs"
+                          className="px-3 py-1 bg-[#B30303] hover:bg-[#910303] text-white font-semibold rounded text-xs"
                         >
                           Save to Lead
                         </button>
@@ -1664,8 +1664,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     {identValidationFeedback && (
                       <div className={`p-2 rounded text-xs border flex items-center justify-between ${
                         identValidationFeedback.valid
-                          ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
-                          : 'bg-amber-950/40 border-amber-800 text-amber-300'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-amber-50 dark:bg-amber-950/35 border-amber-200 dark:border-amber-500/40 text-amber-700 dark:text-amber-300'
                       }`}>
                         <span>{identValidationFeedback.message}</span>
                         {identValidationFeedback.normalizedValue && (
@@ -1681,32 +1681,32 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 {/* Identifiers List */}
                 <div className="space-y-2">
                   {(!lead.identifiers || lead.identifiers.length === 0) ? (
-                    <div className="p-3 text-center text-slate-500 text-xs bg-slate-900/50 rounded-lg">
+                    <div className="p-3 text-center text-[#7A6262] dark:text-[#C59D9D] text-xs bg-[#FAF7F7] dark:bg-[#440303] rounded-lg">
                       No business identifiers recorded for this organization.
                     </div>
                   ) : (
                     lead.identifiers.map((ident, i) => (
                       <div
                         key={i}
-                        className="p-2.5 bg-slate-900 border border-slate-800 rounded-lg flex items-center justify-between gap-3 text-xs"
+                        className="p-2.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg flex items-center justify-between gap-3 text-xs"
                       >
                         <div className="flex items-center gap-2.5 flex-wrap">
-                          <span className="px-1.5 py-0.5 bg-slate-950 text-cyan-400 font-mono text-[11px] font-bold rounded border border-slate-800">
+                          <span className="px-1.5 py-0.5 bg-[#FAF7F7] dark:bg-[#240202] text-sky-700 dark:text-sky-300 font-mono text-[11px] font-bold rounded border border-[#E4DADA] dark:border-[#7A1E1E]">
                             {canonicalizeIdentifierType(ident.type, ident.countryCode || lead.address?.countryCode)}
                           </span>
-                          <span className="font-mono text-white text-xs font-semibold">{ident.value}</span>
+                          <span className="font-mono text-[#240202] dark:text-[#FAF4F4] text-xs font-semibold">{ident.value}</span>
                           {ident.normalizedValue && ident.normalizedValue !== ident.value && (
-                            <span className="text-[10px] text-slate-400 font-mono">
+                            <span className="text-[10px] text-[#543F3F] dark:text-[#DEC2C2] font-mono">
                               (norm: {ident.normalizedValue})
                             </span>
                           )}
                           {ident.countryCode && (
-                            <span className="text-[10px] text-slate-400 uppercase font-mono">
+                            <span className="text-[10px] text-[#543F3F] dark:text-[#DEC2C2] uppercase font-mono">
                               [{ident.countryCode}]
                             </span>
                           )}
                           {ident.issuingAuthority && (
-                            <span className="text-[10px] text-slate-500">
+                            <span className="text-[10px] text-[#7A6262] dark:text-[#C59D9D]">
                               • {ident.issuingAuthority}
                             </span>
                           )}
@@ -1716,7 +1716,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           {getStatusBadge(ident.status, ident.verified)}
                           <button
                             onClick={() => handleRemoveIdentifier(i)}
-                            className="text-slate-500 hover:text-rose-400 px-1 py-0.5 text-xs"
+                            className="text-[#7A6262] dark:text-[#C59D9D] hover:text-[#B30303] dark:hover:text-[#FF9492] px-1 py-0.5 text-xs"
                             title="Remove identifier"
                           >
                             ×
@@ -1734,14 +1734,14 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
           {activeTab === 'contacts' && (
             <div className="space-y-4 text-xs">
               {/* Company-to-Person Discovery Panel (Explicit Owner Review & Approval) */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
-                    <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
-                      <Search className="w-3.5 h-3.5 text-indigo-400" />
+                    <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] flex items-center gap-1.5 text-xs">
+                      <Search className="w-3.5 h-3.5 text-[#910303] dark:text-[#FF9492]" />
                       <span>Discover Decision-Makers for {lead.companyName}</span>
                     </h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">
                       Queries official website leadership pages, corporate officer registries, Wikidata, and configured authorized providers. Discovered candidates require explicit approval before CRM save.
                     </p>
                   </div>
@@ -1750,16 +1750,16 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       type="button"
                       onClick={handleGenerateDmAiPlan}
                       disabled={isPlanningDmAi}
-                      className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-medium rounded flex items-center gap-1 text-xs transition whitespace-nowrap shrink-0 disabled:opacity-50"
+                      className="px-2.5 py-1.5 bg-white dark:bg-[#240202] hover:bg-[#EFE4E4] dark:hover:bg-[#690303] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] font-medium rounded flex items-center gap-1 text-xs transition whitespace-nowrap shrink-0 disabled:opacity-50"
                     >
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                      <Sparkles className="w-3.5 h-3.5 text-[#910303] dark:text-[#FF9492]" />
                       <span>{isPlanningDmAi ? 'Planning...' : 'AI Query Plan'}</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleDiscoverDecisionMakers}
                       disabled={isDiscoveringDm}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded flex items-center gap-1.5 text-xs transition whitespace-nowrap shrink-0 disabled:opacity-50"
+                      className="px-3 py-1.5 bg-[#B30303] hover:bg-[#910303] text-white font-semibold rounded flex items-center gap-1.5 text-xs transition whitespace-nowrap shrink-0 disabled:opacity-50"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${isDiscoveringDm ? 'animate-spin' : ''}`} />
                       <span>{isDiscoveringDm ? 'Discovering...' : 'Discover Decision-Makers'}</span>
@@ -1772,7 +1772,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   <select
                     value={dmTargetRole}
                     onChange={(e) => setDmTargetRole(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1.5 text-xs"
+                    className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1.5 text-xs"
                   >
                     <option value="">All Roles</option>
                     {EXPANDED_RELATIONSHIP_TYPES.map((role) => (
@@ -1786,39 +1786,39 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     value={dmTargetJobTitle}
                     onChange={(e) => setDmTargetJobTitle(e.target.value)}
                     placeholder="Target title (e.g. Procurement)"
-                    className="bg-slate-900 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                    className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2.5 py-1.5 text-xs"
                   />
                   <input
                     type="text"
                     value={dmTargetDepartment}
                     onChange={(e) => setDmTargetDepartment(e.target.value)}
                     placeholder="Department (e.g. Finance)"
-                    className="bg-slate-900 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                    className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2.5 py-1.5 text-xs"
                   />
-                  <label className="inline-flex items-center gap-2 text-[11px] text-slate-300 px-2">
+                  <label className="inline-flex items-center gap-2 text-[11px] text-[#422F2F] dark:text-[#EFE0E0] px-2">
                     <input
                       type="checkbox"
                       checked={dmIncludeHistorical}
                       onChange={(e) => setDmIncludeHistorical(e.target.checked)}
-                      className="rounded border-slate-600"
+                      className="rounded border-[#C7B2B2] dark:border-[#9E3535]"
                     />
                     <span>Include historical / former</span>
                   </label>
                 </div>
 
                 {dmError && (
-                  <div className="p-2.5 bg-rose-950/40 border border-rose-800 rounded text-rose-300 text-xs">
+                  <div className="p-2.5 bg-[#FFF2F2] dark:bg-[#690303]/65 border border-[#F0B8B8] dark:border-[#E52825]/50 rounded text-[#B30303] dark:text-[#FF9492] text-xs">
                     {dmError}
                   </div>
                 )}
 
                 {dmSaveBanner && (
-                  <div className="p-2.5 bg-emerald-950/40 border border-emerald-800 rounded text-emerald-300 text-xs flex items-center justify-between">
+                  <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-500/40 rounded text-emerald-700 dark:text-emerald-300 text-xs flex items-center justify-between">
                     <span>{dmSaveBanner}</span>
                     <button
                       type="button"
                       onClick={() => setDmSaveBanner(null)}
-                      className="text-emerald-400 hover:text-white"
+                      className="text-emerald-700 dark:text-emerald-300 hover:text-[#910303] dark:hover:text-white"
                     >
                       ×
                     </button>
@@ -1826,17 +1826,17 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 )}
 
                 {dmAiPlan && (
-                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-1.5 text-[11px]">
+                  <div className="p-3 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg space-y-1.5 text-[11px]">
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold text-indigo-300">
+                      <span className="font-semibold text-[#910303] dark:text-[#FF9492]">
                         AI Query &amp; Role Plan (Inferred · {dmAiPlan.engine})
                       </span>
-                      <span className="text-slate-400">
+                      <span className="text-[#543F3F] dark:text-[#DEC2C2]">
                         Recommended titles: {dmAiPlan.targetTitles.slice(0, 5).join(', ')}
                       </span>
                     </div>
-                    <p className="text-slate-400">{dmAiPlan.rationale}</p>
-                    <div className="text-slate-300 font-mono text-[10px] space-y-0.5">
+                    <p className="text-[#543F3F] dark:text-[#DEC2C2]">{dmAiPlan.rationale}</p>
+                    <div className="text-[#422F2F] dark:text-[#EFE0E0] font-mono text-[10px] space-y-0.5">
                       {dmAiPlan.suggestedQueries.slice(0, 4).map((q, i) => (
                         <div key={i}>• {q}</div>
                       ))}
@@ -1846,23 +1846,23 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
                 {dmDiscoveryResult && (
                   <div className="space-y-3 pt-1">
-                    <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-lg text-[11px] text-slate-300 space-y-1.5">
+                    <div className="p-2.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg text-[11px] text-[#422F2F] dark:text-[#EFE0E0] space-y-1.5">
                       <div className="flex items-center justify-between gap-2">
                         <span>{dmDiscoveryResult.honestStatusNote}</span>
-                        <span className="font-mono text-slate-400 tabular-nums shrink-0">
+                        <span className="font-mono text-[#543F3F] dark:text-[#DEC2C2] tabular-nums shrink-0">
                           {dmDiscoveryResult.durationMs}ms
                         </span>
                       </div>
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[#543F3F] dark:text-[#DEC2C2]">
                         {dmDiscoveryResult.sourceSummaries.map((s) => (
                           <span key={s.sourceId} className="font-mono">
                             <span
                               className={
                                 s.status === 'success'
-                                  ? 'text-emerald-400'
+                                  ? 'text-emerald-700 dark:text-emerald-300'
                                   : s.status === 'skipped_missing_credentials'
-                                  ? 'text-amber-400'
-                                  : 'text-slate-500'
+                                  ? 'text-amber-700 dark:text-amber-300'
+                                  : 'text-[#7A6262] dark:text-[#C59D9D]'
                               }
                             >
                               {s.sourceName}
@@ -1876,7 +1876,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                     {dmDiscoveryResult.candidates.length > 0 && (
                       <div className="space-y-2">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-semibold text-slate-300">
+                          <span className="text-[11px] font-semibold text-[#422F2F] dark:text-[#EFE0E0]">
                             Discovered Candidates ({dmDiscoveryResult.candidates.length}) — {selectedDmIds.size} selected
                           </span>
                           <div className="flex items-center gap-2">
@@ -1889,7 +1889,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                     : new Set(dmDiscoveryResult.candidates.map((c) => c.candidateId))
                                 )
                               }
-                              className="px-2 py-1 text-[11px] rounded border border-slate-700 text-slate-300 hover:bg-slate-800"
+                              className="px-2 py-1 text-[11px] rounded border border-[#D4C2C2] dark:border-[#8C2828] text-[#422F2F] dark:text-[#EFE0E0] hover:bg-[#EFE4E4] dark:hover:bg-[#690303]"
                             >
                               {selectedDmIds.size === dmDiscoveryResult.candidates.length ? 'Clear All' : 'Select All'}
                             </button>
@@ -1897,7 +1897,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                               type="button"
                               disabled={selectedDmIds.size === 0 || isApprovingDm}
                               onClick={handleApproveSelectedDm}
-                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold rounded text-[11px] whitespace-nowrap shrink-0"
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-semibold rounded text-[11px] whitespace-nowrap shrink-0"
                             >
                               {isApprovingDm
                                 ? 'Saving...'
@@ -1916,8 +1916,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                 key={cand.candidateId}
                                 className={`p-3 rounded-lg border transition space-y-1.5 ${
                                   checked
-                                    ? 'bg-indigo-950/30 border-indigo-500/60'
-                                    : 'bg-slate-900 border-slate-800'
+                                    ? 'bg-[#FDF4F4] dark:bg-[#690303]/50 border-[#D8B4B4] dark:border-[#CE0404]/60'
+                                    : 'bg-white dark:bg-[#240202] border-[#E4DADA] dark:border-[#7A1E1E]'
                                 }`}
                               >
                                 <div className="flex items-start justify-between gap-2">
@@ -1927,18 +1927,18 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                     className="flex items-start gap-2 text-left min-w-0"
                                   >
                                     {checked ? (
-                                      <CheckSquare className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                                      <CheckSquare className="w-4 h-4 text-[#910303] dark:text-[#FF9492] shrink-0 mt-0.5" />
                                     ) : (
-                                      <Square className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                                      <Square className="w-4 h-4 text-[#7A6262] dark:text-[#C59D9D] shrink-0 mt-0.5" />
                                     )}
                                     <div className="min-w-0">
-                                      <div className="font-semibold text-white">
+                                      <div className="font-semibold text-[#240202] dark:text-[#FAF4F4]">
                                         {cand.fullName}{' '}
-                                        <span className="font-normal text-slate-400">
+                                        <span className="font-normal text-[#543F3F] dark:text-[#DEC2C2]">
                                           · {cand.jobTitle || roleSpec?.label || cand.relationshipType}
                                         </span>
                                       </div>
-                                      <div className="text-[10px] text-slate-400 mt-0.5">
+                                      <div className="text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">
                                         {cand.department || roleSpec?.defaultDepartment || 'General'} ·{' '}
                                         {cand.employmentStatus === 'historical'
                                           ? `Historical${cand.endedAt ? ` (ended ${cand.endedAt})` : ''}`
@@ -1950,45 +1950,45 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                     </div>
                                   </button>
                                   <div className="text-right shrink-0 font-mono text-[10px] tabular-nums">
-                                    <div className="text-emerald-400 font-semibold">
+                                    <div className="text-emerald-700 dark:text-emerald-300 font-semibold">
                                       {cand.verificationTier.replace(/_/g, ' ')}
                                     </div>
-                                    <div className="text-slate-400">{cand.confidenceScore}% conf</div>
+                                    <div className="text-[#543F3F] dark:text-[#DEC2C2]">{cand.confidenceScore}% conf</div>
                                   </div>
                                 </div>
 
                                 {cand.uncertainMatch && cand.uncertainMatchReasons && (
-                                  <div className="px-2 py-1 rounded bg-amber-950/40 border border-amber-800/70 text-amber-300 text-[10px]">
+                                  <div className="px-2 py-1 rounded bg-amber-50 dark:bg-amber-950/35 border border-amber-200 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 text-[10px]">
                                     Uncertain CRM identity match (not auto-merged): {cand.uncertainMatchReasons[0]}
                                   </div>
                                 )}
 
                                 {cand.outdatedSignalNote && (
-                                  <div className="px-2 py-1 rounded bg-amber-950/30 border border-amber-900/60 text-amber-300 text-[10px]">
+                                  <div className="px-2 py-1 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 text-[10px]">
                                     {cand.outdatedSignalNote}
                                   </div>
                                 )}
 
                                 {(cand.bioSummary || cand.relevanceExplanation) && (
-                                  <div className="text-[11px] text-slate-300 space-y-0.5">
+                                  <div className="text-[11px] text-[#422F2F] dark:text-[#EFE0E0] space-y-0.5">
                                     {cand.bioSummary && <p>{cand.bioSummary}</p>}
                                     {cand.relevanceExplanation && (
-                                      <p className="text-slate-400 text-[10px]">
+                                      <p className="text-[#543F3F] dark:text-[#DEC2C2] text-[10px]">
                                         Relevance (Inferred): {cand.relevanceExplanation}
                                       </p>
                                     )}
                                   </div>
                                 )}
 
-                                <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
-                                  {cand.email && <span className="font-mono text-cyan-400">{cand.email}</span>}
-                                  {cand.phone && <span className="font-mono text-emerald-400">{cand.phone}</span>}
+                                <div className="flex flex-wrap items-center gap-3 text-[10px] text-[#543F3F] dark:text-[#DEC2C2]">
+                                  {cand.email && <span className="font-mono text-sky-700 dark:text-sky-300">{cand.email}</span>}
+                                  {cand.phone && <span className="font-mono text-emerald-700 dark:text-emerald-300">{cand.phone}</span>}
                                   {sanitizeExternalUrl(cand.linkedinUrl) && (
                                     <a
                                       href={sanitizeExternalUrl(cand.linkedinUrl)}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="text-blue-400 hover:underline"
+                                      className="text-sky-700 dark:text-sky-300 hover:underline"
                                     >
                                       LinkedIn
                                     </a>
@@ -2000,7 +2000,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                           href={sanitizeExternalUrl(src.sourceUrl)}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          className="text-indigo-400 hover:underline inline-flex items-center gap-0.5"
+                                          className="text-[#910303] dark:text-[#FF9492] hover:underline inline-flex items-center gap-0.5"
                                         >
                                           <span>{src.sourceName}</span>
                                           <ExternalLink className="w-2.5 h-2.5" />
@@ -2022,21 +2022,21 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </div>
 
               {/* Saved CRM Decision-Makers & Manual Link Panel */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
-                    <h4 className="font-bold text-white flex items-center gap-1.5 text-xs">
-                      <Users className="w-3.5 h-3.5 text-cyan-400" />
+                    <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] flex items-center gap-1.5 text-xs">
+                      <Users className="w-3.5 h-3.5 text-sky-700 dark:text-sky-300" />
                       <span>Linked CRM Decision-Makers, Officers &amp; Contacts ({linkedPersons.length})</span>
                     </h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">
                       Many-to-many links between persons and companies supporting multiple roles per company and current vs historical tenure.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setIsAddingPerson(!isAddingPerson)}
-                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded flex items-center gap-1 text-xs transition shrink-0 whitespace-nowrap"
+                    className="px-2.5 py-1.5 bg-[#B30303] hover:bg-[#910303] text-white font-semibold rounded flex items-center gap-1 text-xs transition shrink-0 whitespace-nowrap"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>{isAddingPerson ? 'Cancel' : 'Add / Link Contact'}</span>
@@ -2044,48 +2044,48 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 </div>
 
                 {isAddingPerson && (
-                  <form onSubmit={handleAddPersonSubmit} className="p-3.5 bg-slate-900 border border-slate-800 rounded-lg space-y-2.5">
+                  <form onSubmit={handleAddPersonSubmit} className="p-3.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg space-y-2.5">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Full Name *</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Full Name *</label>
                         <input
                           type="text"
                           required
                           value={personForm.fullName}
                           onChange={(e) => setPersonForm((p) => ({ ...p, fullName: e.target.value }))}
                           placeholder="e.g. Astrid Solberg"
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2.5 py-1.5 text-xs"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Email</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Email</label>
                         <input
                           type="email"
                           value={personForm.email}
                           onChange={(e) => setPersonForm((p) => ({ ...p, email: e.target.value }))}
                           placeholder="astrid@company.no"
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs font-mono"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2.5 py-1.5 text-xs font-mono"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Phone</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Phone</label>
                         <input
                           type="text"
                           value={personForm.phone}
                           onChange={(e) => setPersonForm((p) => ({ ...p, phone: e.target.value }))}
                           placeholder="+47 22 34 56 78"
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs font-mono"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2.5 py-1.5 text-xs font-mono"
                         />
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Relationship Type</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Relationship Type</label>
                         <select
                           value={personForm.relationshipType}
                           onChange={(e) => setPersonForm((p) => ({ ...p, relationshipType: e.target.value }))}
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2 py-1.5 text-xs"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1.5 text-xs"
                         >
                           {EXPANDED_RELATIONSHIP_TYPES.map((role) => (
                             <option key={role} value={role}>
@@ -2095,33 +2095,33 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                         </select>
                       </div>
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Job Title</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Job Title</label>
                         <input
                           type="text"
                           value={personForm.jobTitle}
                           onChange={(e) => setPersonForm((p) => ({ ...p, jobTitle: e.target.value }))}
                           placeholder="Managing Director"
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2.5 py-1.5 text-xs"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Designation</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Designation</label>
                         <input
                           type="text"
                           value={personForm.designation}
                           onChange={(e) => setPersonForm((p) => ({ ...p, designation: e.target.value }))}
                           placeholder="Board Member / VP"
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2.5 py-1.5 text-xs"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-slate-400 mb-0.5">Department</label>
+                        <label className="block text-[10px] text-[#543F3F] dark:text-[#DEC2C2] mb-0.5">Department</label>
                         <input
                           type="text"
                           value={personForm.department}
                           onChange={(e) => setPersonForm((p) => ({ ...p, department: e.target.value }))}
                           placeholder="Executive / Procurement"
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs"
+                          className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2.5 py-1.5 text-xs"
                         />
                       </div>
                     </div>
@@ -2133,14 +2133,14 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           value={personForm.linkedinUrl}
                           onChange={(e) => setPersonForm((p) => ({ ...p, linkedinUrl: e.target.value }))}
                           placeholder="https://linkedin.com/in/..."
-                          className="flex-1 bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 text-xs font-mono"
+                          className="flex-1 bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2.5 py-1.5 text-xs font-mono"
                         />
-                        <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer shrink-0">
+                        <label className="inline-flex items-center gap-1.5 text-[11px] text-[#422F2F] dark:text-[#EFE0E0] cursor-pointer shrink-0">
                           <input
                             type="checkbox"
                             checked={personForm.isPrimaryContact}
                             onChange={(e) => setPersonForm((p) => ({ ...p, isPrimaryContact: e.target.checked }))}
-                            className="rounded border-slate-600"
+                            className="rounded border-[#C7B2B2] dark:border-[#9E3535]"
                           />
                           <span>Primary Contact</span>
                         </label>
@@ -2148,14 +2148,14 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       <button
                         type="submit"
                         disabled={savingPerson}
-                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded text-xs"
+                        className="px-3.5 py-1.5 bg-[#B30303] hover:bg-[#910303] disabled:opacity-50 text-white font-semibold rounded text-xs"
                       >
                         {savingPerson ? 'Linking...' : 'Save & Link Person'}
                       </button>
                     </div>
 
                     {personError && (
-                      <div className="p-2 bg-rose-950/40 border border-rose-800 rounded text-rose-300 text-xs">
+                      <div className="p-2 bg-[#FFF2F2] dark:bg-[#690303]/65 border border-[#F0B8B8] dark:border-[#E52825]/50 rounded text-[#B30303] dark:text-[#FF9492] text-xs">
                         {personError}
                       </div>
                     )}
@@ -2163,9 +2163,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 )}
 
                 {loadingPersons ? (
-                  <div className="p-6 text-center text-slate-400 text-xs">Loading linked decision-makers...</div>
+                  <div className="p-6 text-center text-[#543F3F] dark:text-[#DEC2C2] text-xs">Loading linked decision-makers...</div>
                 ) : linkedPersons.length === 0 ? (
-                  <div className="p-6 text-center text-slate-500 text-xs bg-slate-900/50 rounded-lg">
+                  <div className="p-6 text-center text-[#7A6262] dark:text-[#C59D9D] text-xs bg-[#FAF7F7] dark:bg-[#440303] rounded-lg">
                     No decision-makers or contacts linked to this company yet. Click &ldquo;Discover Decision-Makers&rdquo; above or &ldquo;Add / Link Contact&rdquo;.
                   </div>
                 ) : (
@@ -2184,40 +2184,40 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       return (
                         <div
                           key={relationship.id}
-                          className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl space-y-2"
+                          className="p-3.5 bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl space-y-2"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-bold text-white text-sm">{person.fullName}</span>
-                                <span className="text-[11px] text-indigo-300 font-medium">
+                                <span className="font-bold text-[#240202] dark:text-[#FAF4F4] text-sm">{person.fullName}</span>
+                                <span className="text-[11px] text-[#910303] dark:text-[#FF9492] font-medium">
                                   {roleLabel}
                                 </span>
                                 {relationship.isPrimaryContact && (
-                                  <span className="text-[10px] font-semibold text-emerald-400">
+                                  <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
                                     · Primary Contact
                                   </span>
                                 )}
                                 {empStatus === 'historical' && (
-                                  <span className="text-[10px] font-semibold text-amber-400">
+                                  <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
                                     · Historical{endedAt ? ` (ended ${endedAt})` : ''}
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-slate-300 flex items-center gap-2 mt-0.5 flex-wrap">
+                              <div className="text-[11px] text-[#422F2F] dark:text-[#EFE0E0] flex items-center gap-2 mt-0.5 flex-wrap">
                                 {relationship.jobTitle && (
                                   <span className="inline-flex items-center gap-1">
-                                    <Briefcase className="w-3 h-3 text-slate-400" />
+                                    <Briefcase className="w-3 h-3 text-[#543F3F] dark:text-[#DEC2C2]" />
                                     {relationship.jobTitle}
                                   </span>
                                 )}
                                 {relationship.designation && (
-                                  <span className="text-slate-400">· {relationship.designation}</span>
+                                  <span className="text-[#543F3F] dark:text-[#DEC2C2]">· {relationship.designation}</span>
                                 )}
                                 {relationship.department && (
-                                  <span className="text-slate-400">· {relationship.department}</span>
+                                  <span className="text-[#543F3F] dark:text-[#DEC2C2]">· {relationship.department}</span>
                                 )}
-                                <span className="text-slate-500 font-mono tabular-nums">
+                                <span className="text-[#7A6262] dark:text-[#C59D9D] font-mono tabular-nums">
                                   · {relationship.confidenceScore}% conf · {relationship.sourceName}
                                 </span>
                               </div>
@@ -2228,7 +2228,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => onOpenPersonProfile(person.id)}
-                                  className="px-2 py-1 rounded text-[10px] font-semibold bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-300 border border-indigo-500/30 transition"
+                                  className="px-2 py-1 rounded text-[10px] font-semibold bg-[#FDF4F4] dark:bg-[#910303]/35 hover:bg-[#FBEAEA] dark:hover:bg-[#910303]/60 text-[#910303] dark:text-[#FF9492] border border-[#D8B4B4] dark:border-[#CE0404]/40 transition"
                                   title="Open Unified Person Relationship Profile"
                                 >
                                   CRM Profile
@@ -2239,7 +2239,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleSetPrimaryContact(relationship.id)}
-                                  className="p-1 text-slate-400 hover:text-amber-400 transition"
+                                  className="p-1 text-[#543F3F] dark:text-[#DEC2C2] hover:text-amber-700 dark:hover:text-amber-300 transition"
                                   title="Set as Primary Contact"
                                 >
                                   <Star className="w-3.5 h-3.5" />
@@ -2248,7 +2248,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleToggleEmploymentStatus(relationship.id, empStatus)}
-                                className="p-1 text-slate-400 hover:text-cyan-400 transition"
+                                className="p-1 text-[#543F3F] dark:text-[#DEC2C2] hover:text-sky-800 dark:hover:text-sky-200 transition"
                                 title={
                                   empStatus === 'historical'
                                     ? 'Mark as Current Role'
@@ -2262,7 +2262,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                 onClick={() =>
                                   isEditing ? setEditingRelId(null) : handleStartEditContact(item)
                                 }
-                                className="p-1 text-slate-400 hover:text-indigo-400 transition"
+                                className="p-1 text-[#543F3F] dark:text-[#DEC2C2] hover:text-[#B30303] dark:hover:text-[#FFE2E1] transition"
                                 title="Edit contact & role"
                               >
                                 <Edit3 className="w-3.5 h-3.5" />
@@ -2270,7 +2270,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleUnlinkPerson(relationship.id)}
-                                className="p-1 text-slate-500 hover:text-rose-400 transition"
+                                className="p-1 text-[#7A6262] dark:text-[#C59D9D] hover:text-[#B30303] dark:hover:text-[#FF9492] transition"
                                 title="Unlink from company"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -2279,21 +2279,21 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           </div>
 
                           {person.bioSummary && (
-                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                            <p className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] leading-relaxed">
                               {person.bioSummary}
                             </p>
                           )}
 
-                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300">
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#422F2F] dark:text-[#EFE0E0]">
                             <div className="flex flex-wrap gap-3">
                               {person.email && (
-                                <span className="inline-flex items-center gap-1 font-mono text-cyan-400">
+                                <span className="inline-flex items-center gap-1 font-mono text-sky-700 dark:text-sky-300">
                                   <Mail className="w-3 h-3" />
                                   {person.email}
                                 </span>
                               )}
                               {(person.phoneNormalized || person.phone) && (
-                                <span className="inline-flex items-center gap-1 font-mono text-emerald-400">
+                                <span className="inline-flex items-center gap-1 font-mono text-emerald-700 dark:text-emerald-300">
                                   <Phone className="w-3 h-3" />
                                   {person.phoneNormalized || person.phone}
                                 </span>
@@ -2303,7 +2303,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                   href={sanitizeExternalUrl(person.linkedinUrl)}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-blue-400 hover:underline"
+                                  className="inline-flex items-center gap-1 text-sky-700 dark:text-sky-300 hover:underline"
                                 >
                                   <Linkedin className="w-3 h-3" />
                                   <span>LinkedIn</span>
@@ -2314,7 +2314,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                   href={sanitizeExternalUrl(person.officialBioUrl)}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-indigo-400 hover:underline"
+                                  className="inline-flex items-center gap-1 text-[#910303] dark:text-[#FF9492] hover:underline"
                                 >
                                   <ExternalLink className="w-3 h-3" />
                                   <span>Official Bio</span>
@@ -2326,7 +2326,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                               onClick={() =>
                                 setExpandedContactProvId(showProv ? null : relationship.id)
                               }
-                              className="text-[10px] text-slate-400 hover:text-slate-200 underline"
+                              className="text-[10px] text-[#543F3F] dark:text-[#DEC2C2] hover:text-[#440303] dark:hover:text-white underline"
                             >
                               {showProv ? 'Hide Provenance' : 'Provenance'}
                             </button>
@@ -2335,7 +2335,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           {isEditing && (
                             <form
                               onSubmit={(e) => handleSaveEditContact(e, relationship.id)}
-                              className="p-3 bg-slate-950 border border-indigo-500/40 rounded-lg space-y-2"
+                              className="p-3 bg-[#FAF7F7] dark:bg-[#240202] border border-[#D8B4B4] dark:border-[#CE0404]/50 rounded-lg space-y-2"
                             >
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                 <input
@@ -2346,7 +2346,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                     setEditContactForm((f) => ({ ...f, fullName: e.target.value }))
                                   }
                                   placeholder="Full Name"
-                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                                  className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs"
                                 />
                                 <input
                                   type="email"
@@ -2355,7 +2355,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                     setEditContactForm((f) => ({ ...f, email: e.target.value }))
                                   }
                                   placeholder="Email"
-                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs font-mono"
+                                  className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs font-mono"
                                 />
                                 <input
                                   type="text"
@@ -2364,7 +2364,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                     setEditContactForm((f) => ({ ...f, phone: e.target.value }))
                                   }
                                   placeholder="Phone"
-                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs font-mono"
+                                  className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs font-mono"
                                 />
                                 <select
                                   value={editContactForm.relationshipType}
@@ -2374,7 +2374,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                       relationshipType: e.target.value,
                                     }))
                                   }
-                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                                  className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs"
                                 >
                                   {EXPANDED_RELATIONSHIP_TYPES.map((role) => (
                                     <option key={role} value={role}>
@@ -2389,7 +2389,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                     setEditContactForm((f) => ({ ...f, jobTitle: e.target.value }))
                                   }
                                   placeholder="Job Title"
-                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                                  className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs"
                                 />
                                 <input
                                   type="text"
@@ -2401,20 +2401,20 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                     }))
                                   }
                                   placeholder="Department"
-                                  className="bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs"
+                                  className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded px-2 py-1 text-xs"
                                 />
                               </div>
                               <div className="flex justify-end gap-2">
                                 <button
                                   type="button"
                                   onClick={() => setEditingRelId(null)}
-                                  className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded text-xs"
+                                  className="px-2.5 py-1 bg-[#F4ECEC] dark:bg-[#690303] text-[#422F2F] dark:text-[#EFE0E0] rounded text-xs"
                                 >
                                   Cancel
                                 </button>
                                 <button
                                   type="submit"
-                                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded text-xs"
+                                  className="px-3 py-1 bg-[#B30303] hover:bg-[#910303] text-white font-semibold rounded text-xs"
                                 >
                                   Save Contact
                                 </button>
@@ -2423,9 +2423,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           )}
 
                           {showProv && (
-                            <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-[10px] text-slate-400 space-y-1">
+                            <div className="p-2.5 bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg text-[10px] text-[#543F3F] dark:text-[#DEC2C2] space-y-1">
                               <div>
-                                Source: <span className="text-slate-200">{relationship.sourceName}</span>
+                                Source: <span className="text-[#240202] dark:text-[#FAF4F4]">{relationship.sourceName}</span>
                                 {relationship.provenance?.sourceType
                                   ? ` · Type: ${relationship.provenance.sourceType}`
                                   : ''}
@@ -2446,7 +2446,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                                   href={sanitizeExternalUrl(relationship.provenance?.sourceUrl)}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-indigo-400 hover:underline inline-flex items-center gap-1"
+                                  className="text-[#910303] dark:text-[#FF9492] hover:underline inline-flex items-center gap-1"
                                 >
                                   <span>{relationship.provenance?.sourceUrl}</span>
                                   <ExternalLink className="w-2.5 h-2.5" />
@@ -2456,12 +2456,12 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           )}
 
                           {otherCompanies && otherCompanies.length > 0 && (
-                            <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5 text-[10px]">
-                              <span className="text-slate-500 uppercase font-semibold">Also linked to (M:N):</span>
+                            <div className="pt-2 border-t border-[#E4DADA] dark:border-[#7A1E1E] flex flex-wrap items-center gap-1.5 text-[10px]">
+                              <span className="text-[#7A6262] dark:text-[#C59D9D] uppercase font-semibold">Also linked to (M:N):</span>
                               {otherCompanies.map((oc) => (
                                 <span
                                   key={oc.leadId}
-                                  className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300"
+                                  className="px-2 py-0.5 rounded bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] text-[#422F2F] dark:text-[#EFE0E0]"
                                 >
                                   {oc.companyName} ({oc.jobTitle || oc.relationshipType})
                                 </span>
@@ -2480,14 +2480,14 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
           {/* 2. WEB INSPECTOR TAB (SSRF SAFE) */}
           {activeTab === 'web' && (
             <div className="space-y-4 text-xs">
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
-                      <Radio className="w-3.5 h-3.5 text-cyan-400" />
+                    <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] text-xs flex items-center gap-1.5">
+                      <Radio className="w-3.5 h-3.5 text-sky-700 dark:text-sky-300" />
                       Live Website Crawler & SSRF Boundary Shield
                     </h4>
-                    <p className="text-slate-400 text-[11px] mt-0.5">
+                    <p className="text-[#543F3F] dark:text-[#DEC2C2] text-[11px] mt-0.5">
                       Validates DNS, blocks private/local IP targets (127.0.0.1, 10.*, 192.168.*, 169.254.*), and extracts real metadata.
                     </p>
                   </div>
@@ -2495,7 +2495,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   <button
                     onClick={handleRunWebInspect}
                     disabled={isInspecting || !lead.website}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded flex items-center gap-1.5 transition"
+                    className="px-3 py-1.5 bg-[#B30303] hover:bg-[#910303] disabled:opacity-50 text-white font-semibold rounded flex items-center gap-1.5 transition"
                   >
                     {isInspecting ? (
                       <>
@@ -2512,7 +2512,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 </div>
 
                 {!lead.website && (
-                  <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded text-amber-300 text-xs">
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-500/35 rounded text-amber-700 dark:text-amber-300 text-xs">
                     This lead currently does not have a public website recorded to inspect.
                   </div>
                 )}
@@ -2520,17 +2520,17 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
               {/* Inspection Output */}
               {(inspectionResult || lead.webMetadata) && (
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                    <span className="font-semibold text-white">Live HTTP Signals</span>
+                <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-[#E4DADA] dark:border-[#7A1E1E]">
+                    <span className="font-semibold text-[#240202] dark:text-[#FAF4F4]">Live HTTP Signals</span>
                     <div className="flex items-center gap-3 font-mono text-[11px]">
-                      <span className="text-emerald-400">
+                      <span className="text-emerald-700 dark:text-emerald-300">
                         Status: HTTP {inspectionResult?.httpStatus || lead.webMetadata?.httpStatus || 200} OK
                       </span>
-                      <span className="text-slate-400">
+                      <span className="text-[#543F3F] dark:text-[#DEC2C2]">
                         Latency: {inspectionResult?.serverLatencyMs || lead.webMetadata?.serverLatencyMs || 120}ms
                       </span>
-                      <span className="text-cyan-400">
+                      <span className="text-sky-700 dark:text-sky-300">
                         {(inspectionResult?.isHttps ?? lead.webMetadata?.isHttps) ? 'SSL Valid' : 'HTTP'}
                       </span>
                     </div>
@@ -2538,25 +2538,25 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
                   <div className="space-y-2">
                     <div>
-                      <span className="text-slate-500 font-semibold block text-[11px]">HTML Page Title:</span>
-                      <p className="text-white font-medium">
+                      <span className="text-[#7A6262] dark:text-[#C59D9D] font-semibold block text-[11px]">HTML Page Title:</span>
+                      <p className="text-[#240202] dark:text-[#FAF4F4] font-medium">
                         {inspectionResult?.title || lead.webMetadata?.title || 'None provided'}
                       </p>
                     </div>
 
                     <div>
-                      <span className="text-slate-500 font-semibold block text-[11px]">Meta Description:</span>
-                      <p className="text-slate-300 leading-relaxed">
+                      <span className="text-[#7A6262] dark:text-[#C59D9D] font-semibold block text-[11px]">Meta Description:</span>
+                      <p className="text-[#422F2F] dark:text-[#EFE0E0] leading-relaxed">
                         {inspectionResult?.description || lead.webMetadata?.description || 'None provided'}
                       </p>
                     </div>
 
                     {inspectionResult?.emailsFound && inspectionResult.emailsFound.length > 0 && (
-                      <div className="pt-2 border-t border-slate-800">
-                        <span className="text-slate-500 font-semibold block text-[11px]">Discovered Emails in HTML:</span>
+                      <div className="pt-2 border-t border-[#E4DADA] dark:border-[#7A1E1E]">
+                        <span className="text-[#7A6262] dark:text-[#C59D9D] font-semibold block text-[11px]">Discovered Emails in HTML:</span>
                         <div className="flex gap-2 mt-1">
                           {inspectionResult.emailsFound.map((e: string, i: number) => (
-                            <span key={i} className="px-2 py-0.5 bg-slate-900 text-cyan-400 font-mono rounded border border-slate-800">
+                            <span key={i} className="px-2 py-0.5 bg-white dark:bg-[#240202] text-sky-700 dark:text-sky-300 font-mono rounded border border-[#E4DADA] dark:border-[#7A1E1E]">
                               {e}
                             </span>
                           ))}
@@ -2576,7 +2576,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 <button
                   onClick={runQuickAiAnalysis}
                   disabled={aiLoading}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded flex items-center gap-1.5 transition"
+                  className="px-3 py-1.5 bg-[#B30303] hover:bg-[#910303] disabled:opacity-50 text-white font-semibold rounded flex items-center gap-1.5 transition"
                 >
                   <Bot className="w-3.5 h-3.5" />
                   <span>Analyze Lead with Gemini</span>
@@ -2585,7 +2585,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 <button
                   onClick={runQuickAiPitch}
                   disabled={aiLoading}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-semibold rounded flex items-center gap-1.5 transition border border-slate-700"
+                  className="px-3 py-1.5 bg-[#F4ECEC] dark:bg-[#690303] hover:bg-[#E7D8D8] dark:hover:bg-[#7A1212] disabled:opacity-50 text-[#240202] dark:text-[#FAF4F4] font-semibold rounded flex items-center gap-1.5 transition border border-[#D4C2C2] dark:border-[#8C2828]"
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>Generate Custom Pitch</span>
@@ -2593,33 +2593,33 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </div>
 
               {aiError && (
-                <div className="p-3 bg-rose-950/40 border border-rose-800 rounded text-rose-300 text-xs">
+                <div className="p-3 bg-[#FFF2F2] dark:bg-[#690303]/65 border border-[#F0B8B8] dark:border-[#E52825]/50 rounded text-[#B30303] dark:text-[#FF9492] text-xs">
                   {aiError}
                 </div>
               )}
 
               {aiAnalysis && (
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                    <span className="font-bold text-white">Gemini Qualification</span>
-                    <span className="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-400 rounded font-bold">
+                <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-[#E4DADA] dark:border-[#7A1E1E]">
+                    <span className="font-bold text-[#240202] dark:text-[#FAF4F4]">Gemini Qualification</span>
+                    <span className="px-2 py-0.5 text-[10px] bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded font-bold">
                       {aiAnalysis.qualificationStatus} ({aiAnalysis.fitScore}/100)
                     </span>
                   </div>
-                  <p className="text-slate-300 leading-relaxed">{aiAnalysis.summary}</p>
+                  <p className="text-[#422F2F] dark:text-[#EFE0E0] leading-relaxed">{aiAnalysis.summary}</p>
                   <div>
-                    <span className="font-semibold text-white block mb-1">Recommended Strategy:</span>
-                    <p className="text-slate-300">{aiAnalysis.recommendedStrategy}</p>
+                    <span className="font-semibold text-[#240202] dark:text-[#FAF4F4] block mb-1">Recommended Strategy:</span>
+                    <p className="text-[#422F2F] dark:text-[#EFE0E0]">{aiAnalysis.recommendedStrategy}</p>
                   </div>
                 </div>
               )}
 
               {aiPitch && (
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                  <div className="font-bold text-white pb-2 border-b border-slate-800">
+                <div className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
+                  <div className="font-bold text-[#240202] dark:text-[#FAF4F4] pb-2 border-b border-[#E4DADA] dark:border-[#7A1E1E]">
                     Subject: {aiPitch.emailSubject}
                   </div>
-                  <pre className="font-sans text-slate-300 whitespace-pre-wrap leading-relaxed">
+                  <pre className="font-sans text-[#422F2F] dark:text-[#EFE0E0] whitespace-pre-wrap leading-relaxed">
                     {aiPitch.emailBody}
                   </pre>
                 </div>
@@ -2632,42 +2632,42 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
             <div className="space-y-4 text-xs">
               {/* Official Registry Verification History */}
               <div className="space-y-3">
-                <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
-                  <Scale className="w-3.5 h-3.5 text-cyan-400" />
+                <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] text-xs flex items-center gap-1.5">
+                  <Scale className="w-3.5 h-3.5 text-sky-700 dark:text-sky-300" />
                   <span>Official Registry Verification History ({verificationHistory.length})</span>
                 </h4>
                 {verificationHistory.length === 0 ? (
-                  <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-500 text-xs">
+                  <div className="p-3 bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl text-[#7A6262] dark:text-[#C59D9D] text-xs">
                     No official registry verification runs recorded yet. Use &ldquo;Verify with Official Registry&rdquo; in Lead Facts to run a live check.
                   </div>
                 ) : (
                   verificationHistory.map((entry, idx) => (
-                    <div key={idx} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                    <div key={idx} className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-3.5 space-y-1.5">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-white">{entry.sourceName}</span>
+                          <span className="font-semibold text-[#240202] dark:text-[#FAF4F4]">{entry.sourceName}</span>
                           {renderRegistryStateBadge(entry.state)}
                         </div>
-                        <span className="text-slate-400 font-mono tabular-nums text-[10px]">
+                        <span className="text-[#543F3F] dark:text-[#DEC2C2] font-mono tabular-nums text-[10px]">
                           {formatDateLocale(entry.verifiedAt, leadLocale, leadTimezone)}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-300">{entry.summary}</p>
-                      <div className="flex items-center flex-wrap gap-3 text-[10px] font-mono text-slate-400">
+                      <p className="text-[11px] text-[#422F2F] dark:text-[#EFE0E0]">{entry.summary}</p>
+                      <div className="flex items-center flex-wrap gap-3 text-[10px] font-mono text-[#543F3F] dark:text-[#DEC2C2]">
                         <span>Match: {entry.matchType}</span>
                         <span>Mode: {entry.isLiveApi ? 'Live API' : 'Offline / Unavailable'}</span>
                         {entry.matchedRegistrationNumber && (
                           <span>Reg: {entry.matchedRegistrationNumber}</span>
                         )}
                         {entry.conflictCount > 0 && (
-                          <span className="text-rose-400">Conflicts: {entry.conflictCount}</span>
+                          <span className="text-[#B30303] dark:text-[#FF9492]">Conflicts: {entry.conflictCount}</span>
                         )}
                         {sanitizeExternalUrl(entry.sourceUrl) && (
                           <a
                             href={sanitizeExternalUrl(entry.sourceUrl)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-indigo-400 hover:underline inline-flex items-center gap-1"
+                            className="text-[#910303] dark:text-[#FF9492] hover:underline inline-flex items-center gap-1"
                           >
                             <span>Registry Record</span>
                             <ExternalLink className="w-3 h-3" />
@@ -2679,56 +2679,56 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 )}
               </div>
 
-              <div className="space-y-3 pt-3 border-t border-slate-800">
-                <h4 className="font-bold text-white text-xs">Source Observation Evidence</h4>
+              <div className="space-y-3 pt-3 border-t border-[#E4DADA] dark:border-[#7A1E1E]">
+                <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] text-xs">Source Observation Evidence</h4>
                 {lead.sources.map((src, i) => (
-                  <div key={i} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                  <div key={i} className="bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-3.5 space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold text-white">{src.sourceName}</span>
-                      <span className="text-slate-500 font-mono tabular-nums text-[10px]">
+                      <span className="font-semibold text-[#240202] dark:text-[#FAF4F4]">{src.sourceName}</span>
+                      <span className="text-[#7A6262] dark:text-[#C59D9D] font-mono tabular-nums text-[10px]">
                         Retrieved: {formatDateLocale(src.retrievedAt, leadLocale, leadTimezone)}
                       </span>
                     </div>
 
                     {src.providerId && (
-                      <div className="text-[11px] text-cyan-400 font-mono">
+                      <div className="text-[11px] text-sky-700 dark:text-sky-300 font-mono">
                         Provider ID: {src.providerId}
                       </div>
                     )}
 
                     {src.attribution && (
-                      <div className="text-[11px] text-slate-400">
-                        <span className="text-slate-500">Attribution: </span>
+                      <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2]">
+                        <span className="text-[#7A6262] dark:text-[#C59D9D]">Attribution: </span>
                         {src.attribution}
                       </div>
                     )}
 
                     {src.license && (
-                      <div className="text-[10px] text-slate-500">
-                        License: <span className="text-slate-400">{src.license}</span>
+                      <div className="text-[10px] text-[#7A6262] dark:text-[#C59D9D]">
+                        License: <span className="text-[#543F3F] dark:text-[#DEC2C2]">{src.license}</span>
                       </div>
                     )}
                   </div>
                 ))}
               </div>
 
-              <div className="space-y-3 pt-3 border-t border-slate-800">
-                <h4 className="font-bold text-white text-xs">CRM Activity History</h4>
+              <div className="space-y-3 pt-3 border-t border-[#E4DADA] dark:border-[#7A1E1E]">
+                <h4 className="font-bold text-[#240202] dark:text-[#FAF4F4] text-xs">CRM Activity History</h4>
                 {lead.activities.map((act) => (
                   <div
                     key={act.id}
-                    className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-lg flex items-start gap-3"
+                    className="p-3 bg-[#FAF7F7] dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg flex items-start gap-3"
                   >
-                    <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />
+                    <div className="w-2 h-2 rounded-full bg-[#CE0404] mt-1.5 flex-shrink-0" />
                     <div className="space-y-0.5 min-w-0 flex-1">
                       <div className="flex items-center justify-between">
-                        <span className="font-semibold text-white">{act.title}</span>
-                        <span className="text-[10px] text-slate-500">
+                        <span className="font-semibold text-[#240202] dark:text-[#FAF4F4]">{act.title}</span>
+                        <span className="text-[10px] text-[#7A6262] dark:text-[#C59D9D]">
                           {formatDateLocale(act.date, leadLocale, leadTimezone)}
                         </span>
                       </div>
-                      {act.outcome && <p className="text-slate-400 text-[11px]">{act.outcome}</p>}
-                      {act.notes && <p className="text-slate-500 text-[11px] italic">&quot;{act.notes}&quot;</p>}
+                      {act.outcome && <p className="text-[#543F3F] dark:text-[#DEC2C2] text-[11px]">{act.outcome}</p>}
+                      {act.notes && <p className="text-[#7A6262] dark:text-[#C59D9D] text-[11px] italic">&quot;{act.notes}&quot;</p>}
                     </div>
                   </div>
                 ))}
@@ -2745,12 +2745,12 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   value={newNote}
                   onChange={(e) => setNewNote(e.target.value)}
                   placeholder="Record call summary, decision maker details, or next action items..."
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded p-2.5 focus:outline-none focus:border-indigo-500 text-xs"
+                  className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] rounded p-2.5 focus:outline-none focus:border-[#910303] text-xs"
                 />
                 <div className="flex justify-end">
                   <button
                     type="submit"
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded"
+                    className="px-3 py-1.5 bg-[#B30303] hover:bg-[#910303] text-white font-semibold rounded"
                   >
                     Post Note
                   </button>
@@ -2759,15 +2759,15 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
               <div className="space-y-2">
                 {lead.notes.length === 0 ? (
-                  <div className="p-6 text-center text-slate-500 text-xs">No notes recorded yet.</div>
+                  <div className="p-6 text-center text-[#7A6262] dark:text-[#C59D9D] text-xs">No notes recorded yet.</div>
                 ) : (
                   lead.notes.map((n) => (
-                    <div key={n.id} className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-1">
-                      <div className="flex items-center justify-between text-[11px] text-slate-400">
-                        <span className="font-semibold text-slate-300">{n.author}</span>
+                    <div key={n.id} className="p-3 bg-[#FAF7F7] dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-lg space-y-1">
+                      <div className="flex items-center justify-between text-[11px] text-[#543F3F] dark:text-[#DEC2C2]">
+                        <span className="font-semibold text-[#422F2F] dark:text-[#EFE0E0]">{n.author}</span>
                         <span>{formatDateLocale(n.createdAt, leadLocale, leadTimezone)}</span>
                       </div>
-                      <p className="text-slate-200 leading-relaxed">{n.content}</p>
+                      <p className="text-[#240202] dark:text-[#FAF4F4] leading-relaxed">{n.content}</p>
                     </div>
                   ))
                 )}

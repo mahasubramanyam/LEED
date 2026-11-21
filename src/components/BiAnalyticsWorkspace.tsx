@@ -1354,7 +1354,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
               />
               <button
                 type="submit"
-                className="w-full py-1.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors"
+                className="w-full py-1.5 px-3 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium transition-colors"
               >
                 Save Configuration
               </button>
@@ -1414,7 +1414,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
                 type="button"
                 onClick={handleExportReportCsv}
                 disabled={exportingCsv || !generatedReport}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] disabled:opacity-50 text-white text-xs font-medium transition-colors"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>{exportingCsv ? 'Exporting...' : 'Export RFC 4180 CSV'}</span>
@@ -1529,7 +1529,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
                     type="button"
                     onClick={handleRunAiAnalysis}
                     disabled={aiLoading}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium shrink-0"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#B30303] hover:bg-[#910303] disabled:opacity-50 text-white text-xs font-medium shrink-0"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>{aiLoading ? 'Analyzing...' : 'Generate Briefing'}</span>

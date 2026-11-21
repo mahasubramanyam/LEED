@@ -290,7 +290,7 @@ export const LeadEnrichmentPanel: React.FC<LeadEnrichmentPanelProps> = ({
             type="button"
             disabled={isPreviewLoading}
             onClick={handleRunPreview}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#B30303] hover:bg-[#910303] text-white disabled:opacity-50 transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isPreviewLoading ? 'animate-spin' : ''}`} />
             {isPreviewLoading ? 'Running Multi-Source Preview...' : 'Run Enrichment Preview'}
@@ -399,7 +399,7 @@ export const LeadEnrichmentPanel: React.FC<LeadEnrichmentPanelProps> = ({
             {[
               { label: 'Completeness', value: activeQuality.completenessScore, color: 'bg-blue-500' },
               { label: 'Verification', value: activeQuality.verificationScore, color: 'bg-emerald-500' },
-              { label: 'Freshness', value: activeQuality.freshnessScore, color: 'bg-indigo-500' },
+              { label: 'Freshness', value: activeQuality.freshnessScore, color: 'bg-[#E52825]' },
             ].map((dim) => (
               <div
                 key={dim.label}
@@ -798,7 +798,7 @@ export const LeadEnrichmentPanel: React.FC<LeadEnrichmentPanelProps> = ({
                         }
                         className={`px-2.5 py-1 rounded text-[11px] font-medium border ${
                           choice === 'kept_existing'
-                            ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900'
+                            ? 'bg-[#440303] text-white border-[#440303] dark:bg-[#910303] dark:border-[#CE0404]'
                             : 'border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
                         }`}
                       >
@@ -811,7 +811,7 @@ export const LeadEnrichmentPanel: React.FC<LeadEnrichmentPanelProps> = ({
                         }
                         className={`px-2.5 py-1 rounded text-[11px] font-medium border ${
                           choice === 'accepted_incoming'
-                            ? 'bg-blue-600 text-white border-blue-600'
+                            ? 'bg-[#910303] text-white border-[#910303]'
                             : 'border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
                         }`}
                       >

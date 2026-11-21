@@ -520,7 +520,7 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
                       <div
                         className={`rounded-xl p-3.5 text-xs leading-relaxed whitespace-pre-wrap ${
                           msg.role === 'owner'
-                            ? 'bg-slate-900 dark:bg-blue-600 text-white ml-auto max-w-2xl'
+                            ? 'bg-[#440303] dark:bg-[#910303] text-white ml-auto max-w-2xl'
                             : 'bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200'
                         }`}
                       >
@@ -628,7 +628,7 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
               <button
                 onClick={() => handleSendMessage()}
                 disabled={sending || !chatInput.trim()}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-slate-900 dark:bg-blue-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0"
               >
                 <Send className="w-3.5 h-3.5" />
                 {sending ? 'Thinking...' : 'Send'}

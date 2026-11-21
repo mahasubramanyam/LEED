@@ -102,19 +102,23 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
   const postalLabel = currentCountry?.addressFormat?.postalCodeLabel || 'Postal Code';
   const hasPostalCodes = currentCountry ? currentCountry.addressFormat?.hasPostalCodes !== false : true;
 
+  const fieldClass =
+    'w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] placeholder:text-[#7D6666] dark:placeholder:text-[#C9A7A7] text-xs font-medium rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#910303] dark:focus:border-[#CE0404]';
+  const labelClass = 'block text-[11px] font-semibold text-[#440303] dark:text-[#E6D2D2] mb-1';
+
   return (
     <div className={compact ? 'space-y-2' : 'space-y-3'}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         <div>
-          <label className="block text-[11px] font-medium text-slate-400 mb-1 flex items-center justify-between">
+          <label className={`${labelClass} flex items-center justify-between`}>
             <span>Country / Jurisdiction (ISO 3166)</span>
             {currentCountry && (
-              <span className="font-mono text-[10px] text-slate-500">
+              <span className="font-mono text-[10px] text-[#543F3F] dark:text-[#C9A7A7]">
                 {currentCountry.code} / {currentCountry.alpha3} • {currentCountry.currency}
               </span>
             )}
           </label>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {countries.length > 20 && (
               <div className="relative">
                 <input
@@ -122,9 +126,9 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
                   value={countrySearch}
                   onChange={(e) => setCountrySearch(e.target.value)}
                   placeholder="Filter 210 jurisdictions..."
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-[11px] rounded px-2.5 py-1 pl-7 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#E4DADA] dark:border-[#7A1E1E] text-[#240202] dark:text-[#FAF4F4] placeholder:text-[#7D6666] dark:placeholder:text-[#C9A7A7] text-[11px] font-medium rounded-lg px-2.5 py-1 pl-7 focus:outline-none focus:border-[#910303] dark:focus:border-[#CE0404]"
                 />
-                <Search className="w-3 h-3 text-slate-500 absolute left-2 top-1.5" />
+                <Search className="w-3 h-3 text-[#6B5454] dark:text-[#C9A7A7] absolute left-2 top-1.5" />
               </div>
             )}
             <select
@@ -142,7 +146,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
                   currency: nextObj?.currency,
                 });
               }}
-              className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500"
+              className={fieldClass}
             >
               {filteredCountries.length === 0 && (
                 <option value={countryCode}>{countryCode}</option>
@@ -158,7 +162,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
 
         {hasRegions && (
           <div>
-            <label className="block text-[11px] font-medium text-slate-400 mb-1">
+            <label className={labelClass}>
               {regionLabel}
             </label>
             {divisions.length > 0 ? (
@@ -175,7 +179,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
                     currency: currentCountry?.currency,
                   })
                 }
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500"
+                className={fieldClass}
               >
                 <option value="">Select {regionLabel}...</option>
                 {divisions.map((d) => (
@@ -200,7 +204,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
                   })
                 }
                 placeholder={`Enter ${regionLabel.toLowerCase()} (optional)`}
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500"
+                className={fieldClass}
               />
             )}
           </div>
@@ -209,7 +213,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         <div>
-          <label className="block text-[11px] font-medium text-slate-400 mb-1">
+          <label className={labelClass}>
             City / Locality
           </label>
           <input
@@ -227,7 +231,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
               })
             }
             placeholder="Start typing city..."
-            className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500"
+            className={fieldClass}
           />
           {citySuggestions.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
@@ -246,7 +250,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
                       currency: currentCountry?.currency,
                     })
                   }
-                  className="px-1.5 py-0.5 text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded transition"
+                  className="px-2 py-0.5 text-[10px] font-semibold bg-white dark:bg-[#440303] hover:bg-[#FDF2F2] dark:hover:bg-[#690303] text-[#440303] dark:text-[#FAF4F4] border border-[#D4C2C2] dark:border-[#7A1E1E] rounded transition"
                 >
                   {c.name}
                 </button>
@@ -257,10 +261,10 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
 
         {showStreetAndPostal && hasPostalCodes && (
           <div>
-            <label className="block text-[11px] font-medium text-slate-400 mb-1">
+            <label className={labelClass}>
               {postalLabel}
               {currentCountry?.addressFormat?.postalCodeExample && (
-                <span className="text-slate-500 font-mono ml-1">
+                <span className="text-[#543F3F] dark:text-[#C9A7A7] font-mono font-normal ml-1">
                   (e.g. {currentCountry.addressFormat.postalCodeExample})
                 </span>
               )}
@@ -280,7 +284,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
                 })
               }
               placeholder={currentCountry?.addressFormat?.postalCodeExample || 'Postal code'}
-              className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 font-mono focus:outline-none focus:border-indigo-500"
+              className={`${fieldClass} font-mono`}
             />
           </div>
         )}
@@ -288,7 +292,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
 
       {showStreetAndPostal && (
         <div>
-          <label className="block text-[11px] font-medium text-slate-400 mb-1">
+          <label className={labelClass}>
             Street / Suite / Building Address
           </label>
           <input
@@ -306,7 +310,7 @@ export const GeoSelector: React.FC<GeoSelectorProps> = ({
               })
             }
             placeholder="Street address, floor, or registered office..."
-            className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500"
+            className={fieldClass}
           />
         </div>
       )}

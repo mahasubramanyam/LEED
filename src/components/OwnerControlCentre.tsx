@@ -940,7 +940,7 @@ export function OwnerControlCentre({
                             setMigration004Feedback(null);
                             setShowMigration004Confirm(true);
                           }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#B30303] hover:bg-[#910303] rounded-lg transition-colors shadow-xs"
                         >
                           <Database className="w-3.5 h-3.5" />
                           Approve &amp; Apply Migration 004
@@ -1016,7 +1016,7 @@ export function OwnerControlCentre({
                         type="button"
                         disabled={!migration004ConfirmChecked || applyingMigration004}
                         onClick={handleApproveMigration004}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#B30303] hover:bg-[#910303] rounded-lg transition-colors disabled:opacity-50"
                       >
                         {applyingMigration004 ? (
                           <>
@@ -1109,7 +1109,7 @@ export function OwnerControlCentre({
                             setMigration005Feedback(null);
                             setShowMigration005Confirm(true);
                           }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#B30303] hover:bg-[#910303] rounded-lg transition-colors shadow-xs"
                         >
                           <Database className="w-3.5 h-3.5" />
                           Approve &amp; Apply Migration 005
@@ -1178,7 +1178,7 @@ export function OwnerControlCentre({
                         type="button"
                         disabled={!migration005ConfirmChecked || applyingMigration005}
                         onClick={handleApproveMigration005}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#B30303] hover:bg-[#910303] rounded-lg transition-colors disabled:opacity-50"
                       >
                         {applyingMigration005 ? (
                           <>
@@ -1438,7 +1438,7 @@ export function OwnerControlCentre({
               <button
                 type="submit"
                 disabled={updatingProfile}
-                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs disabled:opacity-50"
+                className="px-4 py-2 text-xs font-semibold text-white bg-[#B30303] hover:bg-[#910303] rounded-lg transition-colors shadow-xs disabled:opacity-50"
               >
                 {updatingProfile ? 'Saving...' : 'Update Name'}
               </button>
@@ -1507,7 +1507,7 @@ export function OwnerControlCentre({
               <button
                 type="submit"
                 disabled={changingPassword}
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors shadow-xs disabled:opacity-50"
+                className="px-4 py-2 text-xs font-semibold text-white bg-[#440303] hover:bg-[#690303] dark:bg-[#690303] dark:hover:bg-[#910303] rounded-lg transition-colors shadow-xs disabled:opacity-50"
               >
                 {changingPassword ? 'Updating Password...' : 'Save New Password'}
               </button>
@@ -1842,7 +1842,7 @@ export function OwnerControlCentre({
                       <button
                         type="submit"
                         disabled={savingKey || !allRequiredFilled || fields.length === 0}
-                        className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                        className="px-4 py-2 text-xs font-semibold text-white bg-[#B30303] hover:bg-[#910303] rounded-lg transition-colors disabled:opacity-50"
                       >
                         {savingKey ? 'Encrypting...' : 'Save / Rotate Credential'}
                       </button>
@@ -1915,7 +1915,7 @@ export function OwnerControlCentre({
                         type="button"
                         onClick={() => handleTestConnector(c.id)}
                         disabled={testingConnId === c.id}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold bg-[#B30303] hover:bg-[#910303] text-white rounded-md disabled:opacity-50"
                       >
                         <Play className="w-3 h-3" />
                         <span>{testingConnId === c.id ? 'Testing...' : 'Test'}</span>
@@ -2052,7 +2052,7 @@ export function OwnerControlCentre({
             <button
               type="submit"
               disabled={savingSettings}
-              className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+              className="px-4 py-2 text-xs font-semibold text-white bg-[#B30303] hover:bg-[#910303] rounded-lg transition-colors disabled:opacity-50"
             >
               {savingSettings ? 'Saving...' : 'Save Preferences'}
             </button>
@@ -2095,7 +2095,7 @@ export function OwnerControlCentre({
                 type="button"
                 onClick={handleVerifyChain}
                 disabled={verifyingChain}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-[#B30303] hover:bg-[#910303] rounded-lg transition-colors flex items-center gap-1.5 shrink-0 disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${verifyingChain ? 'animate-spin' : ''}`} />
                 {verifyingChain ? 'Verifying Digests...' : 'Verify Hash Chain'}

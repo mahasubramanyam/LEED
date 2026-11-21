@@ -1026,7 +1026,7 @@ export const WorkflowAutomationWorkspace: React.FC<WorkflowAutomationWorkspacePr
                 <button
                   type="submit"
                   disabled={busy}
-                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg"
+                  className="px-4 py-2 text-xs font-semibold text-white bg-[#B30303] hover:bg-[#910303] disabled:opacity-50 rounded-lg"
                 >
                   {busy ? 'Saving...' : editingId ? 'Save Workflow Changes' : 'Create Workflow'}
                 </button>
@@ -1260,7 +1260,7 @@ export const WorkflowAutomationWorkspace: React.FC<WorkflowAutomationWorkspacePr
                           type="button"
                           onClick={() => handleRetryExecution(ex.id)}
                           disabled={busy}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 font-sans"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[#B30303] text-white hover:bg-[#910303] font-sans"
                         >
                           <RotateCcw className="w-3 h-3" />
                           <span>Retry Failed</span>

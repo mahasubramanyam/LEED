@@ -178,7 +178,7 @@ export const EnrichmentProvidersSection: React.FC = () => {
               type="button"
               disabled={savingPolicy}
               onClick={handleSavePolicy}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#B30303] hover:bg-[#910303] text-white disabled:opacity-50"
             >
               <Save className="w-3.5 h-3.5" />
               {savingPolicy ? 'Saving...' : 'Save Freshness Policy'}

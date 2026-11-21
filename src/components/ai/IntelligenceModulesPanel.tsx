@@ -284,7 +284,7 @@ export const IntelligenceModulesPanel: React.FC<IntelligenceModulesPanelProps> =
               <button
                 onClick={runDailyBriefing}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-900 dark:bg-blue-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
                 {busy ? 'Generating...' : 'Generate Today’s Briefing'}
@@ -500,7 +500,7 @@ export const IntelligenceModulesPanel: React.FC<IntelligenceModulesPanelProps> =
               <button
                 onClick={runPrioritization}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-blue-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
                 Recalculate Priority
@@ -656,7 +656,7 @@ export const IntelligenceModulesPanel: React.FC<IntelligenceModulesPanelProps> =
             <button
               onClick={runCompanyIntel}
               disabled={busy || (!selectedLeadId && leads.length === 0)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-900 dark:bg-blue-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0"
             >
               <FileText className="w-3.5 h-3.5" />
               {busy ? 'Generating Report...' : 'Generate Intelligence Report'}
@@ -697,7 +697,7 @@ export const IntelligenceModulesPanel: React.FC<IntelligenceModulesPanelProps> =
                     </button>
                     <button
                       onClick={() => onJumpToMode?.('drafting', { leadId: companyReport.leadId })}
-                      className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-700"
+                      className="px-2.5 py-1 rounded-lg bg-[#B30303] text-white text-xs hover:bg-[#910303]"
                     >
                       Draft Outreach
                     </button>
@@ -857,7 +857,7 @@ export const IntelligenceModulesPanel: React.FC<IntelligenceModulesPanelProps> =
               <button
                 onClick={runMeetingPrep}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-900 dark:bg-blue-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50"
               >
                 <Users className="w-3.5 h-3.5" />
                 {busy ? 'Preparing Brief...' : 'Generate Meeting Preparation Brief'}
@@ -1026,7 +1026,7 @@ export const IntelligenceModulesPanel: React.FC<IntelligenceModulesPanelProps> =
             <button
               onClick={runDraftMessage}
               disabled={busy}
-              className="w-full py-2 rounded-lg bg-slate-900 dark:bg-blue-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50"
+              className="w-full py-2 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50"
             >
               {busy ? 'Drafting...' : 'Generate Draft (Not Sent)'}
             </button>

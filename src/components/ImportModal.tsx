@@ -15,18 +15,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   existingLeads,
 }) => {
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col shadow-2xl">
-        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-600/15 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 bg-[#240202]/75 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col shadow-2xl">
+        <div className="px-6 py-4 border-b border-[#7A1E1E] bg-gradient-to-r from-[#440303] via-[#690303] to-[#910303] flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-white/15 border border-white/20 text-white flex items-center justify-center">
               <FileSpreadsheet className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              <h2 className="text-sm font-extrabold text-white tracking-tight">
                 Lead &amp; Decision-Maker Import Engine (CSV / Excel .xlsx)
               </h2>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              <p className="text-[11px] font-medium text-[#F5DADA]">
                 Dry-run validation, multi-column merge, CRM deduplication &amp; explicit confirmation
               </p>
             </div>
@@ -35,7 +35,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+            aria-label="Close import modal"
+            className="p-1.5 rounded-lg text-[#F5DADA] hover:text-white hover:bg-white/15 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>

@@ -1235,7 +1235,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                   onClick={() => setCity(c.name)}
                   className={`text-[11px] px-2 py-0.5 rounded border transition ${
                     city.toLowerCase() === c.name.toLowerCase()
-                      ? 'bg-blue-600 border-blue-600 text-white'
+                      ? 'bg-[#910303] border-[#910303] text-white'
                       : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                 >
@@ -1440,7 +1440,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                         onClick={() => toggleManualConnector(conn.id)}
                         className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] rounded-md border transition ${
                           selectionMode === 'manual' && isChecked
-                            ? 'bg-blue-600 border-blue-600 text-white'
+                            ? 'bg-[#910303] border-[#910303] text-white'
                             : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
                         } ${isDisabled ? 'opacity-60' : ''}`}
                       >
@@ -1561,7 +1561,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50 whitespace-nowrap shrink-0"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-[#B30303] hover:bg-[#910303] text-white text-xs font-semibold rounded-lg transition disabled:opacity-50 whitespace-nowrap shrink-0"
                 >
                   <Search className="w-3.5 h-3.5" />
                   <span>Discover Businesses</span>
@@ -1686,7 +1686,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
             <button
               type="submit"
               disabled={isDirectInspecting || !directInspectUrl.trim()}
-              className="px-4 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 whitespace-nowrap shrink-0"
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-[#B30303] hover:bg-[#910303] text-white disabled:opacity-50 whitespace-nowrap shrink-0"
             >
               {isDirectInspecting ? 'Inspecting...' : 'Inspect Official Website'}
             </button>
@@ -2044,7 +2044,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                       : results;
                   handleSaveLeads(chosen);
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md transition disabled:opacity-50"
+                className="flex items-center gap-1 px-3 py-1.5 bg-[#B30303] hover:bg-[#910303] text-white text-xs font-semibold rounded-md transition disabled:opacity-50"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>
@@ -2157,7 +2157,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                           className={`px-2.5 py-1 text-[11px] font-semibold rounded ${
                             isAdded
                               ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40'
-                              : 'bg-blue-600 hover:bg-blue-700 text-white'
+                              : 'bg-[#B30303] hover:bg-[#910303] text-white'
                           }`}
                         >
                           {isAdded ? 'Saved' : 'Add'}
@@ -2329,7 +2329,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                       className={`flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-md transition ${
                         isAdded
                           ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
-                          : 'bg-blue-600 hover:bg-blue-700 text-white'
+                          : 'bg-[#B30303] hover:bg-[#910303] text-white'
                       }`}
                     >
                       {isAdded ? (
@@ -2383,25 +2383,27 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
 
       {/* Discovery Candidate Detail & Enrichment Drawer */}
       {inspectedCandidate && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50">
-          <div className="w-full max-w-xl bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 h-full overflow-y-auto p-6 space-y-5">
-            <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+        <div className="fixed inset-0 z-50 flex justify-end bg-[#240202]/70 backdrop-blur-xs">
+          <div className="w-full max-w-xl bg-white dark:bg-[#240202] border-l border-[#DFD1D1] dark:border-[#7A1E1E] h-full flex flex-col overflow-hidden shadow-2xl">
+            <div className="px-6 py-4 border-b border-[#7A1E1E] bg-gradient-to-r from-[#240202] via-[#440303] to-[#690303] flex items-start justify-between gap-4 shrink-0">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+                <h3 className="text-base font-extrabold text-white tracking-tight">
                   {inspectedCandidate.companyName}
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                <p className="text-xs font-medium text-[#F5DADA] mt-0.5">
                   {inspectedCandidate.sources?.[0]?.sourceName} · {verificationLabel(inspectedCandidate).text}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setInspectedCandidate(null)}
-                className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                aria-label="Close candidate details"
+                className="p-1.5 rounded-lg text-[#F5DADA] hover:text-white hover:bg-[#910303]/60 transition"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
             {/* Duplicate Comparison Alert if Present */}
             {duplicateInfoByLeadId[inspectedCandidate.id] &&
@@ -2656,7 +2658,7 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                   type="button"
                   disabled={isDrawerDmLoading}
                   onClick={() => handleInvestigateDrawerDecisionMakers(inspectedCandidate)}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white whitespace-nowrap shrink-0 inline-flex items-center gap-1.5"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-md bg-[#B30303] hover:bg-[#910303] disabled:opacity-50 text-white whitespace-nowrap shrink-0 inline-flex items-center gap-1.5"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isDrawerDmLoading ? 'animate-spin' : ''}`} />
                   <span>{isDrawerDmLoading ? 'Investigating...' : 'Find Decision-Makers'}</span>
@@ -2780,24 +2782,25 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
               <LeadEnrichmentPanel lead={inspectedCandidate} mode="candidate" />
             </div>
 
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+            <div className="pt-4 border-t border-[#E4DADA] dark:border-[#7A1E1E] flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => {
                   onInspectLead(inspectedCandidate);
                   setInspectedCandidate(null);
                 }}
-                className="px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
+                className="px-3 py-2 text-xs font-semibold rounded-lg border border-[#D4C2C2] dark:border-[#8C2828] text-[#440303] dark:text-[#FAF4F4] hover:bg-[#FAF7F7] dark:hover:bg-[#690303] transition"
               >
                 Open Full Lead Inspector
               </button>
               <button
                 type="button"
                 onClick={() => handleSaveLeads([inspectedCandidate])}
-                className="px-4 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
+                className="px-4 py-2 text-xs font-bold rounded-lg bg-[#B30303] hover:bg-[#910303] text-white shadow-xs transition"
               >
                 Save to CRM Pipeline
               </button>
+            </div>
             </div>
           </div>
         </div>

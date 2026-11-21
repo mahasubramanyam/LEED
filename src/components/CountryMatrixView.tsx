@@ -75,8 +75,8 @@ const SEVEN_STATE_META: Record<
     label: 'Not Implemented',
     shortLabel: 'Unbuilt',
     badgeClass:
-      'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800',
-    dotClass: 'bg-indigo-500',
+      'bg-violet-100 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300 border border-violet-300 dark:border-violet-800',
+    dotClass: 'bg-violet-500',
   },
   temporarily_unavailable: {
     label: 'Temporarily Unavailable',
@@ -299,7 +299,7 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
               onClick={() => setAuditedOnly((v) => !v)}
               className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition ${
                 auditedOnly
-                  ? 'bg-blue-600/10 border-blue-500 text-blue-600 dark:text-blue-400'
+                  ? 'bg-[#FDF4F4] dark:bg-[#910303]/40 border-[#B30303] text-[#910303] dark:text-[#FFE2E1]'
                   : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300'
               }`}
             >
@@ -415,7 +415,7 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
                     {onNavigateToDiscovery && cap.countryCode !== 'GLOBAL' && (
                       <button
                         onClick={() => onNavigateToDiscovery(cap.countryCode)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#B30303] hover:bg-[#910303] text-white shadow-xs transition"
                       >
                         <span>Query</span>
                         <ArrowRight className="w-3.5 h-3.5" />

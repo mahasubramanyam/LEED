@@ -895,43 +895,52 @@ export function LeadsView({
 
       {/* Create International Lead Modal */}
       {isCreateOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Building2 className="w-4 h-4 text-blue-400" />
+        <div className="fixed inset-0 bg-[#240202]/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#7A1E1E] flex items-center justify-between bg-gradient-to-r from-[#440303] via-[#690303] to-[#910303]">
+              <h3 className="text-sm font-extrabold text-white flex items-center gap-2 tracking-tight">
+                <Building2 className="w-4 h-4 text-[#FFE2E1]" />
                 Create International Organization Lead
               </h3>
-              <button onClick={() => setIsCreateOpen(false)} className="text-slate-400 hover:text-white">
+              <button
+                type="button"
+                onClick={() => setIsCreateOpen(false)}
+                aria-label="Close modal"
+                className="p-1 rounded-lg text-[#F5DADA] hover:text-white hover:bg-white/15 transition-colors"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleCreateSubmit} className="p-5 space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Company / Organization Name *</label>
+                  <label className="block text-[11px] font-semibold text-[#440303] dark:text-[#E6D2D2] mb-1">
+                    Company / Organization Name *
+                  </label>
                   <input
                     type="text"
                     required
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     placeholder="e.g. Nordic Robotics AS"
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5"
+                    className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] placeholder:text-[#7D6666] dark:placeholder:text-[#C9A7A7] font-medium rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#910303] dark:focus:border-[#CE0404]"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Industry / Sector</label>
+                  <label className="block text-[11px] font-semibold text-[#440303] dark:text-[#E6D2D2] mb-1">
+                    Industry / Sector
+                  </label>
                   <input
                     type="text"
                     value={newIndustry}
                     onChange={(e) => setNewIndustry(e.target.value)}
                     placeholder="e.g. Manufacturing & Technology"
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5"
+                    className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] placeholder:text-[#7D6666] dark:placeholder:text-[#C9A7A7] font-medium rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#910303] dark:focus:border-[#CE0404]"
                   />
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
+              <div className="p-3.5 bg-[#FBF7F7] dark:bg-[#240202]/70 border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl">
                 <GeoSelector
                   countryCode={newGeo.countryCode}
                   region={newGeo.region}
@@ -957,44 +966,52 @@ export function LeadsView({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Phone (Raw preserved; E.164 normalized separately)</label>
+                  <label className="block text-[11px] font-semibold text-[#440303] dark:text-[#E6D2D2] mb-1">
+                    Phone (Raw preserved; E.164 normalized separately)
+                  </label>
                   <input
                     type="text"
                     value={newPhone}
                     onChange={(e) => setNewPhone(e.target.value)}
                     placeholder="+44 20 7946 0912"
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 font-mono"
+                    className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] placeholder:text-[#7D6666] dark:placeholder:text-[#C9A7A7] rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-[#910303] dark:focus:border-[#CE0404]"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Public Email</label>
+                  <label className="block text-[11px] font-semibold text-[#440303] dark:text-[#E6D2D2] mb-1">
+                    Public Email
+                  </label>
                   <input
                     type="email"
                     value={newEmail}
                     onChange={(e) => setNewEmail(e.target.value)}
                     placeholder="contact@company.com"
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 font-mono"
+                    className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] placeholder:text-[#7D6666] dark:placeholder:text-[#C9A7A7] rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-[#910303] dark:focus:border-[#CE0404]"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Website</label>
+                  <label className="block text-[11px] font-semibold text-[#440303] dark:text-[#E6D2D2] mb-1">
+                    Website
+                  </label>
                   <input
                     type="text"
                     value={newWebsite}
                     onChange={(e) => setNewWebsite(e.target.value)}
                     placeholder="https://company.com"
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 font-mono"
+                    className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] placeholder:text-[#7D6666] dark:placeholder:text-[#C9A7A7] rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-[#910303] dark:focus:border-[#CE0404]"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-800">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-3 border-t border-[#EFE8E8] dark:border-[#7A1E1E]">
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Primary ID Type</label>
+                  <label className="block text-[11px] font-semibold text-[#440303] dark:text-[#E6D2D2] mb-1">
+                    Primary ID Type
+                  </label>
                   <select
                     value={newIdentType}
                     onChange={(e) => setNewIdentType(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5"
+                    className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] font-medium rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#910303] dark:focus:border-[#CE0404]"
                   >
                     {uiIdentifierOptions.map((opt) => (
                       <option key={opt.code} value={opt.code}>
@@ -1004,35 +1021,37 @@ export function LeadsView({
                   </select>
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Business Identifier Number (Optional)</label>
+                  <label className="block text-[11px] font-semibold text-[#440303] dark:text-[#E6D2D2] mb-1">
+                    Business Identifier Number (Optional)
+                  </label>
                   <input
                     type="text"
                     value={newIdentValue}
                     onChange={(e) => setNewIdentValue(e.target.value)}
                     placeholder="e.g. 01234567 or 974760673"
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded px-2.5 py-1.5 font-mono"
+                    className="w-full bg-[#FAF7F7] dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] placeholder:text-[#7D6666] dark:placeholder:text-[#C9A7A7] rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-[#910303] dark:focus:border-[#CE0404]"
                   />
                 </div>
               </div>
 
               {createError && (
-                <div className="p-2.5 bg-rose-950/50 border border-rose-800 rounded text-rose-300">
+                <div className="p-2.5 bg-[#FFF1F1] dark:bg-[#2A0303] border border-[#E52825]/70 rounded-lg text-[#910303] dark:text-[#FFE0DF] font-medium">
                   {createError}
                 </div>
               )}
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#EFE8E8] dark:border-[#7A1E1E]">
                 <button
                   type="button"
                   onClick={() => setIsCreateOpen(false)}
-                  className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded"
+                  className="px-3.5 py-2 bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#440303] dark:text-[#FAF4F4] hover:border-[#910303] hover:bg-[#FDF6F6] dark:hover:bg-[#690303] font-semibold rounded-lg transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isCreating}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded"
+                  className="px-4 py-2 bg-[#B30303] hover:bg-[#910303] disabled:opacity-60 text-white font-bold rounded-lg shadow-xs transition-colors"
                 >
                   {isCreating ? 'Creating...' : 'Create Lead'}
                 </button>
@@ -1044,14 +1063,14 @@ export function LeadsView({
 
       {/* Batch Actions Bar (when items selected) */}
       {selectedIds.size > 0 && (
-        <div className="bg-blue-50 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-blue-900 dark:text-blue-200 shadow-xs">
+        <div className="bg-[#FDF4F4] dark:bg-[#690303] border border-[#D8B4B4] dark:border-[#CE0404]/70 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-[#440303] dark:text-[#FAF4F4] shadow-xs">
           <div className="flex items-center gap-2">
-            <span className="font-bold font-mono text-blue-700 dark:text-blue-300">{selectedIds.size}</span>
-            <span>leads selected</span>
+            <span className="font-bold font-mono text-[#B30303] dark:text-[#FFE2E1]">{selectedIds.size}</span>
+            <span className="font-semibold">leads selected</span>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-slate-500 dark:text-slate-400">Move to:</span>
+            <span className="text-[#543F3F] dark:text-[#DEC2C2] font-semibold">Move to:</span>
             <select
               onChange={(e) => {
                 if (e.target.value) {
@@ -1060,7 +1079,7 @@ export function LeadsView({
                 }
               }}
               defaultValue=""
-              className="bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-700 text-slate-900 dark:text-white text-xs rounded-lg px-2.5 py-1"
+              className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] text-[#240202] dark:text-[#FAF4F4] text-xs font-medium rounded-lg px-2.5 py-1 focus:outline-none focus:border-[#910303]"
             >
               <option value="" disabled>
                 Select stage...
@@ -1075,7 +1094,7 @@ export function LeadsView({
             <button
               type="button"
               onClick={() => setShowBulkEnrichModal(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition"
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#B30303] hover:bg-[#910303] text-white rounded-lg font-semibold transition shadow-xs"
             >
               <ShieldCheck className="w-3.5 h-3.5" />
               Bulk Enrich Preview
@@ -1397,16 +1416,16 @@ export function LeadsView({
 
       {/* Phase 13: Owner-Only Private Notes Search Modal */}
       {showNotesSearch && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col overflow-hidden shadow-2xl">
-            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Lock className="w-4 h-4 text-amber-500" />
+        <div className="fixed inset-0 bg-[#240202]/75 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="px-5 py-4 border-b border-[#7A1E1E] bg-gradient-to-r from-[#440303] via-[#690303] to-[#910303] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Lock className="w-4 h-4 text-[#FFE2E1]" />
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  <h3 className="text-sm font-extrabold text-white tracking-tight">
                     Private CRM Notes Search
                   </h3>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] font-medium text-[#F5DADA]">
                     Owner-only private notes across companies, decision-makers, and opportunities
                   </p>
                 </div>
@@ -1414,29 +1433,30 @@ export function LeadsView({
               <button
                 type="button"
                 onClick={() => setShowNotesSearch(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                aria-label="Close private notes search"
+                className="p-1.5 rounded-lg text-[#F5DADA] hover:text-white hover:bg-white/15 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3 flex-wrap">
+            <div className="p-4 border-b border-[#EFE8E8] dark:border-[#7A1E1E] flex items-center gap-3 flex-wrap bg-[#FAF7F7] dark:bg-[#3A0303]">
               <div className="relative flex-1 min-w-[200px]">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <Search className="w-3.5 h-3.5 text-[#6B5454] dark:text-[#C9A7A7] absolute left-3 top-2.5" />
                 <input
                   type="text"
                   value={notesQuery}
                   onChange={(e) => setNotesQuery(e.target.value)}
                   placeholder="Search private notes by text, title, or tag..."
-                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white"
+                  className="w-full pl-8 pr-3 py-1.5 text-xs font-medium rounded-lg border border-[#D4C2C2] dark:border-[#8C2828] bg-white dark:bg-[#240202] text-[#240202] dark:text-[#FAF4F4] placeholder:text-[#7D6666] dark:placeholder:text-[#C9A7A7] focus:outline-none focus:border-[#910303]"
                 />
               </div>
-              <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+              <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#440303] dark:text-[#E6D2D2] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={notesPinnedOnly}
                   onChange={(e) => setNotesPinnedOnly(e.target.checked)}
-                  className="rounded border-slate-300 dark:border-slate-700"
+                  className="rounded border-[#D4C2C2] dark:border-[#8C2828] accent-[#B30303]"
                 />
                 <span>Pinned only</span>
               </label>
@@ -1444,9 +1464,9 @@ export function LeadsView({
 
             <div className="p-4 overflow-y-auto flex-1 space-y-2.5">
               {loadingNotes ? (
-                <div className="py-10 text-center text-xs text-slate-400">Searching private notes...</div>
+                <div className="py-10 text-center text-xs font-medium text-[#543F3F] dark:text-[#DEC2C2]">Searching private notes...</div>
               ) : notesResults.length === 0 ? (
-                <div className="py-10 text-center text-xs text-slate-400">
+                <div className="py-10 text-center text-xs font-medium text-[#543F3F] dark:text-[#DEC2C2]">
                   No private notes matched your query. Add private notes inside any Company or Person CRM profile.
                 </div>
               ) : (
@@ -1455,21 +1475,21 @@ export function LeadsView({
                   return (
                     <div
                       key={note.id}
-                      className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 space-y-1.5 text-xs"
+                      className="p-3.5 rounded-xl border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#240202]/70 space-y-1.5 text-xs"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-                          {note.pinned && <Pin className="w-3 h-3 text-amber-500" />}
+                        <div className="font-bold text-[#240202] dark:text-white flex items-center gap-1.5">
+                          {note.pinned && <Pin className="w-3 h-3 text-amber-600 dark:text-amber-400" />}
                           <span>{note.title || getNoteCategoryLabel(note.category)}</span>
                         </div>
-                        <span className="text-[10px] font-mono text-slate-400">
+                        <span className="text-[10px] font-mono font-medium text-[#543F3F] dark:text-[#C9A7A7]">
                           {getNoteCategoryLabel(note.category)} · {new Date(note.updatedAt).toLocaleDateString()}
                         </span>
                       </div>
-                      <p className="text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+                      <p className="text-[#422F2F] dark:text-[#E6D2D2] whitespace-pre-wrap leading-relaxed">
                         {note.content}
                       </p>
-                      <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                      <div className="flex items-center justify-between text-[11px] text-[#543F3F] dark:text-[#C9A7A7] pt-1">
                         <span>
                           {note.tags.length > 0 ? note.tags.map((t) => `#${t}`).join(' ') : 'Owner only'}
                         </span>
@@ -1480,7 +1500,7 @@ export function LeadsView({
                               setShowNotesSearch(false);
                               onSelectLead(linkedLead);
                             }}
-                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                            className="text-[#B30303] dark:text-[#FF9492] hover:underline font-bold"
                           >
                             Open {linkedLead.companyName}
                           </button>

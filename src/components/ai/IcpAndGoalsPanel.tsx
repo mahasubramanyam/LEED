@@ -252,7 +252,7 @@ export const IcpAndGoalsPanel: React.FC<IcpAndGoalsPanelProps> = ({
           <button
             onClick={handleSaveGoals}
             disabled={savingGoals}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-blue-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0"
           >
             <Save className="w-3.5 h-3.5" />
             {savingGoals ? 'Saving...' : 'Save Goals'}
@@ -456,7 +456,7 @@ export const IcpAndGoalsPanel: React.FC<IcpAndGoalsPanelProps> = ({
             <button
               onClick={handleSaveIcp}
               disabled={savingIcp}
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
             >
               <Plus className="w-3.5 h-3.5" />
               {savingIcp ? 'Saving...' : editingId ? 'Update ICP Profile' : 'Save ICP Profile'}
@@ -503,7 +503,7 @@ export const IcpAndGoalsPanel: React.FC<IcpAndGoalsPanelProps> = ({
                       <button
                         onClick={() => handleEvaluateIcp(icp)}
                         disabled={evaluatingIcpId === icp.id}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-blue-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50"
                       >
                         <Play className="w-3 h-3" />
                         {evaluatingIcpId === icp.id ? 'Scoring...' : 'Evaluate CRM'}

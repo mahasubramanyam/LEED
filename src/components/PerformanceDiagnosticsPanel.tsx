@@ -355,7 +355,7 @@ export const PerformanceDiagnosticsPanel: React.FC<PerformanceDiagnosticsPanelPr
           <button
             onClick={handleRunBackupDrill}
             disabled={busyAction !== null}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-500 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#B30303] hover:bg-[#910303] text-white hover:bg-slate-800 dark:hover:bg-blue-500 disabled:opacity-50"
           >
             <ShieldCheck className="w-3.5 h-3.5" />
             {busyAction === 'backup_drill' ? 'Running Drill...' : 'Verify Isolated Backup'}

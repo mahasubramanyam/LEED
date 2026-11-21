@@ -363,7 +363,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
 
   if (loading && !profile) {
     return (
-      <div className="p-8 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+      <div className="p-8 text-center text-xs text-[#543F3F] dark:text-[#DEC2C2] flex items-center justify-center gap-2">
         <RefreshCw className="w-4 h-4 animate-spin" />
         Loading unified company relationship profile...
       </div>
@@ -372,9 +372,9 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
 
   if (error || !profile) {
     return (
-      <div className="p-6 rounded-xl border border-rose-500/30 bg-rose-950/20 text-xs text-rose-300 flex items-center justify-between">
+      <div className="p-6 rounded-xl border border-[#F0B8B8] dark:border-[#E52825]/40 bg-[#FFF2F2] dark:bg-[#690303]/55 text-xs text-[#B30303] dark:text-[#FF9492] flex items-center justify-between">
         <span>{error || 'Profile unavailable'}</span>
-        <button onClick={loadProfile} className="px-3 py-1 bg-slate-800 rounded text-white hover:bg-slate-700">
+        <button onClick={loadProfile} className="px-3 py-1 bg-[#F4ECEC] dark:bg-[#690303] rounded text-[#240202] dark:text-[#FAF4F4] hover:bg-[#E7D8D8] dark:hover:bg-[#7A1212]">
           Retry
         </button>
       </div>
@@ -400,56 +400,56 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
     <div className="space-y-5">
       {/* Top Relationship Summary Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-lg border border-slate-800 bg-slate-950/60">
-          <div className="text-[11px] text-slate-400">Relationship Status</div>
-          <div className="mt-1 text-sm font-semibold text-white">
+        <div className="p-3.5 rounded-lg border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#440303]">
+          <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2]">Relationship Status</div>
+          <div className="mt-1 text-sm font-semibold text-[#240202] dark:text-[#FAF4F4]">
             {getRelationshipStatusLabel(profile.relationshipMeta.relationshipStatus)}
           </div>
-          <div className="mt-1 text-[11px] text-slate-500">
+          <div className="mt-1 text-[11px] text-[#7A6262] dark:text-[#C59D9D]">
             {decisionMakers.length} decision-maker(s) linked
           </div>
         </div>
 
-        <div className="p-3.5 rounded-lg border border-slate-800 bg-slate-950/60">
-          <div className="text-[11px] text-slate-400">Derived Engagement</div>
+        <div className="p-3.5 rounded-lg border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#440303]">
+          <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2]">Derived Engagement</div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-sm font-semibold text-white capitalize">
+            <span className="text-sm font-semibold text-[#240202] dark:text-[#FAF4F4] capitalize">
               {engagement.effectiveLevel}
             </span>
-            <span className="text-xs font-mono text-indigo-400">{engagement.score}/100</span>
+            <span className="text-xs font-mono text-[#910303] dark:text-[#FF9492]">{engagement.score}/100</span>
           </div>
-          <div className="mt-1 text-[10px] text-slate-500">
+          <div className="mt-1 text-[10px] text-[#7A6262] dark:text-[#C59D9D]">
             {engagement.ownerOverrideLevel ? 'Owner override active' : 'Derived from CRM activity'}
           </div>
         </div>
 
-        <div className="p-3.5 rounded-lg border border-slate-800 bg-slate-950/60">
-          <div className="text-[11px] text-slate-400">Last Interaction</div>
-          <div className="mt-1 text-sm font-semibold text-white">
+        <div className="p-3.5 rounded-lg border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#440303]">
+          <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2]">Last Interaction</div>
+          <div className="mt-1 text-sm font-semibold text-[#240202] dark:text-[#FAF4F4]">
             {profile.lastInteractionAt
               ? new Date(profile.lastInteractionAt).toLocaleDateString()
               : 'None logged'}
           </div>
-          <div className="mt-1 text-[11px] text-slate-500">
+          <div className="mt-1 text-[11px] text-[#7A6262] dark:text-[#C59D9D]">
             {interactions.length} manual record(s)
           </div>
         </div>
 
-        <div className="p-3.5 rounded-lg border border-slate-800 bg-slate-950/60">
-          <div className="text-[11px] text-slate-400">Next Planned Action</div>
-          <div className="mt-1 text-sm font-semibold text-white truncate">
+        <div className="p-3.5 rounded-lg border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#440303]">
+          <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2]">Next Planned Action</div>
+          <div className="mt-1 text-sm font-semibold text-[#240202] dark:text-[#FAF4F4] truncate">
             {profile.nextPlannedInteractionAt
               ? new Date(profile.nextPlannedInteractionAt).toLocaleDateString()
               : 'Not scheduled'}
           </div>
-          <div className="mt-1 text-[11px] text-slate-500 truncate" title={profile.nextPlannedSummary}>
+          <div className="mt-1 text-[11px] text-[#7A6262] dark:text-[#C59D9D] truncate" title={profile.nextPlannedSummary}>
             {profile.nextPlannedSummary || 'Set a follow-up or task'}
           </div>
         </div>
       </div>
 
       {/* Sub-navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-800 pb-2.5">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-[#E4DADA] dark:border-[#7A1E1E] pb-2.5">
         {[
           { id: 'overview', label: 'Relationship & Engagement', icon: Sliders },
           { id: 'timeline', label: `Interactions (${interactions.length})`, icon: Activity },
@@ -465,8 +465,8 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
               onClick={() => setSection(tab.id as any)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition ${
                 active
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                  ? 'bg-[#910303] text-white'
+                  : 'text-[#543F3F] dark:text-[#DEC2C2] hover:text-[#910303] dark:hover:text-white hover:bg-[#EFE4E4] dark:hover:bg-[#690303]'
               }`}
             >
               <Icon className="w-3.5 h-3.5" />
@@ -480,19 +480,19 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
       {section === 'overview' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Left: Relationship Status & Owner Override Form */}
-          <form onSubmit={handleSaveRelationshipMeta} className="lg:col-span-6 space-y-3.5 bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+          <form onSubmit={handleSaveRelationshipMeta} className="lg:col-span-6 space-y-3.5 bg-[#FAF7F7] dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-white">Relationship Controls</h4>
-              <span className="text-[11px] text-slate-500">Owner-only settings</span>
+              <h4 className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4]">Relationship Controls</h4>
+              <span className="text-[11px] text-[#7A6262] dark:text-[#C59D9D]">Owner-only settings</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Relationship Status</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Relationship Status</label>
                 <select
                   value={relStatus}
                   onChange={(e) => setRelStatus(e.target.value as CrmRelationshipStatus)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 >
                   {CRM_RELATIONSHIP_STATUSES.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -502,11 +502,11 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Owner Engagement Override</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Owner Engagement Override</label>
                 <select
                   value={overrideLevel}
                   onChange={(e) => setOverrideLevel(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 >
                   <option value="">Use Derived Score ({engagement.level})</option>
                   <option value="strong">Override: Strong</option>
@@ -517,44 +517,44 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Next Follow-Up Date</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Next Follow-Up Date</label>
                 <input
                   type="date"
                   value={nextFollowUp}
                   onChange={(e) => setNextFollowUp(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Scheduled Relationship Review</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Scheduled Relationship Review</label>
                 <input
                   type="date"
                   value={reviewDate}
                   onChange={(e) => setReviewDate(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Relationship Tags (comma-separated)</label>
+              <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Relationship Tags (comma-separated)</label>
               <input
                 type="text"
                 value={tagsInput}
                 onChange={(e) => setTagsInput(e.target.value)}
                 placeholder="e.g. strategic, nordics, warm-intro"
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Owner Relationship Annotation</label>
+              <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Owner Relationship Annotation</label>
               <textarea
                 rows={2}
                 value={ownerAnnotation}
                 onChange={(e) => setOwnerAnnotation(e.target.value)}
                 placeholder="Context on why this relationship matters or override rationale..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
             </div>
 
@@ -562,7 +562,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
               <button
                 type="submit"
                 disabled={savingMeta}
-                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
+                className="px-3.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
               >
                 <Save className="w-3.5 h-3.5" />
                 {savingMeta ? 'Saving...' : 'Save Relationship Settings'}
@@ -572,13 +572,13 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
 
           {/* Right: Transparent Derived Engagement Breakdown + Linked People */}
           <div className="lg:col-span-6 space-y-4">
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+            <div className="bg-[#FAF7F7] dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <h4 className="text-xs font-semibold text-white">Engagement Assessment (Derived)</h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{engagement.transparencyLabel}</p>
+                  <h4 className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4]">Engagement Assessment (Derived)</h4>
+                  <p className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">{engagement.transparencyLabel}</p>
                 </div>
-                <span className="text-sm font-mono font-bold text-indigo-400 shrink-0">
+                <span className="text-sm font-mono font-bold text-[#910303] dark:text-[#FF9492] shrink-0">
                   {engagement.score}/100
                 </span>
               </div>
@@ -587,49 +587,49 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 {engagement.factors.map((f) => (
                   <div key={f.key} className="space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-300 font-medium">{f.label}</span>
-                      <span className="font-mono text-slate-400">
+                      <span className="text-[#422F2F] dark:text-[#EFE0E0] font-medium">{f.label}</span>
+                      <span className="font-mono text-[#543F3F] dark:text-[#DEC2C2]">
                         {f.points}/{f.maxPoints}
                       </span>
                     </div>
-                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-1.5 bg-[#F4ECEC] dark:bg-[#690303] rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-indigo-500 rounded-full"
+                        className="h-full bg-[#B30303] rounded-full"
                         style={{ width: `${Math.round((f.points / Math.max(1, f.maxPoints)) * 100)}%` }}
                       />
                     </div>
-                    <p className="text-[11px] text-slate-500">{f.detail}</p>
+                    <p className="text-[11px] text-[#7A6262] dark:text-[#C59D9D]">{f.detail}</p>
                   </div>
                 ))}
               </div>
             </div>
 
             {/* Linked Decision-Makers quick jump */}
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2.5">
-              <h4 className="text-xs font-semibold text-white">Linked Decision-Makers</h4>
+            <div className="bg-[#FAF7F7] dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-2.5">
+              <h4 className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4]">Linked Decision-Makers</h4>
               {decisionMakers.length === 0 ? (
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-[#7A6262] dark:text-[#C59D9D]">
                   No people linked yet. Add or discover decision-makers in the Decision-Makers tab.
                 </p>
               ) : (
-                <div className="divide-y divide-slate-800/80">
+                <div className="divide-y divide-[#EDE3E3] dark:divide-[#7A1E1E]/60">
                   {decisionMakers.map(({ person, relationship }) => (
                     <div key={relationship.id} className="py-2 flex items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-xs font-medium text-white truncate">
+                        <div className="text-xs font-medium text-[#240202] dark:text-[#FAF4F4] truncate">
                           {person.fullName}
                           {relationship.isPrimaryContact && (
-                            <span className="ml-2 text-[10px] text-amber-400">· Primary Contact</span>
+                            <span className="ml-2 text-[10px] text-amber-700 dark:text-amber-300">· Primary Contact</span>
                           )}
                         </div>
-                        <div className="text-[11px] text-slate-400 truncate">
+                        <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] truncate">
                           {[relationship.jobTitle || relationship.designation || person.decisionMakingFunction, person.email].filter(Boolean).join(' · ')}
                         </div>
                       </div>
                       {onOpenPersonProfile && (
                         <button
                           onClick={() => onOpenPersonProfile(person.id)}
-                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-indigo-300 shrink-0"
+                          className="px-2.5 py-1 rounded bg-[#F4ECEC] dark:bg-[#690303] hover:bg-[#E7D8D8] dark:hover:bg-[#7A1212] text-xs text-[#910303] dark:text-[#FF9492] shrink-0"
                         >
                           Relationship Profile
                         </button>
@@ -646,21 +646,21 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
       {/* SECTION 2: MANUAL INTERACTION & COMMUNICATION TIMELINE */}
       {section === 'timeline' && (
         <div className="space-y-4">
-          <form onSubmit={handleAddInteraction} className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+          <form onSubmit={handleAddInteraction} className="bg-[#FAF7F7] dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <h4 className="text-xs font-semibold text-white">Log Manual Interaction</h4>
-              <span className="text-[11px] text-slate-400">
+              <h4 className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4]">Log Manual Interaction</h4>
+              <span className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2]">
                 Manual record only — LEED does not automatically send emails or messages here
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Interaction Type</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Interaction Type</label>
                 <select
                   value={intType}
                   onChange={(e) => setIntType(e.target.value as CrmInteractionType)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 >
                   {CRM_INTERACTION_TYPES.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -670,20 +670,20 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Date &amp; Time</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Date &amp; Time</label>
                 <input
                   type="datetime-local"
                   value={intOccurredAt}
                   onChange={(e) => setIntOccurredAt(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Person (Optional)</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Person (Optional)</label>
                 <select
                   value={intPersonId}
                   onChange={(e) => setIntPersonId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 >
                   <option value="">Company-wide interaction</option>
                   {decisionMakers.map(({ person, relationship }) => (
@@ -697,69 +697,69 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
 
             {intType === 'custom' && (
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Custom Interaction Label</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Custom Interaction Label</label>
                 <input
                   type="text"
                   value={intCustomLabel}
                   onChange={(e) => setIntCustomLabel(e.target.value)}
                   placeholder="e.g. Trade Show Booth Conversation"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 />
               </div>
             )}
 
             <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Summary *</label>
+              <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Summary *</label>
               <input
                 type="text"
                 required
                 value={intSummary}
                 onChange={(e) => setIntSummary(e.target.value)}
                 placeholder="e.g. Introductory call discussing Q3 supply partnership"
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Outcome</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Outcome</label>
                 <input
                   type="text"
                   value={intOutcome}
                   onChange={(e) => setIntOutcome(e.target.value)}
                   placeholder="e.g. Positive — requested pricing sheet"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Next Action</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Next Action</label>
                 <input
                   type="text"
                   value={intNextAction}
                   onChange={(e) => setIntNextAction(e.target.value)}
                   placeholder="e.g. Prepare custom proposal"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Follow-Up Date</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Follow-Up Date</label>
                 <input
                   type="date"
                   value={intFollowUp}
                   onChange={(e) => setIntFollowUp(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Detailed Notes</label>
+              <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Detailed Notes</label>
               <textarea
                 rows={2}
                 value={intNotes}
                 onChange={(e) => setIntNotes(e.target.value)}
                 placeholder="Key takeaways, stakeholder concerns, pricing context..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
             </div>
 
@@ -767,7 +767,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
               <button
                 type="submit"
                 disabled={savingInt}
-                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
+                className="px-3.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
               >
                 <Plus className="w-3.5 h-3.5" />
                 {savingInt ? 'Recording...' : 'Record Interaction'}
@@ -777,11 +777,11 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
 
           {/* Timeline Filter + Chronological List */}
           <div className="flex items-center justify-between gap-2">
-            <h4 className="text-xs font-semibold text-white">Chronological Timeline ({filteredInteractions.length})</h4>
+            <h4 className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4]">Chronological Timeline ({filteredInteractions.length})</h4>
             <select
               value={intFilterType}
               onChange={(e) => setIntFilterType(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-300"
+              className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1 text-xs text-[#422F2F] dark:text-[#EFE0E0]"
             >
               <option value="all">All Types</option>
               {CRM_INTERACTION_TYPES.map((t) => (
@@ -793,20 +793,20 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
           </div>
 
           {filteredInteractions.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            <div className="p-6 text-center text-xs text-[#7A6262] dark:text-[#C59D9D] border border-dashed border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl">
               No interactions recorded yet for this filter.
             </div>
           ) : (
-            <div className="divide-y divide-slate-800 border border-slate-800 rounded-xl bg-slate-950/40">
+            <div className="divide-y divide-[#EDE3E3] dark:divide-[#7A1E1E]/60 border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl bg-[#FAF7F7] dark:bg-[#440303]/80">
               {filteredInteractions.map((item) => {
                 const linkedPerson = decisionMakers.find((d) => d.person.id === item.personId)?.person;
                 return (
                   <div key={item.id} className="p-3.5 space-y-1.5">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-xs font-semibold text-white">{item.summary}</div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          <span className="text-indigo-400 font-medium">
+                        <div className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4]">{item.summary}</div>
+                        <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">
+                          <span className="text-[#910303] dark:text-[#FF9492] font-medium">
                             {item.type === 'custom' && item.customTypeLabel
                               ? item.customTypeLabel
                               : getInteractionTypeLabel(item.type)}
@@ -820,7 +820,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                               {' · '}
                               <button
                                 onClick={() => onOpenPersonProfile?.(linkedPerson.id)}
-                                className="text-slate-200 hover:text-indigo-400 underline"
+                                className="text-[#240202] dark:text-[#FAF4F4] hover:text-[#B30303] dark:hover:text-[#FFE2E1] underline"
                               >
                                 {linkedPerson.fullName}
                               </button>
@@ -830,29 +830,29 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                       </div>
                       <button
                         onClick={() => handleDeleteInteraction(item.id)}
-                        className="p-1 text-slate-500 hover:text-rose-400"
+                        className="p-1 text-[#7A6262] dark:text-[#C59D9D] hover:text-[#B30303] dark:hover:text-[#FF9492]"
                         title="Delete interaction"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                     {item.detailedNotes && (
-                      <p className="text-xs text-slate-300 whitespace-pre-wrap">{item.detailedNotes}</p>
+                      <p className="text-xs text-[#422F2F] dark:text-[#EFE0E0] whitespace-pre-wrap">{item.detailedNotes}</p>
                     )}
                     {(item.outcome || item.nextAction || item.followUpDate) && (
-                      <div className="text-[11px] text-slate-400 pt-1 flex flex-wrap gap-x-4 gap-y-1">
+                      <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] pt-1 flex flex-wrap gap-x-4 gap-y-1">
                         {item.outcome && (
                           <span>
-                            <strong className="text-slate-300">Outcome:</strong> {item.outcome}
+                            <strong className="text-[#422F2F] dark:text-[#EFE0E0]">Outcome:</strong> {item.outcome}
                           </span>
                         )}
                         {item.nextAction && (
                           <span>
-                            <strong className="text-slate-300">Next Action:</strong> {item.nextAction}
+                            <strong className="text-[#422F2F] dark:text-[#EFE0E0]">Next Action:</strong> {item.nextAction}
                           </span>
                         )}
                         {item.followUpDate && (
-                          <span className="text-amber-400">
+                          <span className="text-amber-700 dark:text-amber-300">
                             Follow-up: {new Date(item.followUpDate).toLocaleDateString()}
                           </span>
                         )}
@@ -869,13 +869,13 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
       {/* SECTION 3: PRIVATE OWNER-ONLY NOTES */}
       {section === 'notes' && (
         <div className="space-y-4">
-          <form onSubmit={handleAddPrivateNote} className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+          <form onSubmit={handleAddPrivateNote} className="bg-[#FAF7F7] dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-white flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-amber-400" />
+              <h4 className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4] flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
                 Add Private Owner-Only Note
               </h4>
-              <span className="text-[11px] text-slate-500">Strictly owner-private · Never public</span>
+              <span className="text-[11px] text-[#7A6262] dark:text-[#C59D9D]">Strictly owner-private · Never public</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -884,12 +884,12 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 value={noteTitle}
                 onChange={(e) => setNoteTitle(e.target.value)}
                 placeholder="Optional note title..."
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
               <select
                 value={noteCategory}
                 onChange={(e) => setNoteCategory(e.target.value as CrmNoteCategory)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               >
                 {CRM_NOTE_CATEGORIES.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -902,7 +902,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 value={noteTags}
                 onChange={(e) => setNoteTags(e.target.value)}
                 placeholder="Tags (comma-separated)"
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
             </div>
 
@@ -912,23 +912,23 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
               value={noteContent}
               onChange={(e) => setNoteContent(e.target.value)}
               placeholder="Write private relationship intelligence, negotiation nuances, or reminders..."
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+              className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
             />
 
             <div className="flex items-center justify-between">
-              <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+              <label className="inline-flex items-center gap-2 text-xs text-[#422F2F] dark:text-[#EFE0E0] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={notePinned}
                   onChange={(e) => setNotePinned(e.target.checked)}
-                  className="rounded border-slate-700"
+                  className="rounded border-[#D4C2C2] dark:border-[#8C2828]"
                 />
                 Pin to top of company profile
               </label>
               <button
                 type="submit"
                 disabled={savingNote}
-                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
+                className="px-3.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
               >
                 <Plus className="w-3.5 h-3.5" />
                 {savingNote ? 'Saving...' : 'Save Private Note'}
@@ -937,18 +937,18 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
           </form>
 
           <div className="flex items-center justify-between gap-2">
-            <h4 className="text-xs font-semibold text-white">Saved Notes ({filteredNotes.length})</h4>
+            <h4 className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4]">Saved Notes ({filteredNotes.length})</h4>
             <input
               type="text"
               value={noteSearch}
               onChange={(e) => setNoteSearch(e.target.value)}
               placeholder="Filter notes by keyword or tag..."
-              className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white w-56"
+              className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1 text-xs text-[#240202] dark:text-[#FAF4F4] w-56"
             />
           </div>
 
           {filteredNotes.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            <div className="p-6 text-center text-xs text-[#7A6262] dark:text-[#C59D9D] border border-dashed border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl">
               No private notes match your filter.
             </div>
           ) : (
@@ -958,17 +958,17 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                   key={note.id}
                   className={`p-3.5 rounded-xl border ${
                     note.pinned
-                      ? 'border-amber-500/40 bg-amber-950/10'
-                      : 'border-slate-800 bg-slate-950/40'
+                      ? 'border-amber-200 dark:border-amber-500/40 bg-amber-50/70 dark:bg-amber-950/20'
+                      : 'border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#440303]/80'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-xs font-semibold text-white flex items-center gap-1.5">
-                        {note.pinned && <Pin className="w-3 h-3 text-amber-400" />}
+                      <div className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4] flex items-center gap-1.5">
+                        {note.pinned && <Pin className="w-3 h-3 text-amber-700 dark:text-amber-300" />}
                         <span>{note.title || getNoteCategoryLabel(note.category)}</span>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">
+                      <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">
                         {getNoteCategoryLabel(note.category)} · {new Date(note.updatedAt).toLocaleString()}
                         {note.tags.length > 0 && ` · #${note.tags.join(' #')}`}
                       </div>
@@ -978,7 +978,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                         <button
                           onClick={() => handleTogglePinNote(note.id, note.pinned)}
                           className={`p-1 rounded ${
-                            note.pinned ? 'text-amber-400' : 'text-slate-500 hover:text-amber-300'
+                            note.pinned ? 'text-amber-700 dark:text-amber-300' : 'text-[#7A6262] dark:text-[#C59D9D] hover:text-amber-700 dark:hover:text-amber-300'
                           }`}
                           title={note.pinned ? 'Unpin note' : 'Pin note'}
                         >
@@ -986,7 +986,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                         </button>
                         <button
                           onClick={() => handleDeleteNote(note.id)}
-                          className="p-1 text-slate-500 hover:text-rose-400"
+                          className="p-1 text-[#7A6262] dark:text-[#C59D9D] hover:text-[#B30303] dark:hover:text-[#FF9492]"
                           title="Delete note"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -994,7 +994,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                       </div>
                     )}
                   </div>
-                  <p className="text-xs text-slate-200 mt-2 whitespace-pre-wrap">{note.content}</p>
+                  <p className="text-xs text-[#240202] dark:text-[#FAF4F4] mt-2 whitespace-pre-wrap">{note.content}</p>
                 </div>
               ))}
             </div>
@@ -1005,26 +1005,26 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
       {/* SECTION 4: MULTIPLE OPPORTUNITIES PER COMPANY */}
       {section === 'opportunities' && (
         <div className="space-y-4">
-          <form onSubmit={handleCreateOpportunity} className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
-            <h4 className="text-xs font-semibold text-white">Create Opportunity for This Company</h4>
+          <form onSubmit={handleCreateOpportunity} className="bg-[#FAF7F7] dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
+            <h4 className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4]">Create Opportunity for This Company</h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="sm:col-span-2">
-                <label className="block text-[11px] text-slate-400 mb-1">Opportunity Title *</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Opportunity Title *</label>
                 <input
                   type="text"
                   required
                   value={oppTitle}
                   onChange={(e) => setOppTitle(e.target.value)}
                   placeholder="e.g. 2027 Annual Distribution Agreement"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Decision-Maker</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Decision-Maker</label>
                 <select
                   value={oppPersonId}
                   onChange={(e) => setOppPersonId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 >
                   <option value="">Company-wide</option>
                   {decisionMakers.map(({ person }) => (
@@ -1035,7 +1035,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Estimated Value</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Estimated Value</label>
                 <div className="flex gap-1.5">
                   <input
                     type="number"
@@ -1043,23 +1043,23 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                     value={oppValue}
                     onChange={(e) => setOppValue(e.target.value)}
                     placeholder="25000"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                    className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                   />
                   <input
                     type="text"
                     maxLength={3}
                     value={oppCurrency}
                     onChange={(e) => setOppCurrency(e.target.value.toUpperCase())}
-                    className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white font-mono text-center"
+                    className="w-16 bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4] font-mono text-center"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Pipeline Stage</label>
+                <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Pipeline Stage</label>
                 <select
                   value={oppStageId}
                   onChange={(e) => setOppStageId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                 >
                   {stages.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -1070,23 +1070,23 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Prob. %</label>
+                  <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Prob. %</label>
                   <input
                     type="number"
                     min="0"
                     max="100"
                     value={oppProb}
                     onChange={(e) => setOppProb(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white"
+                    className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Est. Close</label>
+                  <label className="block text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mb-1">Est. Close</label>
                   <input
                     type="date"
                     value={oppCloseDate}
                     onChange={(e) => setOppCloseDate(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white"
+                    className="w-full bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
                   />
                 </div>
               </div>
@@ -1097,21 +1097,21 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 value={oppNextAction}
                 onChange={(e) => setOppNextAction(e.target.value)}
                 placeholder="Next commercial action..."
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
               <input
                 type="text"
                 value={oppDesc}
                 onChange={(e) => setOppDesc(e.target.value)}
                 placeholder="Brief deal scope / description..."
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
             </div>
             <div className="flex justify-end">
               <button
                 type="submit"
                 disabled={savingOpp}
-                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
+                className="px-3.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
               >
                 <Plus className="w-3.5 h-3.5" />
                 {savingOpp ? 'Creating...' : 'Add Opportunity'}
@@ -1120,7 +1120,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
           </form>
 
           {opportunities.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            <div className="p-6 text-center text-xs text-[#7A6262] dark:text-[#C59D9D] border border-dashed border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl">
               No opportunities tracked for this company yet. You can track multiple parallel deals per company.
             </div>
           ) : (
@@ -1130,12 +1130,12 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 const person = decisionMakers.find((d) => d.person.id === opp.personId)?.person;
                 const isHistoryOpen = expandedOppHistoryId === opp.id;
                 return (
-                  <div key={opp.id} className="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-2.5">
+                  <div key={opp.id} className="p-4 rounded-xl border border-[#E4DADA] dark:border-[#7A1E1E] bg-[#FAF7F7] dark:bg-[#440303] space-y-2.5">
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div>
-                        <div className="text-xs font-bold text-white">{opp.title}</div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          <span className="font-mono text-emerald-400 font-semibold">
+                        <div className="text-xs font-bold text-[#240202] dark:text-[#FAF4F4]">{opp.title}</div>
+                        <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">
+                          <span className="font-mono text-emerald-700 dark:text-emerald-300 font-semibold">
                             {opp.currency} {opp.estimatedValue.toLocaleString()}
                           </span>
                           {' · '}
@@ -1150,7 +1150,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                         <select
                           value={opp.pipelineStageId}
                           onChange={(e) => handleUpdateOppStageOrStatus(opp.id, { pipelineStageId: e.target.value })}
-                          className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white"
+                          className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded px-2 py-1 text-[11px] text-[#240202] dark:text-[#FAF4F4]"
                         >
                           {stages.map((s) => (
                             <option key={s.id} value={s.id}>
@@ -1163,7 +1163,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                           onChange={(e) =>
                             handleUpdateOppStageOrStatus(opp.id, { status: e.target.value as any })
                           }
-                          className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white"
+                          className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded px-2 py-1 text-[11px] text-[#240202] dark:text-[#FAF4F4]"
                         >
                           {CRM_OPPORTUNITY_STATUSES.map((st) => (
                             <option key={st.id} value={st.id}>
@@ -1173,33 +1173,33 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                         </select>
                         <button
                           onClick={() => setExpandedOppHistoryId(isHistoryOpen ? null : opp.id)}
-                          className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 inline-flex items-center gap-1"
+                          className="px-2 py-1 rounded bg-[#F4ECEC] dark:bg-[#690303] hover:bg-[#E7D8D8] dark:hover:bg-[#7A1212] text-[11px] text-[#422F2F] dark:text-[#EFE0E0] inline-flex items-center gap-1"
                         >
                           <History className="w-3 h-3" />
                           History ({opp.stageHistory.length})
                         </button>
                         <button
                           onClick={() => handleDeleteOpp(opp.id)}
-                          className="p-1 text-slate-500 hover:text-rose-400"
+                          className="p-1 text-[#7A6262] dark:text-[#C59D9D] hover:text-[#B30303] dark:hover:text-[#FF9492]"
                           title="Delete opportunity"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
-                    {opp.description && <p className="text-xs text-slate-300">{opp.description}</p>}
+                    {opp.description && <p className="text-xs text-[#422F2F] dark:text-[#EFE0E0]">{opp.description}</p>}
                     {opp.nextAction && (
-                      <div className="text-[11px] text-slate-400">
-                        <strong className="text-slate-300">Next Action:</strong> {opp.nextAction}
+                      <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2]">
+                        <strong className="text-[#422F2F] dark:text-[#EFE0E0]">Next Action:</strong> {opp.nextAction}
                       </div>
                     )}
                     {isHistoryOpen && (
-                      <div className="pt-2 border-t border-slate-800 space-y-1">
-                        <div className="text-[11px] font-semibold text-slate-300">
+                      <div className="pt-2 border-t border-[#E4DADA] dark:border-[#7A1E1E] space-y-1">
+                        <div className="text-[11px] font-semibold text-[#422F2F] dark:text-[#EFE0E0]">
                           Stage Transition History ({stage?.name || opp.pipelineStageId})
                         </div>
                         {opp.stageHistory.map((ch) => (
-                          <div key={ch.id} className="text-[11px] text-slate-400">
+                          <div key={ch.id} className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2]">
                             {new Date(ch.changedAt).toLocaleString()} ·{' '}
                             {ch.fromStageName ? `${ch.fromStageName} → ${ch.toStageName}` : ch.toStageName}
                             {ch.reason ? ` (${ch.reason})` : ''} · by {ch.changedBy}
@@ -1218,8 +1218,8 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
       {/* SECTION 5: LINKED FOLLOW-UP TASKS */}
       {section === 'tasks' && (
         <div className="space-y-4">
-          <form onSubmit={handleCreateTask} className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
-            <h4 className="text-xs font-semibold text-white">Add Follow-Up Task for This Company</h4>
+          <form onSubmit={handleCreateTask} className="bg-[#FAF7F7] dark:bg-[#440303] border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl p-4 space-y-3">
+            <h4 className="text-xs font-semibold text-[#240202] dark:text-[#FAF4F4]">Add Follow-Up Task for This Company</h4>
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <input
                 type="text"
@@ -1227,18 +1227,18 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 value={taskTitle}
                 onChange={(e) => setTaskTitle(e.target.value)}
                 placeholder="e.g. Send revised commercial terms"
-                className="sm:col-span-2 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="sm:col-span-2 bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
               <input
                 type="date"
                 value={taskDue}
                 onChange={(e) => setTaskDue(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               />
               <select
                 value={taskPriority}
                 onChange={(e) => setTaskPriority(e.target.value as any)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               >
                 <option value="high">High Priority</option>
                 <option value="medium">Medium Priority</option>
@@ -1249,7 +1249,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
               <select
                 value={taskCategory}
                 onChange={(e) => setTaskCategory(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               >
                 {CRM_TASK_CATEGORIES.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -1260,7 +1260,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
               <select
                 value={taskPersonId}
                 onChange={(e) => setTaskPersonId(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded-lg px-2.5 py-1.5 text-xs text-[#240202] dark:text-[#FAF4F4]"
               >
                 <option value="">Company-level task</option>
                 {decisionMakers.map(({ person }) => (
@@ -1273,7 +1273,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                 <button
                   type="submit"
                   disabled={savingTask}
-                  className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
+                  className="px-3.5 py-1.5 rounded-lg bg-[#B30303] hover:bg-[#910303] text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   {savingTask ? 'Adding...' : 'Add Task'}
@@ -1283,20 +1283,20 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
           </form>
 
           {tasks.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            <div className="p-6 text-center text-xs text-[#7A6262] dark:text-[#C59D9D] border border-dashed border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl">
               No tasks linked to this company yet.
             </div>
           ) : (
-            <div className="divide-y divide-slate-800 border border-slate-800 rounded-xl bg-slate-950/40">
+            <div className="divide-y divide-[#EDE3E3] dark:divide-[#7A1E1E]/60 border border-[#E4DADA] dark:border-[#7A1E1E] rounded-xl bg-[#FAF7F7] dark:bg-[#440303]/80">
               {tasks.map((t) => {
                 const person = decisionMakers.find((d) => d.person.id === t.personId)?.person;
                 return (
                   <div key={t.id} className="p-3.5 flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className={`text-xs font-medium ${t.completed ? 'line-through text-slate-500' : 'text-white'}`}>
+                      <div className={`text-xs font-medium ${t.completed ? 'line-through text-[#7A6262] dark:text-[#C59D9D]' : 'text-[#240202] dark:text-[#FAF4F4]'}`}>
                         {t.title}
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">
+                      <div className="text-[11px] text-[#543F3F] dark:text-[#DEC2C2] mt-0.5">
                         Due {new Date(t.dueDate).toLocaleDateString()} · Priority: {t.priority} ·{' '}
                         {getTaskStatusLabel(t.status)}
                         {person && ` · ${person.fullName}`}
@@ -1305,7 +1305,7 @@ export const CompanyRelationshipPanel: React.FC<CompanyRelationshipPanelProps> =
                     <select
                       value={t.status || (t.completed ? 'completed' : 'pending')}
                       onChange={(e) => handleUpdateTaskStatus(t.id, e.target.value)}
-                      className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white shrink-0"
+                      className="bg-white dark:bg-[#240202] border border-[#D4C2C2] dark:border-[#8C2828] rounded px-2 py-1 text-[11px] text-[#240202] dark:text-[#FAF4F4] shrink-0"
                     >
                       {CRM_TASK_STATUSES.map((st) => (
                         <option key={st.id} value={st.id}>

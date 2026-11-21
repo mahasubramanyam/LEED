@@ -97,7 +97,7 @@ export const ActionProposalsPanel: React.FC<ActionProposalsPanelProps> = ({
               onClick={() => setFilter(key)}
               className={`px-2.5 py-1 rounded-md font-medium ${
                 filter === key
-                  ? 'bg-slate-900 dark:bg-blue-600 text-white'
+                  ? 'bg-[#910303] text-white'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >

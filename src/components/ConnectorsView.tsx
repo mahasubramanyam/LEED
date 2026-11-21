@@ -767,7 +767,7 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
                       type="button"
                       onClick={() => handleTestConnection(c.id)}
                       disabled={testingId === c.id}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-[#B30303] hover:bg-[#910303] text-white rounded-lg transition disabled:opacity-50"
                     >
                       {testingId === c.id ? (
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1004,7 +1004,7 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
                           <button
                             type="submit"
                             disabled={savingCred}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-[#B30303] hover:bg-[#910303] text-white rounded-lg disabled:opacity-50"
                           >
                             <Save className="w-3.5 h-3.5" />
                             <span>{savingCred ? 'Encrypting...' : 'Save Encrypted'}</span>
@@ -1091,7 +1091,7 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
                         <button
                           type="submit"
                           disabled={savingConfig}
-                          className="px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
+                          className="px-3 py-1.5 text-xs font-semibold bg-[#B30303] hover:bg-[#910303] text-white rounded-lg disabled:opacity-50"
                         >
                           {savingConfig ? 'Saving...' : 'Save Policy'}
                         </button>
@@ -1326,7 +1326,7 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
             <button
               type="submit"
               disabled={savingSettings}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition disabled:opacity-50"
+              className="px-4 py-2 bg-[#B30303] hover:bg-[#910303] text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition disabled:opacity-50"
             >
               <Save className="w-3.5 h-3.5" />
               <span>{savingSettings ? 'Saving...' : 'Save Defaults'}</span>

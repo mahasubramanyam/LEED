@@ -754,7 +754,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={() => loadPersons()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#B30303] hover:bg-[#910303] text-white whitespace-nowrap shrink-0"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingPersons ? 'animate-spin' : ''}`} />
                 <span>Apply Filters</span>
@@ -950,7 +950,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                     required
                     className="w-20 px-1.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                   />
-                  <button type="submit" className="px-2 py-1 text-[11px] bg-blue-600 text-white rounded">
+                  <button type="submit" className="px-2 py-1 text-[11px] bg-[#B30303] hover:bg-[#910303] text-white rounded">
                     Save
                   </button>
                 </form>
@@ -1153,7 +1153,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                           <button
                             type="button"
                             onClick={() => onOpenPersonProfile(p.id)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-medium transition"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#B30303] hover:bg-[#910303] text-white font-medium transition"
                           >
                             <Activity className="w-3 h-3" />
                             <span>Relationship Profile</span>
@@ -1280,7 +1280,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                           <button
                             type="submit"
                             disabled={savingPersonEdit}
-                            className="px-3 py-1 rounded bg-blue-600 text-white font-semibold text-xs disabled:opacity-50"
+                            className="px-3 py-1 rounded bg-[#B30303] hover:bg-[#910303] text-white font-semibold text-xs disabled:opacity-50"
                           >
                             {savingPersonEdit ? 'Saving...' : 'Save Changes'}
                           </button>
@@ -1362,7 +1362,7 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
                           <button
                             type="submit"
                             disabled={savingLink || !linkCompanyForm.leadId}
-                            className="px-3 py-1 rounded bg-indigo-600 text-white font-semibold text-xs disabled:opacity-50"
+                            className="px-3 py-1 rounded bg-[#B30303] hover:bg-[#910303] text-white font-semibold text-xs disabled:opacity-50"
                           >
                             {savingLink ? 'Linking...' : 'Link to Company'}
                           </button>
