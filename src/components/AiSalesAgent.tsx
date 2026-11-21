@@ -34,6 +34,7 @@ import { apiFetch } from '../utils/apiFetch.ts';
 import { IcpAndGoalsPanel } from './ai/IcpAndGoalsPanel.tsx';
 import { ActionProposalsPanel } from './ai/ActionProposalsPanel.tsx';
 import { IntelligenceModulesPanel } from './ai/IntelligenceModulesPanel.tsx';
+import { SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 type AgentTab =
   | 'chat'
@@ -300,74 +301,45 @@ export const AiSalesAgent: React.FC<AiSalesAgentProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Header & Honest Provider Status Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-            <Bot className="w-5 h-5 text-blue-600" />
-            AI Sales Agent
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Evidence-grounded sales intelligence, ICP scoring, prioritization, meeting prep, and approval-controlled CRM recommendations.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          {providerStatus && (
-            <span
-              className={
-                providerStatus.configured
-                  ? 'text-emerald-700 dark:text-emerald-400 font-medium'
-                  : 'text-amber-700 dark:text-amber-400 font-medium'
-              }
-            >
-              {providerStatus.configured
-                ? `Gemini Ready · ${providerStatus.model}`
-                : 'Deterministic Fallback Mode (No GEMINI_API_KEY)'}
-            </span>
-          )}
-          <span className="text-slate-300 dark:text-slate-700">·</span>
+      <WorkspaceToolbar
+        meta={
+          providerStatus
+            ? providerStatus.configured
+              ? `Gemini Ready · ${providerStatus.model}`
+              : 'Deterministic Fallback Mode (No GEMINI_API_KEY)'
+            : undefined
+        }
+        actions={
           <button
+            type="button"
             onClick={() => setIncludePrivateNotes((prev) => !prev)}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium whitespace-nowrap ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold whitespace-nowrap transition-colors ${
               includePrivateNotes
-                ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300'
-                : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'border-[#E09F3E]/60 bg-[#FFF9D8] dark:bg-[#232A24] text-[#540B0E] dark:text-[#FFF3B0]'
+                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
             }`}
             title="Private owner notes are excluded from AI context by default. Toggle to explicitly authorize inclusion for requests."
           >
-            {includePrivateNotes ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-            {includePrivateNotes ? 'Private Notes: Authorized' : 'Private Notes: Excluded'}
+            {includePrivateNotes ? <Unlock className="w-3.5 h-3.5 text-[#E09F3E]" /> : <Lock className="w-3.5 h-3.5" />}
+            <span>{includePrivateNotes ? 'Private Notes: Authorized' : 'Private Notes: Excluded'}</span>
           </button>
-        </div>
-      </div>
+        }
+      />
 
-      {/* Sub-Workspace Navigation */}
-      <div className="flex items-center gap-1 overflow-x-auto pb-1 border-b border-slate-200 dark:border-slate-800">
-        {tabs.map((tab) => {
+      <SegmentedTabs
+        variant="underline"
+        activeId={activeTab}
+        onChange={(id) => setActiveTab(id)}
+        items={tabs.map((tab) => {
           const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap shrink-0 border-b-2 transition-colors ${
-                active
-                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{tab.label}</span>
-              {tab.badge !== undefined && tab.badge > 0 && (
-                <span className="ml-0.5 tabular-nums text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-                  ({tab.badge})
-                </span>
-              )}
-            </button>
-          );
+          return {
+            id: tab.id,
+            label: tab.label,
+            icon: <Icon className="w-3.5 h-3.5" />,
+            count: tab.badge,
+          };
         })}
-      </div>
+      />
 
       {/* ==================== TAB 1: CONVERSATIONAL AI SALES AGENT ==================== */}
       {activeTab === 'chat' && (

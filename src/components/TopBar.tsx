@@ -1,18 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Search,
   Moon,
   Sun,
   Download,
   Upload,
-  Database,
   Menu,
-  Key,
-  Shield,
+  KeyRound,
   X,
   Bell,
 } from 'lucide-react';
 import { CanonicalLead } from '../types.ts';
+import { ActionMenu } from './ui/SunsetUI.tsx';
 
 interface TopBarProps {
   currentTab: string;
@@ -29,11 +28,27 @@ interface TopBarProps {
   onOpenReminders?: () => void;
 }
 
+const TAB_TITLES: Record<string, string> = {
+  dashboard: 'Dashboard',
+  discovery: 'Discover Leads',
+  'country-matrix': 'Registry Matrix',
+  leads: 'Companies',
+  import: 'Import Hub',
+  pipeline: 'Pipeline',
+  tasks: 'Tasks',
+  outreach: 'Outreach',
+  dedupe: 'Dedupe Hub',
+  'ai-agent': 'AI Sales Agent',
+  'bi-analytics': 'Business Intelligence',
+  workflows: 'Workflows',
+  connectors: 'Connectors',
+  'control-centre': 'Owner Control Centre',
+};
+
 export function TopBar({
   currentTab,
   theme,
   onToggleTheme,
-  isDbConnected,
   onOpenImport,
   onExportCsv,
   onOpenPasswordChange,
@@ -45,27 +60,28 @@ export function TopBar({
 }: TopBarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
-  // Tab label titles
-  const tabTitles: Record<string, { title: string; subtitle: string }> = {
-    dashboard: { title: 'Personal CRM Dashboard', subtitle: 'Relationships, follow-ups, opportunities, recent interactions, and pipeline health' },
-    discovery: { title: 'Registry Discovery', subtitle: 'Live query engine across Norway (Brreg), UK (Companies House), Australia (ABN), & OSM' },
-    leads: { title: 'Leads & Relationship Directory', subtitle: 'Canonical CRM database with segmentation, saved views, and verified provenance' },
-    import: { title: 'Import & Decision-Makers Hub', subtitle: 'CSV & Excel parsing, field normalization, audit ledger, and M:N person relationships' },
-    pipeline: { title: 'Pipeline & Opportunities', subtitle: 'Company pipeline and multi-opportunity stage progression with stage history' },
-    tasks: { title: 'Tasks & Follow-Up Manager', subtitle: 'Owner scheduled engagements, outcomes, recurrence, and reminders' },
-    outreach: { title: 'Campaigns & HITL Approval', subtitle: 'Human-in-the-Loop email outreach approval queue' },
-    dedupe: { title: 'Deduplication Hub', subtitle: 'Cross-registry deduplication, deterministic matching, and rollback ledger' },
-    'ai-agent': { title: 'AI Sales Agent', subtitle: 'Gemini-powered pitch generation, meeting briefings, and market analysis' },
-    'bi-analytics': { title: 'BI & Operational Analytics', subtitle: 'Lead intelligence, sales pipeline velocity, outreach provenance, reports & CSV export' },
-    workflows: { title: 'Workflow Automation', subtitle: 'Rule-based TRIGGER → CONDITIONS → ACTIONS engine with owner approval & safety controls' },
-    connectors: { title: 'Connectors Observability', subtitle: 'Status, rate limits, latency, and attribution telemetry' },
-    'control-centre': { title: 'Owner Control Centre', subtitle: 'Sole administrator settings, active sessions, and Neon PostgreSQL diagnostics' },
-  };
+  useEffect(() => {
+    if (!showSearchResults) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSearchResults(false);
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowSearchResults(false);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [showSearchResults]);
 
-  const currentInfo = tabTitles[currentTab] || { title: 'Lead Intelligence', subtitle: 'Production single-owner platform' };
+  const pageTitle = TAB_TITLES[currentTab] || 'LEED';
 
-  // Filtered leads for global search
   const filteredLeads = searchQuery.trim()
     ? leads
         .filter(
@@ -78,82 +94,80 @@ export function TopBar({
     : [];
 
   return (
-    <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 flex items-center justify-between gap-4 sticky top-0 z-20 shadow-2xs">
-      {/* Left: Mobile Toggle & Page Title */}
+    <header className="h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4 sticky top-0 z-20">
+      {/* Left: Mobile Menu & Crisp Page Title */}
       <div className="flex items-center gap-3 min-w-0">
         <button
+          type="button"
           onClick={onMobileMenuToggle}
-          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden shrink-0"
+          aria-label="Open navigation menu"
+          className="p-2 rounded-lg text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden shrink-0"
         >
           <Menu className="w-5 h-5" />
         </button>
-
-        <div className="truncate">
-          <h1 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white tracking-tight truncate">
-            {currentInfo.title}
-          </h1>
-          <p className="hidden md:block text-[11px] text-slate-500 dark:text-slate-400 truncate">
-            {currentInfo.subtitle}
-          </p>
-        </div>
+        <h1 className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-slate-50 tracking-tight truncate">
+          {pageTitle}
+        </h1>
       </div>
 
-      {/* Center: Global Search Bar */}
-      <div className="relative flex-1 max-w-xs sm:max-w-md hidden sm:block">
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            placeholder="Search leads, CRN, or domains..."
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setShowSearchResults(true);
+      {/* Center: Global Search */}
+      <div ref={searchRef} className="relative flex-1 max-w-sm hidden md:block">
+        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <input
+          type="text"
+          placeholder="Search companies, registration, or domain..."
+          value={searchQuery}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            setShowSearchResults(true);
+          }}
+          onFocus={() => setShowSearchResults(true)}
+          className="w-full pl-9 pr-8 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-[#E09F3E] focus:bg-white dark:focus:bg-slate-900 transition-colors"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchQuery('');
+              setShowSearchResults(false);
             }}
-            onFocus={() => setShowSearchResults(true)}
-            className="w-full pl-9 pr-8 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-slate-800 transition-all"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => {
-                setSearchQuery('');
-                setShowSearchResults(false);
-              }}
-              className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
+            aria-label="Clear search"
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
 
-        {/* Global Search Results Dropdown */}
         {showSearchResults && searchQuery.trim() && (
-          <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-lg overflow-hidden z-50">
+          <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg overflow-hidden z-50">
             {filteredLeads.length === 0 ? (
-              <div className="p-4 text-center text-xs text-slate-400">
-                No matching leads found for &ldquo;{searchQuery}&rdquo;
+              <div className="px-4 py-3 text-center text-xs text-slate-500 dark:text-slate-400">
+                No matching companies for &ldquo;{searchQuery}&rdquo;
               </div>
             ) : (
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredLeads.map((l) => (
                   <button
                     key={l.id}
+                    type="button"
                     onClick={() => {
                       onSelectLead(l);
                       setShowSearchResults(false);
                       setSearchQuery('');
                     }}
-                    className="w-full px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between text-xs transition-colors"
+                    className="w-full px-4 py-2.5 text-left hover:bg-[#FFF9D8]/60 dark:hover:bg-slate-800 flex items-center justify-between gap-3 transition-colors"
                   >
-                    <div>
-                      <span className="font-semibold text-slate-900 dark:text-white block">
+                    <div className="min-w-0">
+                      <span className="text-sm font-semibold text-slate-900 dark:text-white block truncate">
                         {l.companyName}
                       </span>
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {l.registrationNumber ? `CRN: ${l.registrationNumber} · ` : ''}{l.address?.city || l.address?.country}
+                      <span className="text-xs text-slate-500 dark:text-slate-400 block truncate">
+                        {[l.registrationNumber, l.address?.city || l.address?.country]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </span>
                     </div>
-                    <span className="text-[11px] font-mono font-medium text-blue-600 dark:text-blue-400">
+                    <span className="text-xs font-mono tabular-nums text-[#335C67] dark:text-[#E09F3E] shrink-0">
                       ${(l.opportunityValue || 0).toLocaleString()}
                     </span>
                   </button>
@@ -164,60 +178,54 @@ export function TopBar({
         )}
       </div>
 
-      {/* Right Actions */}
+      {/* Right: Concise Utility Actions */}
       <div className="flex items-center gap-2 shrink-0">
-        {/* Neon Database Live Indicator */}
-        <div className="hidden xl:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 text-[11px] font-mono text-slate-600 dark:text-slate-300">
-          <Database className="w-3.5 h-3.5 text-blue-500" />
-          <span>Neon PG 18.6</span>
-          <span className={`w-1.5 h-1.5 rounded-full ${isDbConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
-        </div>
-
-        {/* In-App Reminder Centre Trigger */}
         {onOpenReminders && (
           <button
             type="button"
             onClick={onOpenReminders}
-            title="Open In-App Reminder Centre"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors shadow-2xs"
+            title="Reminders"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 hover:bg-[#FFF9D8]/60 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors whitespace-nowrap"
           >
-            <Bell className={`w-3.5 h-3.5 ${reminderCount > 0 ? 'text-amber-500' : 'text-slate-400'}`} />
-            <span className="hidden md:inline">Reminders</span>
+            <Bell className={`w-3.5 h-3.5 ${reminderCount > 0 ? 'text-[#E09F3E]' : 'text-slate-400'}`} />
+            <span className="hidden sm:inline">Reminders</span>
             {reminderCount > 0 && (
-              <span className="font-mono text-[11px] font-bold text-amber-600 dark:text-amber-400 tabular-nums">
-                ({reminderCount})
+              <span className="font-mono tabular-nums text-[#540B0E] dark:text-[#FFF3B0]">
+                {reminderCount}
               </span>
             )}
           </button>
         )}
 
-        {/* Quick CSV Export */}
-        <button
-          onClick={onExportCsv}
-          title="Export CRM to CSV"
-          className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors shadow-2xs"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>Export</span>
-        </button>
+        <ActionMenu
+          label="Actions"
+          items={[
+            {
+              label: 'Import Leads',
+              icon: <Upload className="w-3.5 h-3.5 text-[#335C67] dark:text-[#8AB0BA]" />,
+              onClick: onOpenImport,
+            },
+            {
+              label: 'Export CSV',
+              icon: <Download className="w-3.5 h-3.5 text-[#335C67] dark:text-[#8AB0BA]" />,
+              onClick: onExportCsv,
+            },
+            {
+              label: 'Change Password',
+              icon: <KeyRound className="w-3.5 h-3.5 text-slate-500" />,
+              onClick: onOpenPasswordChange,
+            },
+          ]}
+        />
 
-        {/* Quick CSV Import */}
         <button
-          onClick={onOpenImport}
-          title="Batch Import Leads"
-          className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs"
-        >
-          <Upload className="w-3.5 h-3.5" />
-          <span>Import</span>
-        </button>
-
-        {/* Light / Dark Mode Toggle */}
-        <button
+          type="button"
           onClick={onToggleTheme}
-          title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          className="p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 hover:text-slate-900 dark:text-[#FFF3B0] dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
         >
-          {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+          {theme === 'dark' ? <Sun className="w-4 h-4 text-[#E09F3E]" /> : <Moon className="w-4 h-4" />}
         </button>
       </div>
     </header>

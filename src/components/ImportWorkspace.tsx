@@ -43,6 +43,7 @@ import {
   ROLE_TAXONOMY_SPECS,
 } from '../../shared/decisionMakerRoles.ts';
 import { CRM_RELATIONSHIP_STATUSES } from '../../shared/crmSpecs.ts';
+import { SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 interface ImportWorkspaceProps {
   existingLeads: CanonicalLead[];
@@ -483,81 +484,25 @@ export const ImportWorkspace: React.FC<ImportWorkspaceProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Workspace Header & Sub-Navigation */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <FileSpreadsheet className="w-5 h-5 text-blue-600" />
-            <span>Lead Import, Normalization &amp; Decision-Maker Processing</span>
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Parse CSV &amp; Excel workbooks, normalize international entities &amp; contacts, inspect duplicates before saving, and manage M:N company-person relationships.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-1.5 text-xs">
-          {[
-            { id: 'wizard', label: 'Import Wizard', icon: FileSpreadsheet },
-            { id: 'batches', label: 'Batch Audit Ledger', icon: History },
-            { id: 'templates', label: 'Mapping Templates', icon: BookmarkCheck },
-            { id: 'persons', label: 'Decision-Makers', icon: Users },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeSubTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveSubTab(tab.id as any)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium border transition whitespace-nowrap shrink-0 ${
-                  active
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Phase 12: Portfolio Data Quality & Freshness Health Strip */}
-      {qualitySummary && (
-        <div className="bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-200">
-            <ShieldCheck className="w-4 h-4 text-blue-600" />
-            <span>CRM Data Quality &amp; Freshness Intelligence</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-4 text-slate-600 dark:text-slate-300">
-            <span>
-              Avg Company Quality:{' '}
-              <strong className="font-mono text-slate-900 dark:text-white">
-                {qualitySummary.averageCompanyQuality}/100
-              </strong>
-            </span>
-            <span>
-              Avg Decision-Maker Quality:{' '}
-              <strong className="font-mono text-slate-900 dark:text-white">
-                {qualitySummary.averagePersonQuality}/100
-              </strong>
-            </span>
-            <span>
-              Stale / Re-Verify Queue:{' '}
-              <strong className="font-mono text-amber-600 dark:text-amber-400">
-                {qualitySummary.staleOrReverifyCompaniesCount}
-              </strong>
-            </span>
-            <span>
-              Open Source Conflicts:{' '}
-              <strong className="font-mono text-rose-600 dark:text-rose-400">
-                {qualitySummary.openConflictsCount}
-              </strong>
-            </span>
-          </div>
-        </div>
-      )}
+      <WorkspaceToolbar
+        meta={
+          qualitySummary
+            ? `Quality: ${qualitySummary.averageCompanyQuality}/100 companies · ${qualitySummary.averagePersonQuality}/100 contacts · ${qualitySummary.staleOrReverifyCompaniesCount} stale · ${qualitySummary.openConflictsCount} conflicts`
+            : undefined
+        }
+      >
+        <SegmentedTabs
+          variant="segmented"
+          activeId={activeSubTab}
+          onChange={(id) => setActiveSubTab(id as any)}
+          items={[
+            { id: 'wizard', label: 'Import Wizard', icon: <FileSpreadsheet className="w-3.5 h-3.5" /> },
+            { id: 'batches', label: 'Batch Ledger', icon: <History className="w-3.5 h-3.5" /> },
+            { id: 'templates', label: 'Templates', icon: <BookmarkCheck className="w-3.5 h-3.5" /> },
+            { id: 'persons', label: 'Decision-Makers', icon: <Users className="w-3.5 h-3.5" /> },
+          ]}
+        />
+      </WorkspaceToolbar>
 
       {/* 1. WIZARD */}
       {activeSubTab === 'wizard' && (

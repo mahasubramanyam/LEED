@@ -56,6 +56,7 @@ import { GeoSelector } from './GeoSelector.tsx';
 import { LeadEnrichmentPanel } from './LeadEnrichmentPanel.tsx';
 import { CompanyRelationshipPanel } from './CompanyRelationshipPanel.tsx';
 import { apiFetch } from '../utils/apiFetch.ts';
+import { ActionMenu } from './ui/SunsetUI.tsx';
 import {
   EXPANDED_RELATIONSHIP_TYPES,
   ROLE_TAXONOMY_SPECS,
@@ -935,88 +936,78 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Drawer Header */}
-        <div className="p-5 border-b border-slate-800 bg-slate-950/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xl" title={lead.address?.country || lead.address?.countryCode}>
+        <div className="px-5 py-4 border-b border-slate-800 bg-slate-950/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-lg shrink-0" title={lead.address?.country || lead.address?.countryCode}>
                 {getCountryFlag(lead.address?.countryCode)}
               </span>
-              <h2 className="text-lg font-bold text-white tracking-tight">{lead.companyName}</h2>
-              {lead.address?.countryCode && (
-                <span className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700 rounded uppercase">
-                  {lead.address.countryCode}
-                </span>
-              )}
-              {lead.registrationNumber && (
-                <span className="px-2 py-0.5 text-xs font-mono bg-cyan-950/60 text-cyan-400 border border-cyan-800/60 rounded">
-                  {lead.registrationType}: {lead.registrationNumber}
-                </span>
-              )}
+              <h2 className="text-xl font-bold text-white tracking-tight truncate">{lead.companyName}</h2>
             </div>
 
-            <p className="text-xs text-slate-400">
-              {lead.legalName && lead.legalName !== lead.companyName && (
-                <span className="text-slate-300 font-medium mr-2">Legal: {lead.legalName} •</span>
-              )}
-              {lead.industry} • {lead.category}
+            <p className="text-xs text-slate-400 truncate">
+              {[
+                lead.address?.countryCode,
+                lead.registrationNumber ? `${lead.registrationType || 'ID'} ${lead.registrationNumber}` : null,
+                lead.legalName && lead.legalName !== lead.companyName ? `Legal: ${lead.legalName}` : null,
+                lead.industry,
+                lead.category,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {onOpenAiAgent && (
-              <>
-                <button
-                  onClick={() => onOpenAiAgent({ tab: 'company_intel', leadId: lead.id })}
-                  className="px-2.5 py-1 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-500 text-white inline-flex items-center gap-1 whitespace-nowrap"
-                  title="Open Company Sales Intelligence in AI Sales Agent"
-                >
-                  <Bot className="w-3.5 h-3.5" />
-                  <span>AI Intel</span>
-                </button>
-                <button
-                  onClick={() => onOpenAiAgent({ tab: 'meeting_prep', leadId: lead.id })}
-                  className="px-2.5 py-1 text-xs font-medium rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800 whitespace-nowrap"
-                  title="Prepare Meeting Brief"
-                >
-                  Prep Meeting
-                </button>
-                <button
-                  onClick={() => onOpenAiAgent({ tab: 'drafting', leadId: lead.id })}
-                  className="px-2.5 py-1 text-xs font-medium rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800 whitespace-nowrap"
-                  title="Draft Sales Message"
-                >
-                  Draft
-                </button>
-              </>
-            )}
-            {onOpenOutreach && (
-              <button
-                onClick={() => onOpenOutreach({ leadId: lead.id, tab: 'campaigns' })}
-                className="px-2.5 py-1 text-xs font-medium rounded-lg border border-indigo-500/40 bg-indigo-500/15 text-indigo-300 hover:bg-indigo-500/25 inline-flex items-center gap-1 whitespace-nowrap"
-                title="Enroll or manage in Outreach & Follow-Up Automation"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Outreach</span>
-              </button>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <span
+              className={`text-xs font-semibold tabular-nums flex items-center gap-1 ${
+                lead.confidenceScore >= 80 ? 'text-[#8AB0BA]' : 'text-[#E09F3E]'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{lead.confidenceScore}%</span>
+            </span>
+
+            {(onOpenAiAgent || onOpenOutreach) && (
+              <ActionMenu
+                label="Engage"
+                items={[
+                  ...(onOpenAiAgent
+                    ? [
+                        {
+                          label: 'AI Company Intel',
+                          icon: <Bot className="w-3.5 h-3.5 text-slate-400" />,
+                          onClick: () => onOpenAiAgent({ tab: 'company_intel', leadId: lead.id }),
+                        },
+                        {
+                          label: 'Prepare Meeting Brief',
+                          icon: <Calendar className="w-3.5 h-3.5 text-slate-400" />,
+                          onClick: () => onOpenAiAgent({ tab: 'meeting_prep', leadId: lead.id }),
+                        },
+                        {
+                          label: 'Draft Sales Message',
+                          icon: <Mail className="w-3.5 h-3.5 text-slate-400" />,
+                          onClick: () => onOpenAiAgent({ tab: 'drafting', leadId: lead.id }),
+                        },
+                      ]
+                    : []),
+                  ...(onOpenOutreach
+                    ? [
+                        {
+                          label: 'Enroll in Outreach',
+                          icon: <Send className="w-3.5 h-3.5 text-slate-400" />,
+                          onClick: () => onOpenOutreach({ leadId: lead.id, tab: 'campaigns' }),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
             )}
 
-            {/* Confidence Score Pill */}
-            <div className="text-right">
-              <span
-                className={`px-2.5 py-1 text-xs font-bold rounded flex items-center gap-1.5 ${
-                  lead.confidenceScore >= 80
-                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                }`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>{lead.confidenceScore}% Confidence</span>
-              </span>
-            </div>
-
-            {/* Close Button */}
             <button
+              type="button"
               onClick={onClose}
+              aria-label="Close company details"
               className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
             >
               <X className="w-5 h-5" />

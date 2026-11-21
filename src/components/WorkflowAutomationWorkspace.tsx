@@ -38,6 +38,7 @@ import {
 } from '../../shared/biWorkflowSpecs.ts';
 import type { CanonicalLead, PipelineStage } from '../types.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
+import { ActionMenu, SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 type WorkflowSubTab = 'workflows' | 'history' | 'approvals';
 
@@ -378,97 +379,65 @@ export const WorkflowAutomationWorkspace: React.FC<WorkflowAutomationWorkspacePr
   );
 
   return (
-    <div className="space-y-6">
-      {/* Header & Sub-Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white tracking-tight">
-            Workflow Automation Engine
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Rule-based TRIGGER &rarr; CONDITIONS &rarr; ACTIONS automation with owner approval gates, suppression compliance &amp; idempotency
-          </p>
-        </div>
+    <div className="space-y-5">
+      <WorkspaceToolbar
+        actions={
+          <>
+            <ActionMenu
+              label="Actions"
+              items={[
+                {
+                  label: 'Run Timer Sweep',
+                  icon: <Clock className="w-3.5 h-3.5 text-slate-400" />,
+                  onClick: handleEvaluateTimers,
+                  disabled: busy,
+                },
+                {
+                  label: 'Refresh',
+                  icon: <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${loading ? 'animate-spin' : ''}`} />,
+                  onClick: fetchWorkspace,
+                  disabled: loading,
+                },
+              ]}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                resetBuilder();
+                setShowBuilder(true);
+                setSubTab('workflows');
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-[#335C67] hover:bg-[#274952] rounded-lg transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Workflow</span>
+            </button>
+          </>
+        }
+      >
+        <SegmentedTabs
+          variant="segmented"
+          activeId={subTab}
+          onChange={(id) => setSubTab(id)}
+          items={[
+            { id: 'workflows' as WorkflowSubTab, label: 'Workflows', count: workspace?.stats.totalWorkflows },
+            { id: 'history' as WorkflowSubTab, label: 'Run History', count: workspace?.stats.totalExecutions },
+            {
+              id: 'approvals' as WorkflowSubTab,
+              label: 'Approvals & Alerts',
+              count: pendingApprovals.length + (workspace?.stats.unreadNotifications || 0),
+            },
+          ]}
+        />
+      </WorkspaceToolbar>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-0.5">
-            {[
-              { id: 'workflows', label: 'Workflows', count: workspace?.stats.totalWorkflows },
-              { id: 'history', label: 'Execution History', count: workspace?.stats.totalExecutions },
-              {
-                id: 'approvals',
-                label: 'Approvals & Alerts',
-                count: pendingApprovals.length + (workspace?.stats.unreadNotifications || 0),
-              },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setSubTab(tab.id as WorkflowSubTab)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  subTab === tab.id
-                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <span>{tab.label}</span>
-                {tab.count !== undefined && tab.count > 0 && (
-                  <span className="ml-1.5 font-mono tabular-nums text-[11px] text-slate-400">({tab.count})</span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={handleEvaluateTimers}
-            disabled={busy}
-            title="Run on-demand evaluation for stage-duration and overdue-task workflows"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800"
-          >
-            <Clock className="w-3.5 h-3.5" />
-            <span>Run Timer Sweep</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              resetBuilder();
-              setShowBuilder(true);
-              setSubTab('workflows');
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New Workflow</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Safety & Scheduling Policy Banner */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
-        <div className="flex items-start gap-2">
-          <ShieldAlert className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-          <div>
-            <span className="font-semibold text-slate-900 dark:text-white">Workflow Safety Policy:</span> Automatic
-            external email/LinkedIn sending, destructive CRM deletes, and contact harvesting are unconditionally blocked.
-            Sensitive field updates and enrichment requests require explicit owner approval.
-            {workspace?.schedulingDisclosure && (
-              <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                {workspace.schedulingDisclosure}
-              </span>
-            )}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={fetchWorkspace}
-          disabled={loading}
-          className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Refresh</span>
-        </button>
+      {/* Concise Safety Disclosure */}
+      <div className="flex flex-wrap items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/60 text-xs text-slate-600 dark:text-slate-400">
+        <ShieldAlert className="w-3.5 h-3.5 text-[#335C67] dark:text-[#8AB0BA] shrink-0" />
+        <span>
+          Owner approval required for sensitive updates; automatic external sending and destructive deletes are blocked.
+          {workspace?.schedulingDisclosure ? ` ${workspace.schedulingDisclosure}` : ''}
+        </span>
       </div>
 
       {notice && (

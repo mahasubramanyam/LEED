@@ -1,15 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  CheckSquare,
   Plus,
   Calendar,
-  Building2,
   Trash2,
   Check,
-  User,
   Repeat,
-  Bell,
-  Info,
   Save,
   Bot,
 } from 'lucide-react';
@@ -18,9 +13,9 @@ import {
   CRM_RECURRENCE_FREQUENCIES,
   CRM_TASK_CATEGORIES,
   CRM_TASK_STATUSES,
-  getTaskStatusLabel,
 } from '../../shared/crmSpecs.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
+import { EmptyState, SegmentedTabs, SurfaceCard, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 interface TasksViewProps {
   tasks: LeadTask[];
@@ -36,14 +31,14 @@ interface TasksViewProps {
 }
 
 type TaskFilterTab =
+  | 'all'
   | 'overdue'
   | 'today'
   | 'upcoming'
   | 'high_priority'
   | 'follow_ups'
   | 'missing_outcome'
-  | 'completed'
-  | 'all';
+  | 'completed';
 
 export const TasksView: React.FC<TasksViewProps> = ({
   tasks,
@@ -54,7 +49,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
   onDeleteTask,
   onSelectLead,
   onOpenPersonProfile,
-  onOpenReminderCenter,
   onOpenAiAgent,
 }) => {
   const [filter, setFilter] = useState<TaskFilterTab>('all');
@@ -62,7 +56,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [persons, setPersons] = useState<PersonRecord[]>([]);
   const [opportunities, setOpportunities] = useState<CrmOpportunity[]>([]);
 
-  // Composer fields
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState(() => new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10));
@@ -74,7 +67,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [selectedOppId, setSelectedOppId] = useState('');
   const [recurrenceFreq, setRecurrenceFreq] = useState<'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly'>('none');
 
-  // Inline outcome editing
   const [editingOutcomeId, setEditingOutcomeId] = useState<string | null>(null);
   const [outcomeDraft, setOutcomeDraft] = useState('');
 
@@ -200,249 +192,239 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
   const leadOpps = opportunities.filter((o) => !selectedLeadId || o.leadId === selectedLeadId);
 
+  const inputClass =
+    'w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-[#E09F3E]';
+
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-base font-bold text-white flex items-center gap-2">
-            <CheckSquare className="w-5 h-5 text-indigo-400" />
-            Task &amp; Follow-Up Manager
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Track company, decision-maker, and opportunity follow-ups with priorities, recurrence, outcomes, and in-app reminders.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {onOpenAiAgent && (
+    <div className="space-y-5">
+      {/* Streamlined Action Toolbar */}
+      <WorkspaceToolbar
+        meta={`${tasks.length} total · ${counts.overdue} overdue · ${counts.today} due today`}
+        actions={
+          <>
+            {onOpenAiAgent && (
+              <button
+                type="button"
+                onClick={() => onOpenAiAgent({ tab: 'briefing' })}
+                className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <Bot className="w-3.5 h-3.5 text-[#335C67] dark:text-[#E09F3E]" />
+                <span>AI Briefing</span>
+              </button>
+            )}
             <button
-              onClick={() => onOpenAiAgent({ tab: 'briefing' })}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap"
+              type="button"
+              onClick={() => setIsCreating((v) => !v)}
+              className="px-3.5 py-1.5 bg-[#335C67] hover:bg-[#25454E] text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
             >
-              <Bot className="w-3.5 h-3.5" />
-              AI Follow-Up Briefing
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Task</span>
             </button>
-          )}
-          {onOpenReminderCenter && (
-            <button
-              onClick={onOpenReminderCenter}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg inline-flex items-center gap-1.5"
-            >
-              <Bell className="w-3.5 h-3.5 text-amber-400" />
-              Reminder Centre
-            </button>
-          )}
-          <button
-            onClick={() => setIsCreating(!isCreating)}
-            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New Task / Follow-Up</span>
-          </button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
-      {/* Honest Reminder / Manual Follow-Up Notice */}
-      <div className="px-4 py-2.5 rounded-lg border border-slate-800 bg-slate-950/60 text-[11px] text-slate-400 flex items-center gap-2">
-        <Info className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-        <span>
-          Follow-up tasks and recurring schedules are tracked strictly in-app for the owner — LEED never sends automated emails or messages without your explicit action.
-        </span>
-      </div>
-
-      {/* 8 Filter Views */}
-      <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 p-1.5 rounded-xl border border-slate-800 text-xs">
-        {[
-          { id: 'all', label: `All (${tasks.length})` },
-          { id: 'overdue', label: `Overdue (${counts.overdue})` },
-          { id: 'today', label: `Today (${counts.today})` },
-          { id: 'upcoming', label: `Upcoming (${counts.upcoming})` },
-          { id: 'high_priority', label: `High Priority (${counts.high})` },
-          { id: 'follow_ups', label: `Follow-Ups Due (${counts.followUps})` },
-          { id: 'missing_outcome', label: `Missing Outcome (${counts.missingOutcome})` },
-          { id: 'completed', label: `Completed (${counts.completed})` },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setFilter(tab.id as TaskFilterTab)}
-            className={`px-3 py-1.5 rounded-lg font-medium transition ${
-              filter === tab.id
-                ? 'bg-indigo-600 text-white'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* Filter Tabs */}
+      <SegmentedTabs
+        activeId={filter}
+        onChange={setFilter}
+        items={[
+          { id: 'all', label: 'All', count: tasks.length },
+          { id: 'overdue', label: 'Overdue', count: counts.overdue },
+          { id: 'today', label: 'Today', count: counts.today },
+          { id: 'upcoming', label: 'Upcoming', count: counts.upcoming },
+          { id: 'high_priority', label: 'High Priority', count: counts.high },
+          { id: 'follow_ups', label: 'Follow-Ups', count: counts.followUps },
+          { id: 'missing_outcome', label: 'Needs Outcome', count: counts.missingOutcome },
+          { id: 'completed', label: 'Completed', count: counts.completed },
+        ]}
+      />
 
       {/* New Task Composer */}
       {isCreating && (
-        <form onSubmit={handleCreate} className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3.5">
-          <h3 className="text-xs font-bold text-white">Create Task or Recurring Follow-Up</h3>
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div className="md:col-span-6">
-              <label className="block text-[11px] text-slate-400 mb-1">Task Title *</label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Call managing director to review proposal terms"
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
-                required
-              />
+        <SurfaceCard>
+          <form onSubmit={handleCreate} className="space-y-4">
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-50">
+              New Task
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+              <div className="md:col-span-6">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Title *
+                </label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Call managing director to review proposal"
+                  className={inputClass}
+                  required
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Category
+                </label>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value as any)}
+                  className={inputClass}
+                >
+                  {CRM_TASK_CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Priority
+                </label>
+                <select
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value as any)}
+                  className={inputClass}
+                >
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-4">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Company
+                </label>
+                <select
+                  value={selectedLeadId}
+                  onChange={(e) => setSelectedLeadId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">None</option>
+                  {leads.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.companyName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-4">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Contact
+                </label>
+                <select
+                  value={selectedPersonId}
+                  onChange={(e) => setSelectedPersonId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">None</option>
+                  {persons.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-4">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Opportunity
+                </label>
+                <select
+                  value={selectedOppId}
+                  onChange={(e) => setSelectedOppId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">None</option>
+                  {leadOpps.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="md:col-span-4">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Due Date
+                </label>
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div className="md:col-span-4">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Reminder Date
+                </label>
+                <input
+                  type="date"
+                  value={reminderDate}
+                  onChange={(e) => setReminderDate(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div className="md:col-span-4">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Recurrence
+                </label>
+                <select
+                  value={recurrenceFreq}
+                  onChange={(e) => setRecurrenceFreq(e.target.value as any)}
+                  className={inputClass}
+                >
+                  {CRM_RECURRENCE_FREQUENCIES.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="md:col-span-12">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  rows={2}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Context or preparation notes..."
+                  className={inputClass}
+                />
+              </div>
             </div>
 
-            <div className="md:col-span-3">
-              <label className="block text-[11px] text-slate-400 mb-1">Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as any)}
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCreating(false)}
+                className="px-3.5 py-1.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold"
               >
-                {CRM_TASK_CATEGORIES.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-3">
-              <label className="block text-[11px] text-slate-400 mb-1">Priority</label>
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as any)}
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 bg-[#335C67] hover:bg-[#25454E] text-white text-xs font-semibold rounded-lg"
               >
-                <option value="high">High Priority</option>
-                <option value="medium">Medium Priority</option>
-                <option value="low">Low Priority</option>
-              </select>
+                Save Task
+              </button>
             </div>
-
-            <div className="md:col-span-4">
-              <label className="block text-[11px] text-slate-400 mb-1">Company</label>
-              <select
-                value={selectedLeadId}
-                onChange={(e) => setSelectedLeadId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
-              >
-                <option value="">No company linked</option>
-                {leads.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.companyName}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-4">
-              <label className="block text-[11px] text-slate-400 mb-1">Decision-Maker (Optional)</label>
-              <select
-                value={selectedPersonId}
-                onChange={(e) => setSelectedPersonId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
-              >
-                <option value="">No person linked</option>
-                {persons.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.fullName} {p.decisionMakingFunction ? `(${p.decisionMakingFunction})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-4">
-              <label className="block text-[11px] text-slate-400 mb-1">Opportunity (Optional)</label>
-              <select
-                value={selectedOppId}
-                onChange={(e) => setSelectedOppId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
-              >
-                <option value="">No opportunity linked</option>
-                {leadOpps.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-4">
-              <label className="block text-[11px] text-slate-400 mb-1">Due Date</label>
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
-              />
-            </div>
-
-            <div className="md:col-span-4">
-              <label className="block text-[11px] text-slate-400 mb-1">In-App Reminder Date (Optional)</label>
-              <input
-                type="date"
-                value={reminderDate}
-                onChange={(e) => setReminderDate(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
-              />
-            </div>
-
-            <div className="md:col-span-4">
-              <label className="block text-[11px] text-slate-400 mb-1">Recurrence</label>
-              <select
-                value={recurrenceFreq}
-                onChange={(e) => setRecurrenceFreq(e.target.value as any)}
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
-              >
-                {CRM_RECURRENCE_FREQUENCIES.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-12">
-              <label className="block text-[11px] text-slate-400 mb-1">Description / Context</label>
-              <textarea
-                rows={2}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Preparation notes, questions to ask, or linked context..."
-                className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded-lg p-2"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => setIsCreating(false)}
-              className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-lg text-xs"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg"
-            >
-              Save Task
-            </button>
-          </div>
-        </form>
+          </form>
+        </SurfaceCard>
       )}
 
-      {/* Tasks List */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-800/80">
-        {filtered.length === 0 ? (
-          <div className="p-8 text-center text-slate-500 text-xs">
-            No tasks match this filter view.
-          </div>
-        ) : (
-          filtered.map((task) => {
+      {/* Task List */}
+      {filtered.length === 0 ? (
+        <EmptyState
+          title="No matching tasks"
+          description="Create a task or choose another filter."
+        />
+      ) : (
+        <SurfaceCard padding="none" className="overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
+          {filtered.map((task) => {
             const lead = leads.find((l) => l.id === task.leadId);
             const person = persons.find((p) => p.id === task.personId);
             const opp = opportunities.find((o) => o.id === task.opportunityId);
@@ -452,18 +434,20 @@ export const TasksView: React.FC<TasksViewProps> = ({
             return (
               <div
                 key={task.id}
-                className={`p-4 space-y-2 hover:bg-slate-800/30 transition ${
-                  task.completed ? 'opacity-70 bg-slate-950/30' : ''
+                className={`px-5 py-3.5 hover:bg-[#FFF9D8]/40 dark:hover:bg-slate-800/40 transition-colors ${
+                  task.completed ? 'opacity-65' : ''
                 }`}
               >
                 <div className="flex items-start justify-between gap-4 flex-wrap">
                   <div className="flex items-start gap-3 min-w-0 flex-1">
                     <button
+                      type="button"
                       onClick={() => handleStatusChange(task, task.completed ? 'pending' : 'completed')}
-                      className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center transition shrink-0 ${
+                      aria-label={task.completed ? 'Mark pending' : 'Mark completed'}
+                      className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center transition-colors shrink-0 ${
                         task.completed
-                          ? 'bg-emerald-600 border-emerald-500 text-white'
-                          : 'border-slate-700 hover:border-indigo-500'
+                          ? 'bg-[#335C67] border-[#335C67] text-white'
+                          : 'border-slate-300 dark:border-slate-600 hover:border-[#E09F3E]'
                       }`}
                     >
                       {task.completed && <Check className="w-3.5 h-3.5" />}
@@ -471,69 +455,74 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
                     <div className="min-w-0 flex-1">
                       <div
-                        className={`text-xs font-semibold ${
-                          task.completed ? 'line-through text-slate-500' : 'text-white'
+                        className={`text-sm font-semibold ${
+                          task.completed
+                            ? 'line-through text-slate-400'
+                            : 'text-slate-900 dark:text-slate-100'
                         }`}
                       >
                         {task.title}
                       </div>
-
                       {task.description && (
-                        <p className="text-[11px] text-slate-400 mt-0.5">{task.description}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          {task.description}
+                        </p>
                       )}
 
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400 mt-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400 mt-1">
                         {lead && (
                           <button
+                            type="button"
                             onClick={() => onSelectLead(lead)}
-                            className="hover:text-indigo-400 inline-flex items-center gap-1 text-slate-200 font-medium"
+                            className="text-[#335C67] dark:text-[#8AB0BA] font-semibold hover:underline"
                           >
-                            <Building2 className="w-3 h-3 text-slate-500" />
-                            <span>{lead.companyName}</span>
+                            {lead.companyName}
                           </button>
                         )}
                         {person && (
                           <>
-                            <span>·</span>
+                            {lead && <span>·</span>}
                             <button
+                              type="button"
                               onClick={() => onOpenPersonProfile?.(person.id)}
-                              className="hover:text-emerald-400 inline-flex items-center gap-1 text-slate-300"
+                              className="hover:underline text-slate-700 dark:text-slate-300"
                             >
-                              <User className="w-3 h-3 text-slate-500" />
-                              <span>{person.fullName}</span>
+                              {person.fullName}
                             </button>
                           </>
                         )}
                         {opp && (
                           <>
                             <span>·</span>
-                            <span className="text-indigo-300">Deal: {opp.title}</span>
+                            <span>{opp.title}</span>
                           </>
                         )}
-                        <span>·</span>
-                        <span className={`inline-flex items-center gap-1 ${isOverdue ? 'text-rose-400 font-semibold' : ''}`}>
+                        {(lead || person || opp) && <span>·</span>}
+                        <span
+                          className={`inline-flex items-center gap-1 tabular-nums ${
+                            isOverdue ? 'text-[#9E2A2B] dark:text-[#E09D9E] font-semibold' : ''
+                          }`}
+                        >
                           <Calendar className="w-3 h-3" />
-                          Due {new Date(task.dueDate).toLocaleDateString()}
+                          {new Date(task.dueDate).toLocaleDateString()}
                           {isOverdue ? ' (Overdue)' : ''}
                         </span>
-                        <span>·</span>
-                        <span className="capitalize">{(task.category || 'follow_up').replace(/_/g, ' ')}</span>
                         <span>·</span>
                         <span
                           className={
                             task.priority === 'high'
-                              ? 'text-rose-400 font-semibold'
+                              ? 'text-[#9E2A2B] dark:text-[#E09D9E] font-semibold'
                               : task.priority === 'medium'
-                                ? 'text-amber-400'
-                                : 'text-slate-400'
+                              ? 'text-[#956219] dark:text-[#E09F3E]'
+                              : ''
                           }
                         >
-                          {task.priority} priority
+                          {task.priority}
                         </span>
                         {task.recurrence && task.recurrence.frequency !== 'none' && (
                           <>
                             <span>·</span>
-                            <span className="inline-flex items-center gap-1 text-indigo-400">
+                            <span className="inline-flex items-center gap-1 text-[#335C67] dark:text-[#8AB0BA]">
                               <Repeat className="w-3 h-3" />
                               {task.recurrence.frequency}
                             </span>
@@ -542,7 +531,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       </div>
 
                       {task.outcome && editingOutcomeId !== task.id && (
-                        <div className="text-[11px] text-emerald-400 mt-1">
+                        <div className="text-xs text-[#335C67] dark:text-[#B0CFC9] mt-1">
                           Outcome: {task.outcome}
                         </div>
                       )}
@@ -553,18 +542,20 @@ export const TasksView: React.FC<TasksViewProps> = ({
                             type="text"
                             value={outcomeDraft}
                             onChange={(e) => setOutcomeDraft(e.target.value)}
-                            placeholder="Record task / follow-up outcome..."
-                            className="flex-1 bg-slate-950 border border-slate-700 rounded px-2.5 py-1 text-xs text-white"
+                            placeholder="Record outcome..."
+                            className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1 text-xs text-slate-900 dark:text-white"
                           />
                           <button
+                            type="button"
                             onClick={() => handleSaveOutcome(task)}
-                            className="px-2.5 py-1 bg-indigo-600 text-white rounded text-xs inline-flex items-center gap-1"
+                            className="px-2.5 py-1 bg-[#335C67] text-white rounded-lg text-xs inline-flex items-center gap-1"
                           >
                             <Save className="w-3 h-3" /> Save
                           </button>
                           <button
+                            type="button"
                             onClick={() => setEditingOutcomeId(null)}
-                            className="px-2 py-1 bg-slate-800 text-slate-300 rounded text-xs"
+                            className="px-2.5 py-1 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-xs"
                           >
                             Cancel
                           </button>
@@ -577,7 +568,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                     <select
                       value={currentStatus}
                       onChange={(e) => handleStatusChange(task, e.target.value as any)}
-                      className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200"
+                      className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-700 dark:text-slate-200"
                     >
                       {CRM_TASK_STATUSES.map((st) => (
                         <option key={st.id} value={st.id}>
@@ -588,30 +579,33 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
                     {onUpdateTask && (
                       <button
+                        type="button"
                         onClick={() => {
                           setEditingOutcomeId(task.id);
                           setOutcomeDraft(task.outcome || '');
                         }}
-                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px]"
+                        className="px-2.5 py-1 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-medium"
                       >
-                        {task.outcome ? 'Edit Outcome' : 'Log Outcome'}
+                        {task.outcome ? 'Edit Outcome' : 'Outcome'}
                       </button>
                     )}
 
                     <button
+                      type="button"
                       onClick={() => onDeleteTask(task.id)}
-                      className="p-1 text-slate-500 hover:text-rose-400 transition"
+                      className="p-1.5 text-slate-400 hover:text-[#9E2A2B] transition-colors"
                       title="Delete task"
+                      aria-label="Delete task"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </SurfaceCard>
+      )}
     </div>
   );
 };

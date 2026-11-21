@@ -33,6 +33,7 @@ import {
 } from '../../shared/biWorkflowSpecs.ts';
 import type { CanonicalLead, PipelineStage } from '../types.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
+import { NoticeBanner, SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 type BiSubTab = 'dashboard' | 'advanced' | 'reports' | 'ai_insights';
 
@@ -78,6 +79,7 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
 }) => {
   const [subTab, setSubTab] = useState<BiSubTab>('dashboard');
   const [filters, setFilters] = useState<BiAnalyticsFilter>({});
+  const [showFilters, setShowFilters] = useState<boolean>(false);
   const [dashboard, setDashboard] = useState<BiDashboardResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -294,169 +296,151 @@ export const BiAnalyticsWorkspace: React.FC<BiAnalyticsWorkspaceProps> = ({
     if (found) onSelectLead(found);
   };
 
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+
   return (
-    <div className="space-y-6">
-      {/* Header & Sub-Navigation */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white tracking-tight">
-            Business Intelligence &amp; Operational Reporting
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Live aggregates calculated strictly from LEED CRM, Pipeline, Enrichment, Outreach &amp; Workflow records
-            {dashboard ? ` · Updated ${new Date(dashboard.generatedAt).toLocaleTimeString()}` : ''}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-0.5">
-            {[
-              { id: 'dashboard', label: 'BI Dashboard', icon: BarChart3 },
-              { id: 'advanced', label: 'Advanced Analytics', icon: Layers },
-              { id: 'reports', label: 'Reports & CSV', icon: FileSpreadsheet },
-              { id: 'ai_insights', label: 'AI Briefings', icon: Sparkles },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const active = subTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setSubTab(tab.id as BiSubTab)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                    active
-                      ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-2xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => fetchAnalytics(filters)}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Global Analytics Filter Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 mr-1 pb-2">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span>Filters</span>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">From Date</label>
-            <input
-              type="date"
-              value={filters.dateFrom || ''}
-              onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value || undefined }))}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">To Date</label>
-            <input
-              type="date"
-              value={filters.dateTo || ''}
-              onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value || undefined }))}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1 min-w-[120px]">
-            <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Country</label>
-            <select
-              value={filters.country || ''}
-              onChange={(e) => setFilters((f) => ({ ...f, country: e.target.value || undefined }))}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-            >
-              <option value="">All Countries</option>
-              {filterOptions.countries.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1 min-w-[140px]">
-            <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Industry</label>
-            <select
-              value={filters.industry || ''}
-              onChange={(e) => setFilters((f) => ({ ...f, industry: e.target.value || undefined }))}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-            >
-              <option value="">All Industries</option>
-              {filterOptions.industries.map((ind) => (
-                <option key={ind} value={ind}>{ind}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1 min-w-[140px]">
-            <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Source</label>
-            <select
-              value={filters.source || ''}
-              onChange={(e) => setFilters((f) => ({ ...f, source: e.target.value || undefined }))}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-            >
-              <option value="">All Sources</option>
-              {filterOptions.sources.map((src) => (
-                <option key={src} value={src}>{src}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1 min-w-[140px]">
-            <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Pipeline Stage</label>
-            <select
-              value={filters.stageId || ''}
-              onChange={(e) => setFilters((f) => ({ ...f, stageId: e.target.value || undefined }))}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-            >
-              <option value="">All Stages</option>
-              {stages.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {hasActiveFilters && (
+    <div className="space-y-5">
+      <WorkspaceToolbar
+        meta={dashboard ? `Updated ${new Date(dashboard.generatedAt).toLocaleTimeString()}` : undefined}
+        actions={
+          <>
             <button
               type="button"
-              onClick={() => setFilters({})}
-              className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded-lg"
+              onClick={() => setShowFilters((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+                showFilters || activeFilterCount > 0
+                  ? 'bg-[#FFF9D8] dark:bg-[#232A24] border-[#E09F3E]/60 text-[#540B0E] dark:text-[#FFF3B0]'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
+              }`}
             >
-              Clear Filters
+              <Filter className="w-3.5 h-3.5" />
+              <span>Filters</span>
+              {activeFilterCount > 0 && <span className="tabular-nums">({activeFilterCount})</span>}
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => fetchAnalytics(filters)}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </button>
+          </>
+        }
+      >
+        <SegmentedTabs
+          variant="segmented"
+          activeId={subTab}
+          onChange={(id) => setSubTab(id)}
+          items={[
+            { id: 'dashboard' as BiSubTab, label: 'Overview', icon: <BarChart3 className="w-3.5 h-3.5" /> },
+            { id: 'advanced' as BiSubTab, label: 'Advanced', icon: <Layers className="w-3.5 h-3.5" /> },
+            { id: 'reports' as BiSubTab, label: 'Reports & CSV', icon: <FileSpreadsheet className="w-3.5 h-3.5" /> },
+            { id: 'ai_insights' as BiSubTab, label: 'AI Briefings', icon: <Sparkles className="w-3.5 h-3.5" /> },
+          ]}
+        />
+      </WorkspaceToolbar>
+
+      {/* Collapsible Global Analytics Filter Bar */}
+      {(showFilters || hasActiveFilters) && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">From Date</label>
+              <input
+                type="date"
+                value={filters.dateFrom || ''}
+                onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value || undefined }))}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">To Date</label>
+              <input
+                type="date"
+                value={filters.dateTo || ''}
+                onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value || undefined }))}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1 min-w-[120px]">
+              <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Country</label>
+              <select
+                value={filters.country || ''}
+                onChange={(e) => setFilters((f) => ({ ...f, country: e.target.value || undefined }))}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              >
+                <option value="">All Countries</option>
+                {filterOptions.countries.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1 min-w-[140px]">
+              <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Industry</label>
+              <select
+                value={filters.industry || ''}
+                onChange={(e) => setFilters((f) => ({ ...f, industry: e.target.value || undefined }))}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              >
+                <option value="">All Industries</option>
+                {filterOptions.industries.map((ind) => (
+                  <option key={ind} value={ind}>{ind}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1 min-w-[140px]">
+              <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Source</label>
+              <select
+                value={filters.source || ''}
+                onChange={(e) => setFilters((f) => ({ ...f, source: e.target.value || undefined }))}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              >
+                <option value="">All Sources</option>
+                {filterOptions.sources.map((src) => (
+                  <option key={src} value={src}>{src}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1 min-w-[140px]">
+              <label className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Pipeline Stage</label>
+              <select
+                value={filters.stageId || ''}
+                onChange={(e) => setFilters((f) => ({ ...f, stageId: e.target.value || undefined }))}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              >
+                <option value="">All Stages</option>
+                {stages.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={() => setFilters({})}
+                className="px-3 py-1.5 text-xs font-semibold text-[#9E2A2B] dark:text-[#E09D9E] border border-[#9E2A2B]/30 rounded-lg hover:bg-[#FDF3F3] dark:hover:bg-[#540B0E]/30"
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {notice && (
-        <div
-          className={`flex items-center justify-between px-4 py-2.5 rounded-lg border text-xs ${
-            notice.type === 'success'
-              ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
-              : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300'
-          }`}
-        >
-          <span>{notice.text}</span>
-          <button type="button" onClick={() => setNotice(null)} className="text-xs underline ml-4">
-            Dismiss
-          </button>
-        </div>
+        <NoticeBanner
+          tone={notice.type === 'success' ? 'success' : 'error'}
+          message={notice.text}
+          onDismiss={() => setNotice(null)}
+        />
       )}
 
       {error && (

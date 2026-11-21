@@ -32,6 +32,7 @@ import {
 } from '../types.ts';
 import { EnrichmentProvidersSection } from './EnrichmentProvidersSection.tsx';
 import { PerformanceDiagnosticsPanel } from './PerformanceDiagnosticsPanel.tsx';
+import { SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 interface OwnerProfile {
   id: string;
@@ -753,90 +754,44 @@ export function OwnerControlCentre({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Banner / Executive Identity */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-xl bg-blue-600/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/20">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Owner Control Centre</h1>
-                <span className="px-2 py-0.5 text-xs font-semibold rounded-md bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                  Single-Owner Enforced
-                </span>
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  PostgreSQL Active
-                </span>
-              </div>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Sole Platform Administrator: <strong className="text-slate-800 dark:text-slate-200">{owner?.fullName || 'Maha'}</strong> ({owner?.email || 'mahasubramanyam0@gmail.com'})
-              </p>
-            </div>
-          </div>
+    <div className="space-y-5">
+      <WorkspaceToolbar
+        meta={`Administrator: ${owner?.fullName || 'Owner'} (${owner?.email || ''}) · Neon PostgreSQL`}
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              fetchDiagnostics();
+              fetchSessions();
+              fetchAuditLog();
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingDiag ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+        }
+      />
 
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => {
-                fetchDiagnostics();
-                fetchSessions();
-                fetchAuditLog();
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingDiag ? 'animate-spin' : ''}`} />
-              Refresh Diagnostics
-            </button>
-            <button
-              onClick={onLogout}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 rounded-lg transition-colors border border-red-200 dark:border-red-900"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              Sign Out
-            </button>
-          </div>
-        </div>
-
-        {/* Tab Navigation */}
-        <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 mt-6 pt-2 overflow-x-auto scrollbar-none">
-          {[
-            { id: 'overview', label: 'Database & Health', icon: Server },
-            { id: 'performance', label: 'Performance & Reliability', icon: Activity },
-            { id: 'sessions', label: 'Active Sessions', icon: Laptop, badge: sessions.filter((s) => s.isActive).length },
-            { id: 'security', label: 'Profile & Security', icon: Lock },
-            { id: 'connectors', label: 'Connectors & Credentials', icon: Radio },
-            { id: 'settings', label: 'System Preferences', icon: Sliders },
-            { id: 'audit', label: 'Audit Log', icon: History, badge: auditLog.length },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium border-b-2 transition-all whitespace-nowrap ${
-                  active
-                    ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 font-semibold'
-                    : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-                {tab.badge !== undefined && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                    active ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                  }`}>
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <SegmentedTabs
+        variant="underline"
+        activeId={activeTab}
+        onChange={(id) => setActiveTab(id as any)}
+        items={[
+          { id: 'overview', label: 'Database & Health', icon: <Server className="w-3.5 h-3.5" /> },
+          { id: 'performance', label: 'Performance', icon: <Activity className="w-3.5 h-3.5" /> },
+          {
+            id: 'sessions',
+            label: 'Sessions',
+            icon: <Laptop className="w-3.5 h-3.5" />,
+            count: sessions.filter((s) => s.isActive).length,
+          },
+          { id: 'security', label: 'Security', icon: <Lock className="w-3.5 h-3.5" /> },
+          { id: 'connectors', label: 'Credentials', icon: <Radio className="w-3.5 h-3.5" /> },
+          { id: 'settings', label: 'Preferences', icon: <Sliders className="w-3.5 h-3.5" /> },
+          { id: 'audit', label: 'Audit Log', icon: <History className="w-3.5 h-3.5" />, count: auditLog.length },
+        ]}
+      />
 
       {/* TAB 1: OVERVIEW & DATABASE HEALTH */}
       {activeTab === 'overview' && (

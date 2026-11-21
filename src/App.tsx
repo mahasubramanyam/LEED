@@ -635,7 +635,7 @@ export default function App() {
   );
 
   return (
-    <div className={`min-h-screen flex ${theme === 'dark' ? 'dark' : ''} bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans selection:bg-blue-600 selection:text-white`}>
+    <div className={`min-h-screen flex ${theme === 'dark' ? 'dark' : ''} bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans selection:bg-[#FFF3B0] selection:text-[#540B0E]`}>
       {/* Desktop & Collapsible Sidebar */}
       <div className="hidden lg:flex shrink-0">
         <Sidebar
@@ -657,10 +657,10 @@ export default function App() {
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden flex">
           <div
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs"
+            className="fixed inset-0 bg-[#0F181B]/60 backdrop-blur-xs"
             onClick={() => setMobileMenuOpen(false)}
           />
-          <div className="relative z-50 flex w-72">
+          <div className="relative z-50 flex w-60">
             <Sidebar
               currentTab={currentTab}
               onSelectTab={(tab) => {
@@ -705,18 +705,18 @@ export default function App() {
         {/* Dynamic Main Workspace */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center min-h-[400px] space-y-3">
-              <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs text-slate-500 font-medium">
-                Verifying owner authentication & Neon PostgreSQL state...
+            <div className="flex flex-col items-center justify-center min-h-[360px] space-y-3">
+              <div className="w-7 h-7 border-2 border-[#335C67] border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm text-slate-500 dark:text-slate-400">
+                Loading workspace...
               </span>
             </div>
           ) : (
             <Suspense
               fallback={
-                <div className="flex flex-col items-center justify-center min-h-[320px] space-y-2.5">
-                  <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Loading workspace module...</span>
+                <div className="flex flex-col items-center justify-center min-h-[300px] space-y-2.5">
+                  <div className="w-6 h-6 border-2 border-[#335C67] border-t-transparent rounded-full animate-spin" />
+                  <span className="text-sm text-slate-500 dark:text-slate-400">Loading view...</span>
                 </div>
               }
             >

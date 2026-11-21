@@ -21,6 +21,7 @@ import {
 import { CountrySourceCapability, SevenStateRegistryStatus } from '../types.js';
 import { apiFetch } from '../utils/apiFetch.ts';
 import { formatDateLocale, formatNumberLocale } from '../../shared/localization.ts';
+import { WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 interface CountryMatrixViewProps {
   onNavigateToDiscovery?: (countryCode: string) => void;
@@ -196,31 +197,21 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Header Card */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Globe2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
-              Global Country & Official Registry Coverage Matrix
-            </h2>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-3xl">
-            Audit-grade classification covering 27 priority national registries, 2 cross-border official registries (GLEIF LEI &amp; EU VIES VAT), and 195 sovereign states across 7 distinct operational states.
-            Distinguishes live open APIs, credentialed gateways, restricted commercial systems, unbuilt integrations, and offline reference tiers.
-          </p>
-        </div>
-
-        <button
-          onClick={fetchMatrix}
-          disabled={isLoading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-          <span>Refresh Audit Matrix</span>
-        </button>
-      </div>
+    <div className="space-y-5">
+      <WorkspaceToolbar
+        meta="29 audited national & cross-border registries · 195 sovereign states"
+        actions={
+          <button
+            type="button"
+            onClick={fetchMatrix}
+            disabled={isLoading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+        }
+      />
 
       {/* 7-State Metrics Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
@@ -233,22 +224,19 @@ export const CountryMatrixView: React.FC<CountryMatrixViewProps> = ({ onNavigate
               key={stateKey}
               type="button"
               onClick={() => setSelectedRegistryState(isSelected ? 'ALL' : stateKey)}
-              className={`text-left bg-white dark:bg-slate-900 border rounded-xl p-3 shadow-xs transition ${
+              className={`text-left border rounded-xl p-3 transition ${
                 isSelected
-                  ? 'border-blue-500 ring-1 ring-blue-500/40'
-                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                  ? 'bg-[#FFF9D8] dark:bg-[#232A24] border-[#E09F3E] text-[#540B0E] dark:text-[#FFF3B0]'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-[#E09F3E]/60'
               }`}
             >
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 truncate">
-                  {meta.shortLabel}
-                </span>
-                <span className={`w-2 h-2 rounded-xs ${meta.dotClass}`} />
+              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">
+                {meta.shortLabel}
               </div>
-              <div className="text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
+              <div className="text-lg font-bold tabular-nums text-slate-900 dark:text-slate-50 mt-0.5">
                 {formatNumberLocale(count)}
               </div>
-              <div className="text-[10px] text-slate-400 truncate">{meta.label}</div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{meta.label}</div>
             </button>
           );
         })}

@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Kanban,
-  Building2,
-  MapPin,
   ChevronRight,
   ChevronLeft,
   AlertTriangle,
@@ -19,8 +17,9 @@ import {
   formatCurrencyLocale,
   getLocaleForCountry,
 } from '../../shared/localization.ts';
-import { CRM_OPPORTUNITY_STATUSES, getOpportunityStatusLabel } from '../../shared/crmSpecs.ts';
+import { CRM_OPPORTUNITY_STATUSES } from '../../shared/crmSpecs.ts';
 import { apiFetch } from '../utils/apiFetch.ts';
+import { SegmentedTabs, SurfaceCard, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 interface PipelineBoardProps {
   stages: PipelineStage[];
@@ -45,7 +44,6 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
   const [lostModalLeadId, setLostModalLeadId] = useState<string | null>(null);
   const [lostReason, setLostReason] = useState('No Response after Follow-ups');
 
-  // Phase 13 Multi-Opportunity state
   const [opportunities, setOpportunities] = useState<CrmOpportunity[]>([]);
   const [persons, setPersons] = useState<PersonRecord[]>([]);
   const [isCreatingOpp, setIsCreatingOpp] = useState(false);
@@ -156,213 +154,222 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
 
   const boardSummary = summarizeValuesByCurrency(leads, 'USD');
 
-  return (
-    <div className="space-y-4">
-      {/* Board Summary + Mode Switcher */}
-      <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-900 px-4 py-3 rounded-xl border border-slate-800 gap-4 flex-wrap">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
-            <button
-              onClick={() => setBoardMode('companies')}
-              className={`px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 transition ${
-                boardMode === 'companies' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Kanban className="w-3.5 h-3.5" />
-              Company Pipeline ({leads.length})
-            </button>
-            <button
-              onClick={() => setBoardMode('opportunities')}
-              className={`px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 transition ${
-                boardMode === 'opportunities' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Briefcase className="w-3.5 h-3.5" />
-              Opportunities ({opportunities.length})
-            </button>
-          </div>
-          <span className="text-[11px] text-slate-500">
-            Track multiple commercial opportunities per company with stage history
-          </span>
-        </div>
+  const inputClass =
+    'w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E09F3E]';
 
-        <div className="flex items-center gap-3">
-          <div>
-            Company Pipeline:{' '}
-            <span className="font-semibold text-emerald-400 font-mono">
-              {boardSummary.primaryFormatted}
+  return (
+    <div className="space-y-5">
+      {/* Unified Light/Dark Toolbar */}
+      <WorkspaceToolbar
+        actions={
+          <>
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              Total{' '}
+              <strong className="font-mono tabular-nums text-[#335C67] dark:text-[#E09F3E]">
+                {boardSummary.primaryFormatted}
+              </strong>
             </span>
-          </div>
-          {boardMode === 'opportunities' && leads.length > 0 && (
-            <button
-              onClick={() => setIsCreatingOpp(!isCreatingOpp)}
-              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New Opportunity
-            </button>
-          )}
-        </div>
-      </div>
+            {boardMode === 'opportunities' && leads.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setIsCreatingOpp((v) => !v)}
+                className="px-3.5 py-1.5 bg-[#335C67] hover:bg-[#25454E] text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New Opportunity</span>
+              </button>
+            )}
+          </>
+        }
+      >
+        <SegmentedTabs
+          variant="segmented"
+          activeId={boardMode}
+          onChange={setBoardMode}
+          items={[
+            { id: 'companies', label: 'Companies', count: leads.length, icon: <Kanban className="w-3.5 h-3.5" /> },
+            { id: 'opportunities', label: 'Opportunities', count: opportunities.length, icon: <Briefcase className="w-3.5 h-3.5" /> },
+          ]}
+        />
+      </WorkspaceToolbar>
 
       {/* Create Opportunity Form */}
       {boardMode === 'opportunities' && isCreatingOpp && (
-        <form onSubmit={handleCreateOpp} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-          <h3 className="text-xs font-bold text-white">Create Commercial Opportunity</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Company *</label>
-              <select
-                value={oppLeadId}
-                onChange={(e) => setOppLeadId(e.target.value)}
-                required
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
-              >
-                {leads.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.companyName}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Opportunity Title *</label>
-              <input
-                type="text"
-                required
-                value={oppTitle}
-                onChange={(e) => setOppTitle(e.target.value)}
-                placeholder="e.g. Regional Distribution Contract"
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Estimated Value &amp; Currency</label>
-              <div className="flex gap-1.5">
+        <SurfaceCard>
+          <form onSubmit={handleCreateOpp} className="space-y-4">
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-50">
+              New Opportunity
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Company *
+                </label>
+                <select
+                  value={oppLeadId}
+                  onChange={(e) => setOppLeadId(e.target.value)}
+                  required
+                  className={inputClass}
+                >
+                  {leads.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.companyName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Title *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={oppTitle}
+                  onChange={(e) => setOppTitle(e.target.value)}
+                  placeholder="Regional Distribution Contract"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Value &amp; Currency
+                </label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    value={oppValue}
+                    onChange={(e) => setOppValue(e.target.value)}
+                    placeholder="45000"
+                    className={inputClass}
+                  />
+                  <input
+                    type="text"
+                    maxLength={3}
+                    value={oppCurrency}
+                    onChange={(e) => setOppCurrency(e.target.value.toUpperCase())}
+                    className="w-16 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white font-mono text-center"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Stage
+                </label>
+                <select
+                  value={oppStageId}
+                  onChange={(e) => setOppStageId(e.target.value)}
+                  className={inputClass}
+                >
+                  {stages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Contact
+                </label>
+                <select
+                  value={oppPersonId}
+                  onChange={(e) => setOppPersonId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Company-wide</option>
+                  {persons.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Probability %
+                </label>
                 <input
                   type="number"
                   min="0"
-                  value={oppValue}
-                  onChange={(e) => setOppValue(e.target.value)}
-                  placeholder="45000"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  max="100"
+                  value={oppProb}
+                  onChange={(e) => setOppProb(e.target.value)}
+                  className={inputClass}
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Expected Close
+                </label>
+                <input
+                  type="date"
+                  value={oppCloseDate}
+                  onChange={(e) => setOppCloseDate(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Next Action
+                </label>
                 <input
                   type="text"
-                  maxLength={3}
-                  value={oppCurrency}
-                  onChange={(e) => setOppCurrency(e.target.value.toUpperCase())}
-                  className="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white font-mono text-center"
+                  value={oppNextAction}
+                  onChange={(e) => setOppNextAction(e.target.value)}
+                  placeholder="Send draft agreement"
+                  className={inputClass}
                 />
               </div>
             </div>
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Stage</label>
-              <select
-                value={oppStageId}
-                onChange={(e) => setOppStageId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCreatingOpp(false)}
+                className="px-3.5 py-1.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800"
               >
-                {stages.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Decision-Maker</label>
-              <select
-                value={oppPersonId}
-                onChange={(e) => setOppPersonId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 bg-[#335C67] hover:bg-[#25454E] text-white text-xs font-semibold rounded-lg"
               >
-                <option value="">Company-wide</option>
-                {persons.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.fullName}
-                  </option>
-                ))}
-              </select>
+                Save Opportunity
+              </button>
             </div>
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Probability %</label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={oppProb}
-                onChange={(e) => setOppProb(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Expected Close Date</label>
-              <input
-                type="date"
-                value={oppCloseDate}
-                onChange={(e) => setOppCloseDate(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Next Action</label>
-              <input
-                type="text"
-                value={oppNextAction}
-                onChange={(e) => setOppNextAction(e.target.value)}
-                placeholder="e.g. Send draft agreement"
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsCreatingOpp(false)}
-              className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-lg text-xs"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg"
-            >
-              Create Opportunity
-            </button>
-          </div>
-        </form>
+          </form>
+        </SurfaceCard>
       )}
 
-      {/* Empty Pipeline Initialization Banner */}
+      {/* Empty Stage State */}
       {stages.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center space-y-3">
-          <div className="mx-auto w-10 h-10 rounded-full bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center">
-            <Kanban className="w-5 h-5 text-indigo-400" />
-          </div>
-          <h3 className="text-sm font-bold text-white">No Pipeline Stages Configured</h3>
-          <p className="text-xs text-slate-400 max-w-md mx-auto">
-            Initialize the standard 8-stage sales pipeline or save your first lead to create default stages automatically.
+        <SurfaceCard padding="lg" className="text-center space-y-3">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">
+            No Pipeline Stages Configured
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+            Initialize the default stages or save your first company to create them automatically.
           </p>
           {initStageError && (
-            <div className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800 rounded-lg px-3 py-2 max-w-md mx-auto">
+            <div className="text-xs text-[#9E2A2B] dark:text-[#E09D9E] bg-[#FDF3F3] dark:bg-[#540B0E]/40 border border-[#9E2A2B]/40 rounded-lg px-3 py-2 max-w-md mx-auto">
               {initStageError}
             </div>
           )}
           {onInitializeStages && (
             <button
+              type="button"
               onClick={onInitializeStages}
               disabled={isInitializingStages}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition inline-flex items-center gap-2"
+              className="px-4 py-2 bg-[#335C67] hover:bg-[#25454E] disabled:opacity-50 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-2"
             >
               <CheckCircle2 className="w-4 h-4" />
-              {isInitializingStages ? 'Initializing Stages...' : 'Initialize Default Pipeline Stages'}
+              {isInitializingStages ? 'Initializing...' : 'Initialize Default Pipeline Stages'}
             </button>
           )}
-        </div>
+        </SurfaceCard>
       ) : boardMode === 'companies' ? (
-        /* EXISTING COMPANY PIPELINE KANBAN (100% preserved) */
-        <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-thin">
+        <div className="flex gap-3.5 overflow-x-auto pb-4 scrollbar-thin">
           {stages.map((stage, idx) => {
             const stageLeads = leads.filter((l) => l.pipelineStageId === stage.id);
             const stageSummary = summarizeValuesByCurrency(stageLeads, 'USD');
@@ -373,105 +380,101 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
             return (
               <div
                 key={stage.id}
-                className="flex-shrink-0 w-80 bg-slate-900 border border-slate-800 rounded-xl flex flex-col max-h-[750px]"
+                className="shrink-0 w-76 bg-slate-100/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col max-h-[740px]"
               >
-                <div className="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-950/60 rounded-t-xl">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: stage.color }} />
-                    <h3 className="text-xs font-bold text-white tracking-wide">{stage.name}</h3>
-                    <span className="text-[11px] text-slate-400 font-mono">({stageLeads.length})</span>
+                <div className="px-3.5 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50 truncate">
+                      {stage.name}
+                    </h3>
+                    <span className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                      {stageLeads.length}
+                    </span>
                   </div>
-                  <div className="text-[11px] font-mono font-semibold text-slate-300 truncate max-w-[140px]">
+                  <div className="text-xs font-mono tabular-nums text-[#335C67] dark:text-[#E09F3E] truncate">
                     {stageHasValue ? stageSummary.primaryFormatted : '—'}
                   </div>
                 </div>
 
-                <div className="p-2 space-y-2.5 overflow-y-auto flex-1 scrollbar-thin">
+                <div className="p-2.5 space-y-2.5 overflow-y-auto flex-1 scrollbar-thin">
                   {stageLeads.length === 0 ? (
-                    <div className="p-6 text-center text-slate-600 text-xs border border-dashed border-slate-800/80 rounded-lg">
-                      No leads in this stage
+                    <div className="p-5 text-center text-slate-400 dark:text-slate-500 text-xs border border-dashed border-slate-200 dark:border-slate-800 rounded-lg">
+                      Empty stage
                     </div>
                   ) : (
                     stageLeads.map((lead) => {
-                      const companyOppsCount = opportunities.filter((o) => o.leadId === lead.id && o.status === 'open').length;
+                      const companyOppsCount = opportunities.filter(
+                        (o) => o.leadId === lead.id && o.status === 'open'
+                      ).length;
                       return (
                         <div
                           key={lead.id}
                           onClick={() => onSelectLead(lead)}
-                          className="bg-slate-950 border border-slate-800/90 hover:border-slate-700 p-3 rounded-lg cursor-pointer group transition space-y-2"
+                          className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-[#E09F3E] p-3.5 rounded-lg cursor-pointer group transition-colors space-y-2"
                         >
-                          <div className="flex items-start justify-between gap-1.5">
+                          <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <h4 className="text-xs font-semibold text-white group-hover:text-indigo-400 transition truncate">
+                              <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover:text-[#335C67] dark:group-hover:text-[#FFF3B0] transition-colors truncate">
                                 {lead.companyName}
                               </h4>
-                              {lead.registrationNumber && (
-                                <span className="text-[10px] text-cyan-400 font-mono">
-                                  {lead.registrationType}: {lead.registrationNumber}
-                                </span>
-                              )}
+                              <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                {[lead.address?.city || lead.address?.country, lead.industry]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </p>
                             </div>
-                            <span className="text-[11px] font-mono font-semibold text-emerald-400">
+                            <span className="text-xs font-mono tabular-nums text-[#335C67] dark:text-[#8AB0BA] shrink-0">
                               {lead.confidenceScore}%
                             </span>
                           </div>
 
-                          <div className="text-[11px] text-slate-400 space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <MapPin className="w-3 h-3 text-slate-500 flex-shrink-0" />
-                              <span className="truncate">
-                                {lead.address?.city || lead.address?.country || 'Unknown City'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <Building2 className="w-3 h-3 text-slate-500 flex-shrink-0" />
-                              <span className="truncate">{lead.industry}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-800 text-slate-300">
-                            <span className="font-semibold text-emerald-400 font-mono">
+                          <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100 dark:border-slate-800">
+                            <span className="font-semibold font-mono tabular-nums text-slate-900 dark:text-slate-100">
                               {formatCurrencyLocale(
                                 lead.opportunityValue || 0,
                                 lead.currency || 'USD',
                                 getLocaleForCountry(lead.address?.countryCode, lead.currency)
                               )}
                             </span>
-                            <span className="text-slate-400 text-[10px]">
+                            <span className="text-slate-500 dark:text-slate-400 tabular-nums">
                               {companyOppsCount > 0
-                                ? `${companyOppsCount} deal(s)`
+                                ? `${companyOppsCount} deal${companyOppsCount > 1 ? 's' : ''}`
                                 : lead.winProbability !== undefined
-                                  ? `${lead.winProbability}% Prob`
-                                  : ''}
+                                ? `${lead.winProbability}%`
+                                : ''}
                             </span>
                           </div>
 
                           <div
-                            className="flex items-center justify-between pt-1 border-t border-slate-800/60"
+                            className="flex items-center justify-between pt-1.5 border-t border-slate-100 dark:border-slate-800/70"
                             onClick={(e) => e.stopPropagation()}
                           >
                             {prevStage ? (
                               <button
+                                type="button"
                                 onClick={() => handleMove(lead.id, prevStage.id)}
-                                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition"
-                                title={`Move back to ${prevStage.name}`}
+                                className="p-1 rounded hover:bg-[#FFF9D8] dark:hover:bg-slate-800 text-slate-500 hover:text-[#540B0E] dark:hover:text-[#FFF3B0] transition-colors"
+                                title={`Move to ${prevStage.name}`}
+                                aria-label={`Move to ${prevStage.name}`}
                               >
-                                <ChevronLeft className="w-3.5 h-3.5" />
+                                <ChevronLeft className="w-4 h-4" />
                               </button>
                             ) : (
-                              <div className="w-4" />
+                              <div className="w-6" />
                             )}
-                            <span className="text-[10px] text-slate-500 font-medium">Move Stage</span>
+                            <span className="text-[11px] text-slate-400">Move</span>
                             {nextStage ? (
                               <button
+                                type="button"
                                 onClick={() => handleMove(lead.id, nextStage.id)}
-                                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded transition"
+                                className="p-1 rounded hover:bg-[#FFF9D8] dark:hover:bg-slate-800 text-slate-500 hover:text-[#335C67] dark:hover:text-[#E09F3E] transition-colors"
                                 title={`Advance to ${nextStage.name}`}
+                                aria-label={`Advance to ${nextStage.name}`}
                               >
-                                <ChevronRight className="w-3.5 h-3.5" />
+                                <ChevronRight className="w-4 h-4" />
                               </button>
                             ) : (
-                              <div className="w-4" />
+                              <div className="w-6" />
                             )}
                           </div>
                         </div>
@@ -484,8 +487,7 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
           })}
         </div>
       ) : (
-        /* PHASE 13 MULTI-OPPORTUNITY KANBAN BOARD */
-        <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-thin">
+        <div className="flex gap-3.5 overflow-x-auto pb-4 scrollbar-thin">
           {stages.map((stage, idx) => {
             const stageOpps = opportunities.filter((o) => o.pipelineStageId === stage.id);
             const prevStage = idx > 0 ? stages[idx - 1] : null;
@@ -495,23 +497,26 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
             return (
               <div
                 key={stage.id}
-                className="flex-shrink-0 w-80 bg-slate-900 border border-slate-800 rounded-xl flex flex-col max-h-[750px]"
+                className="shrink-0 w-76 bg-slate-100/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col max-h-[740px]"
               >
-                <div className="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-950/60 rounded-t-xl">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: stage.color }} />
-                    <h3 className="text-xs font-bold text-white">{stage.name}</h3>
-                    <span className="text-[11px] text-slate-400 font-mono">({stageOpps.length})</span>
+                <div className="px-3.5 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-50 truncate">
+                      {stage.name}
+                    </h3>
+                    <span className="text-xs text-slate-500 font-mono tabular-nums">
+                      {stageOpps.length}
+                    </span>
                   </div>
-                  <div className="text-[11px] font-mono text-slate-300">
+                  <div className="text-xs font-mono tabular-nums text-[#335C67] dark:text-[#E09F3E]">
                     {totalStageVal > 0 ? totalStageVal.toLocaleString() : '—'}
                   </div>
                 </div>
 
-                <div className="p-2 space-y-2.5 overflow-y-auto flex-1 scrollbar-thin">
+                <div className="p-2.5 space-y-2.5 overflow-y-auto flex-1 scrollbar-thin">
                   {stageOpps.length === 0 ? (
-                    <div className="p-6 text-center text-slate-600 text-xs border border-dashed border-slate-800/80 rounded-lg">
-                      No opportunities in {stage.name}
+                    <div className="p-5 text-center text-slate-400 dark:text-slate-500 text-xs border border-dashed border-slate-200 dark:border-slate-800 rounded-lg">
+                      No opportunities
                     </div>
                   ) : (
                     stageOpps.map((opp) => {
@@ -520,49 +525,60 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                       return (
                         <div
                           key={opp.id}
-                          className="bg-slate-950 border border-slate-800/90 hover:border-slate-700 p-3 rounded-lg space-y-2"
+                          className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-[#E09F3E] p-3.5 rounded-lg space-y-2 transition-colors"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <div className="text-xs font-semibold text-white truncate">{opp.title}</div>
+                              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                                {opp.title}
+                              </div>
                               {company && (
                                 <button
+                                  type="button"
                                   onClick={() => onSelectLead(company)}
-                                  className="text-[11px] text-indigo-400 hover:underline truncate block mt-0.5"
+                                  className="text-xs text-[#335C67] dark:text-[#8AB0BA] hover:underline truncate block mt-0.5"
                                 >
                                   {company.companyName}
                                 </button>
                               )}
                             </div>
                             <button
+                              type="button"
                               onClick={() => handleDeleteOpp(opp.id)}
-                              className="p-1 text-slate-500 hover:text-rose-400"
+                              className="p-1 text-slate-400 hover:text-[#9E2A2B]"
                               title="Delete opportunity"
+                              aria-label="Delete opportunity"
                             >
-                              <Trash2 className="w-3 h-3" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
 
-                          <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                            <span className="font-mono font-semibold text-emerald-400">
+                          <div className="text-xs flex items-center justify-between">
+                            <span className="font-mono tabular-nums font-semibold text-slate-900 dark:text-slate-100">
                               {opp.currency} {opp.estimatedValue.toLocaleString()}
                             </span>
-                            <span>{opp.probability}% prob</span>
+                            <span className="text-slate-500 dark:text-slate-400 tabular-nums">
+                              {opp.probability}%
+                            </span>
                           </div>
 
-                          <div className="text-[11px] text-slate-500 space-y-0.5">
-                            {person && <div>Contact: {person.fullName}</div>}
-                            {opp.expectedCloseDate && (
-                              <div>Close: {new Date(opp.expectedCloseDate).toLocaleDateString()}</div>
-                            )}
-                            {opp.nextAction && <div className="truncate">Next: {opp.nextAction}</div>}
-                          </div>
+                          {(person || opp.expectedCloseDate || opp.nextAction) && (
+                            <div className="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
+                              {person && <div className="truncate">{person.fullName}</div>}
+                              {opp.expectedCloseDate && (
+                                <div className="tabular-nums">
+                                  Close {new Date(opp.expectedCloseDate).toLocaleDateString()}
+                                </div>
+                              )}
+                              {opp.nextAction && <div className="truncate">{opp.nextAction}</div>}
+                            </div>
+                          )}
 
-                          <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 gap-2">
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 gap-2">
                             <select
                               value={opp.status}
                               onChange={(e) => handleUpdateOppStatus(opp.id, e.target.value as any)}
-                              className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-[10px] text-slate-200"
+                              className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5 text-xs text-slate-700 dark:text-slate-200"
                             >
                               {CRM_OPPORTUNITY_STATUSES.map((s) => (
                                 <option key={s.id} value={s.id}>
@@ -572,18 +588,20 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                             </select>
 
                             <button
+                              type="button"
                               onClick={() => setHistoryOpp(opp)}
-                              className="text-[10px] text-slate-400 hover:text-white inline-flex items-center gap-1"
+                              className="text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white inline-flex items-center gap-1"
                             >
                               <History className="w-3 h-3" />
-                              History ({opp.stageHistory.length})
+                              {opp.stageHistory.length}
                             </button>
 
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-0.5">
                               {prevStage && (
                                 <button
+                                  type="button"
                                   onClick={() => handleMoveOppStage(opp.id, prevStage.id)}
-                                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded"
+                                  className="p-1 hover:bg-[#FFF9D8] dark:hover:bg-slate-800 text-slate-500 rounded"
                                   title={`Move to ${prevStage.name}`}
                                 >
                                   <ChevronLeft className="w-3.5 h-3.5" />
@@ -591,8 +609,9 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                               )}
                               {nextStage && (
                                 <button
+                                  type="button"
                                   onClick={() => handleMoveOppStage(opp.id, nextStage.id)}
-                                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 rounded"
+                                  className="p-1 hover:bg-[#FFF9D8] dark:hover:bg-slate-800 text-slate-500 rounded"
                                   title={`Advance to ${nextStage.name}`}
                                 >
                                   <ChevronRight className="w-3.5 h-3.5" />
@@ -611,23 +630,32 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
         </div>
       )}
 
-      {/* Opportunity Stage History Modal */}
+      {/* Stage History Modal */}
       {historyOpp && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 max-w-md w-full space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-sm font-bold text-white">Stage History — {historyOpp.title}</h3>
-              <button onClick={() => setHistoryOpp(null)} className="text-slate-400 hover:text-white">
+        <div className="fixed inset-0 bg-[#0F181B]/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 max-w-md w-full space-y-3 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="text-base font-semibold text-slate-900 dark:text-white truncate">
+                Stage History · {historyOpp.title}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setHistoryOpp(null)}
+                className="text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {historyOpp.stageHistory.map((ch) => (
-                <div key={ch.id} className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-xs">
-                  <div className="font-semibold text-white">
+                <div
+                  key={ch.id}
+                  className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs"
+                >
+                  <div className="font-semibold text-slate-900 dark:text-white">
                     {ch.fromStageName ? `${ch.fromStageName} → ${ch.toStageName}` : ch.toStageName}
                   </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
+                  <div className="text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
                     {new Date(ch.changedAt).toLocaleString()} · {ch.changedBy}
                     {ch.reason ? ` · ${ch.reason}` : ''}
                   </div>
@@ -640,43 +668,46 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
 
       {/* Lost Reason Modal */}
       {lostModalLeadId && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 max-w-md w-full space-y-4 shadow-xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-400" />
-                Record Deal Loss Reason
+        <div className="fixed inset-0 bg-[#0F181B]/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 max-w-md w-full space-y-4 shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-base font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-[#E09F3E]" />
+                Closed Lost Reason
               </h3>
-              <button onClick={() => setLostModalLeadId(null)} className="text-slate-400 hover:text-white">
+              <button
+                type="button"
+                onClick={() => setLostModalLeadId(null)}
+                className="text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-xs text-slate-300">
-              Please specify why this deal was marked as Closed Lost for accurate conversion analytics:
-            </p>
             <select
               value={lostReason}
               onChange={(e) => setLostReason(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded p-2"
+              className={inputClass}
             >
-              <option value="No Response after Follow-ups">No Response after Multiple Follow-ups</option>
-              <option value="Budget Constraint">Budget Constraint / Unqualified Spend</option>
+              <option value="No Response after Follow-ups">No Response after Follow-ups</option>
+              <option value="Budget Constraint">Budget Constraint</option>
               <option value="Chose Competitor">Chose Competitor</option>
-              <option value="Not a Fit (Product Capability)">Not a Fit (Product Capability Mismatch)</option>
-              <option value="Project Cancelled / Postponed">Project Cancelled or Indefinitely Postponed</option>
+              <option value="Not a Fit (Product Capability)">Not a Fit</option>
+              <option value="Project Cancelled / Postponed">Project Cancelled or Postponed</option>
             </select>
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => setLostModalLeadId(null)}
-                className="px-3 py-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 text-xs rounded"
+                className="px-3.5 py-1.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={confirmLostReason}
-                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded"
+                className="px-3.5 py-1.5 bg-[#9E2A2B] hover:bg-[#540B0E] text-white text-xs font-semibold rounded-lg"
               >
-                Confirm Closed Lost
+                Confirm Lost
               </button>
             </div>
           </div>

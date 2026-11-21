@@ -20,7 +20,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Sync mode if initialMode changes
   React.useEffect(() => {
     setMode(initialMode);
     setError(null);
@@ -41,7 +40,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           throw new Error('Please fill out all fields');
         }
         if (password.length < 8) {
-          throw new Error('Password must be at least 8 characters long');
+          throw new Error('Password must be at least 8 characters');
         }
         if (password !== confirmPassword) {
           throw new Error('Passwords do not match');
@@ -79,7 +78,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           throw new Error('Current and new password are required');
         }
         if (password.length < 8) {
-          throw new Error('New password must be at least 8 characters long');
+          throw new Error('New password must be at least 8 characters');
         }
         if (password !== confirmPassword) {
           throw new Error('New passwords do not match');
@@ -98,13 +97,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           localStorage.setItem('leed_session_token', data.token);
         }
 
-        setSuccessMsg('Password updated successfully. All other active sessions have been revoked.');
+        setSuccessMsg('Password updated. Other active sessions have been revoked.');
         setPassword('');
         setCurrentPassword('');
         setConfirmPassword('');
         setTimeout(() => {
           if (onClose) onClose();
-        }, 1800);
+        }, 1600);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -115,77 +114,75 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-6 sm:p-8 relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0F181B]/75 backdrop-blur-xs">
+      <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl p-6 sm:p-8 relative">
         {mode === 'change_password' && onClose && (
           <button
+            type="button"
             onClick={onClose}
-            className="absolute top-4 right-4 text-slate-400 hover:text-white transition"
+            aria-label="Close modal"
+            className="absolute top-4 right-4 p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         )}
 
-        {/* Modal Header */}
         <div className="text-center mb-6">
-          <div className="w-12 h-12 mx-auto rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 p-0.5 shadow-lg shadow-indigo-500/20 mb-3">
-            <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-              {mode === 'setup' ? (
-                <ShieldCheck className="w-6 h-6 text-cyan-400" />
-              ) : mode === 'change_password' ? (
-                <KeyRound className="w-6 h-6 text-indigo-400" />
-              ) : (
-                <Lock className="w-6 h-6 text-emerald-400" />
-              )}
-            </div>
+          <div className="w-11 h-11 mx-auto rounded-xl bg-[#335C67] flex items-center justify-center mb-3">
+            {mode === 'setup' ? (
+              <ShieldCheck className="w-5 h-5 text-[#FFF3B0]" />
+            ) : mode === 'change_password' ? (
+              <KeyRound className="w-5 h-5 text-[#FFF3B0]" />
+            ) : (
+              <Lock className="w-5 h-5 text-[#FFF3B0]" />
+            )}
           </div>
 
-          <h2 className="text-xl font-bold text-white tracking-tight">
+          <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-50 tracking-tight">
             {mode === 'setup'
-              ? 'Initialize Owner Account'
+              ? 'Create Owner Account'
               : mode === 'change_password'
-              ? 'Change Owner Password'
-              : 'Owner Authentication'}
+              ? 'Change Password'
+              : 'Sign In to LEED'}
           </h2>
-          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             {mode === 'setup'
-              ? 'LEED is a private single-owner platform. Setting your credentials locks the instance against public registration.'
+              ? 'Set your private credentials to lock this single-owner workspace.'
               : mode === 'change_password'
-              ? 'Enter your current password and choose a new secure password (min. 8 characters).'
-              : 'Enter your private credentials to access pipeline records, live registry connectors, and AI tools.'}
+              ? 'Enter your current password and a new password (min. 8 characters).'
+              : 'Private single-owner workspace access.'}
           </p>
         </div>
 
-        {/* Error Alert */}
         {error && (
-          <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+          <div className="mb-4 p-3 rounded-lg bg-[#FDF3F3] dark:bg-[#540B0E]/40 border border-[#9E2A2B]/40 text-[#540B0E] dark:text-[#F9E3E3] text-xs flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-[#9E2A2B] dark:text-[#E09D9E] shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
         )}
 
-        {/* Success Alert */}
         {successMsg && (
-          <div className="mb-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-start gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+          <div className="mb-4 p-3 rounded-lg bg-[#EFF5F4] dark:bg-[#162E2A]/60 border border-[#335C67]/40 text-[#1F3940] dark:text-[#B0CFC9] text-xs flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 text-[#335C67] dark:text-[#8AB0BA] shrink-0 mt-0.5" />
             <span>{successMsg}</span>
           </div>
         )}
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'setup' && (
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Owner Full Name</label>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Full Name
+              </label>
               <div className="relative">
-                <User className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
                   type="text"
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Mahasubramanyam"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Your name"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
                 />
               </div>
             </div>
@@ -193,16 +190,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
 
           {mode !== 'change_password' && (
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Owner Email</label>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Email
+              </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="owner@domain.com"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
                 />
               </div>
             </div>
@@ -210,53 +209,59 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
 
           {mode === 'change_password' && (
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Current Password</label>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Current Password
+              </label>
               <div className="relative">
-                <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
                   type="password"
                   required
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  placeholder="••••••••"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
                 />
               </div>
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               {mode === 'change_password' ? 'New Password' : 'Password'}
             </label>
             <div className="relative">
-              <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
-                className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                placeholder="••••••••"
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
               />
             </div>
             {password && password.length < 8 && (
-              <p className="text-[11px] text-amber-400 mt-1">Must be at least 8 characters</p>
+              <p className="text-xs text-[#9E2A2B] dark:text-[#E09D9E] mt-1">
+                Minimum 8 characters required
+              </p>
             )}
           </div>
 
           {(mode === 'setup' || mode === 'change_password') && (
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">Confirm Password</label>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Confirm Password
+              </label>
               <div className="relative">
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
                   type="password"
                   required
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  placeholder="••••••••"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#E09F3E]"
                 />
               </div>
             </div>
@@ -265,34 +270,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode: initialMode,
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2 mt-2"
+            className="w-full py-2.5 px-4 bg-[#335C67] hover:bg-[#25454E] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 mt-2"
           >
             {isLoading ? (
-              <span className="inline-block w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
+              <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             ) : mode === 'setup' ? (
-              <>
-                <ShieldCheck className="w-4 h-4" />
-                <span>Initialize & Lock Instance</span>
-              </>
+              <span>Create Account</span>
             ) : mode === 'change_password' ? (
-              <>
-                <KeyRound className="w-4 h-4" />
-                <span>Update Password</span>
-              </>
+              <span>Update Password</span>
             ) : (
-              <>
-                <Lock className="w-4 h-4" />
-                <span>Sign In as Owner</span>
-              </>
+              <span>Sign In</span>
             )}
           </button>
         </form>
-
-        {/* Security Notice */}
-        <div className="mt-6 pt-4 border-t border-slate-800/80 text-[11px] text-slate-500 text-center flex items-center justify-center gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Argon2/bcrypt 12-round hashing • HTTP-only secure cookie • CSRF protected</span>
-        </div>
       </div>
     </div>
   );

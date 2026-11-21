@@ -30,6 +30,7 @@ import {
   ConnectorAccessMode,
 } from '../types.js';
 import { apiFetch } from '../utils/apiFetch.ts';
+import { KpiMetric, SegmentedTabs, WorkspaceToolbar } from './ui/SunsetUI.tsx';
 
 interface ConnectorsViewProps {
   connectors: ConnectorStatus[];
@@ -436,140 +437,61 @@ export const ConnectorsView: React.FC<ConnectorsViewProps> = ({
   const totalInvocations = connectors.reduce((sum, c) => sum + (c.totalCalls || 0), 0);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Layers className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <span>Unified Connector Registry & Execution Hub</span>
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Standardized provider contracts, AES-256-GCM credentials, rate-limit governance, and execution telemetry.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {onOpenMatrix && (
+    <div className="space-y-5">
+      <WorkspaceToolbar
+        actions={
+          onOpenMatrix ? (
             <button
               type="button"
               onClick={onOpenMatrix}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 transition"
             >
-              <Globe2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <Globe2 className="w-3.5 h-3.5 text-[#335C67] dark:text-[#8AB0BA]" />
               <span>Country Matrix</span>
             </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('connectors')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
-              activeTab === 'connectors'
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            Providers ({connectors.length})
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('runs');
-              loadEncryptionAndRuns();
-            }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 ${
-              activeTab === 'runs'
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            <History className="w-3.5 h-3.5" />
-            <span>Execution History ({runs.length})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('settings')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 ${
-              activeTab === 'settings'
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Crawler Defaults</span>
-          </button>
-        </div>
-      </div>
+          ) : undefined
+        }
+      >
+        <SegmentedTabs
+          variant="segmented"
+          activeId={activeTab}
+          onChange={(id) => {
+            setActiveTab(id);
+            if (id === 'runs') loadEncryptionAndRuns();
+          }}
+          items={[
+            { id: 'connectors' as const, label: 'Providers', count: connectors.length },
+            { id: 'runs' as const, label: 'Run History', icon: <History className="w-3.5 h-3.5" />, count: runs.length },
+            { id: 'settings' as const, label: 'Crawler Defaults', icon: <Settings className="w-3.5 h-3.5" /> },
+          ]}
+        />
+      </WorkspaceToolbar>
 
       {/* KPI Strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-            Verified Operational
-          </div>
-          <div className="mt-1 text-2xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
-            {operationalCount} / {connectors.length}
-          </div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-            Tested or executed cleanly
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-            Auth / Config Attention
-          </div>
-          <div className="mt-1 text-2xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400">
-            {authOrConfigNeeded}
-          </div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-            {disabledCount} disabled by owner
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-            Recorded Executions
-          </div>
-          <div className="mt-1 text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
-            {totalInvocations}
-          </div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-            Backed by connector_runs ledger
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
-          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-            At-Rest Encryption Key
-          </div>
-          <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold">
-            <Lock
-              className={`w-4 h-4 ${
-                encryptionStatus?.configured
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-amber-600 dark:text-amber-400'
-              }`}
-            />
-            <span
-              className={
-                encryptionStatus?.configured
-                  ? 'text-emerald-700 dark:text-emerald-300'
-                  : 'text-amber-700 dark:text-amber-300'
-              }
-            >
-              {encryptionStatus?.configured ? 'AES-256-GCM Ready' : 'Key Missing'}
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-mono truncate">
-            {encryptionStatus?.configured
-              ? encryptionStatus.source
-              : 'Set CONNECTOR_ENCRYPTION_KEY'}
-          </div>
-        </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <KpiMetric
+          label="Operational"
+          value={`${operationalCount} / ${connectors.length}`}
+          detail="Verified or executed cleanly"
+          tone="teal"
+        />
+        <KpiMetric
+          label="Needs Setup"
+          value={authOrConfigNeeded}
+          detail={`${disabledCount} disabled`}
+          tone={authOrConfigNeeded > 0 ? 'amber' : 'default'}
+        />
+        <KpiMetric
+          label="Recorded Runs"
+          value={totalInvocations}
+          detail="Connector execution ledger"
+        />
+        <KpiMetric
+          label="Encryption Key"
+          value={encryptionStatus?.configured ? 'AES-256-GCM' : 'Missing'}
+          detail={encryptionStatus?.configured ? encryptionStatus.source : 'Set CONNECTOR_ENCRYPTION_KEY'}
+          tone={encryptionStatus?.configured ? 'teal' : 'amber'}
+        />
       </div>
 
       {/* Encryption Key Warning Banner (never invents a key) */}

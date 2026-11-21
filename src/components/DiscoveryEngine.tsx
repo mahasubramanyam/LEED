@@ -54,6 +54,7 @@ import {
   EXPANDED_RELATIONSHIP_TYPES,
   ROLE_TAXONOMY_SPECS,
 } from '../../shared/decisionMakerRoles.ts';
+import { ActionMenu, SegmentedTabs } from './ui/SunsetUI.tsx';
 
 interface DiscoveryEngineProps {
   onAddLeadToCrm: (lead: CanonicalLead) => void;
@@ -958,66 +959,49 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
     <div className="space-y-5">
       {/* Control Workspace Card */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 mb-4 border-b border-slate-200 dark:border-slate-800">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              <Globe2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              <span>Global Business Discovery Engine</span>
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Single-country, multi-country, and bulk commercial discovery via unified Phase 4 connectors with deduplication &amp; CRM preservation.
-            </p>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-200 dark:border-slate-800">
+          <SegmentedTabs
+            variant="segmented"
+            activeId={searchMode}
+            onChange={(id) => setSearchMode(id)}
+            items={[
+              { id: 'single' as const, label: 'Single Country' },
+              { id: 'multi_country' as const, label: 'Multi-Country' },
+              { id: 'bulk' as const, label: 'Bulk Queries' },
+            ]}
+          />
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Search Mode Switcher */}
-            <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 p-0.5">
-              {([
-                { id: 'single', label: 'Single Country' },
-                { id: 'multi_country', label: 'Multi-Country' },
-                { id: 'bulk', label: 'Bulk Queries' },
-              ] as const).map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setSearchMode(m.id)}
-                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition whitespace-nowrap shrink-0 ${
-                    searchMode === m.id
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={loadProvidersMatrix}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
-            >
-              <Database className="w-3.5 h-3.5" />
-              <span>Search &amp; Directory Matrix</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowUrlInspector((v) => !v)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Inspect Website URL</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={loadHistory}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
-            >
-              <History className="w-3.5 h-3.5" />
-              <span>Execution History</span>
-            </button>
+          <div className="flex items-center gap-2">
+            {showUrlInspector && (
+              <button
+                type="button"
+                onClick={() => setShowUrlInspector(false)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-[#FFF9D8] dark:bg-[#232A24] border border-[#E09F3E]/50 text-[#540B0E] dark:text-[#FFF3B0] transition"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-[#E09F3E]" />
+                <span>URL Inspector Open</span>
+              </button>
+            )}
+            <ActionMenu
+              label="Tools"
+              items={[
+                {
+                  label: 'Directory Matrix',
+                  icon: <Database className="w-3.5 h-3.5 text-slate-400" />,
+                  onClick: loadProvidersMatrix,
+                },
+                {
+                  label: showUrlInspector ? 'Hide URL Inspector' : 'Inspect Website URL',
+                  icon: <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />,
+                  onClick: () => setShowUrlInspector((v) => !v),
+                },
+                {
+                  label: 'Execution History',
+                  icon: <History className="w-3.5 h-3.5 text-slate-400" />,
+                  onClick: loadHistory,
+                },
+              ]}
+            />
           </div>
         </div>
 
@@ -1034,8 +1018,8 @@ export const DiscoveryEngine: React.FC<DiscoveryEngineProps> = ({
                     onClick={() => handleCountryChange(c.code)}
                     className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md font-medium transition border ${
                       isSelected
-                        ? 'bg-blue-600 border-blue-600 text-white'
-                        : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        ? 'bg-[#335C67] border-[#335C67] text-white'
+                        : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-[#E09F3E]/60 hover:bg-[#FFF9D8]/50 dark:hover:bg-slate-800'
                     }`}
                   >
                     <span>{c.flag}</span>
