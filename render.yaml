@@ -1,0 +1,35 @@
+# Render Blueprint — LEED Staging Web Service (Managed Node.js 22, Single Instance)
+# All secrets (DATABASE_URL, CONNECTOR_ENCRYPTION_KEY, SETUP_SECRET) use `sync: false`
+# and must be set exclusively in Render's Environment / Secret Settings (never in Git).
+
+services:
+  - type: web
+    name: leed-staging
+    runtime: node
+    plan: starter
+    numInstances: 1
+    autoDeploy: false
+    healthCheckPath: /api/status
+    # `--include=dev` is required when NODE_ENV=production because `tsx` is in devDependencies
+    # and is invoked at runtime by `npm run start`.
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: AUTO_RUN_MIGRATIONS
+        value: "false"
+      - key: PGSSLMODE
+        value: require
+      - key: DATABASE_URL
+        sync: false
+      - key: CONNECTOR_ENCRYPTION_KEY
+        sync: false
+      - key: SETUP_SECRET
+        sync: false
+      - key: APP_URL
+        sync: false
